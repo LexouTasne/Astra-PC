@@ -10,7 +10,7 @@ from astra_pc.skills.manager import SkillManager
 
 
 class AstraPlanner:
-    """Fast deterministic router first; small LLM planner only as fallback."""
+    """Deterministic routes first, local model only when necessary."""
 
     def __init__(self, brain: AstraBrain, skills: SkillManager):
         self.brain = brain
@@ -21,8 +21,11 @@ class AstraPlanner:
         text: str,
         context: DesktopContext,
         accessibility: list[dict[str, Any]] | None = None,
+        memories: list[dict[str, Any]] | None = None,
+        reference: dict[str, Any] | None = None,
+        browser_dom: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        fast = self._fast_plan(text)
+        fast = self._fast_plan(text, context)
         if fast:
             return fast
 
@@ -30,30 +33,29 @@ class AstraPlanner:
             "request": text,
             "context": context.as_dict(),
             "skills": self.skills.describe(),
+            "relevant_memory": (memories or [])[:6],
+            "resolved_reference": reference or {},
             "accessibility": (accessibility or [])[:35],
+            "browser_dom": (browser_dom or [])[:35],
             "schema": {
                 "type": "skill|answer",
-                "skill": "apps|system",
+                "skill": "skill name",
                 "action": "action name",
                 "args": {},
                 "answer": "text when type=answer",
             },
         }
-        raw = self.brain.text_client.chat(
-            json.dumps(prompt, ensure_ascii=False),
-            system=(
-                "You are Astra's local planner. Return ONE compact JSON object only. "
-                "Use a skill only when the request clearly maps to an available skill. "
-                "Otherwise type=answer and answer the user directly. Never invent skills."
-            ),
-            temperature=0.05,
-            num_ctx=3072,
-            num_predict=120,
+        raw = self.brain.ask(
+            "Plan this desktop request. Return ONE compact JSON object only. "
+            "Use a skill only when it clearly matches an available skill. "
+            "Use relevant memory only when it actually helps. "
+            "Never invent a capability.\n"
+            + json.dumps(prompt, ensure_ascii=False)
         )
         return self._json(raw)
 
     @staticmethod
-    def _fast_plan(text: str) -> dict[str, Any] | None:
+    def _fast_plan(text: str, context: DesktopContext | None = None) -> dict[str, Any] | None:
         q = " ".join(text.lower().strip().split())
 
         url = re.search(r"https?://\S+", text)
@@ -65,7 +67,7 @@ class AstraPlanner:
                 "args": {"url": url.group(0).rstrip(".,)")},
             }
 
-        m = re.search(r"\b(?:abre|abra|abrir|open)\s+(?:o\s+|a\s+)?([\w.+-]+)", q)
+        m = re.search(r"\b(?:abre|abra|abrir|open)\s+(?:o\s+|a\s+)?([\w.+À-ÿ-]+)", q)
         if m:
             return {
                 "type": "skill",
@@ -96,14 +98,57 @@ class AstraPlanner:
         if q in {"próxima música", "proxima musica", "próxima", "proxima"}:
             return {"type": "skill", "skill": "system", "action": "media", "args": {"command": "next"}}
 
+        if any(x in q for x in ("o que copiei", "ler clipboard", "ler área de transferência", "ler area de transferencia")):
+            return {"type": "skill", "skill": "clipboard", "action": "clipboard_read", "args": {}}
+
+        m = re.search(r"^(?:copie|copiar|clipboard)\s+(.+)$", text.strip(), re.I)
+        if m:
+            return {
+                "type": "skill",
+                "skill": "clipboard",
+                "action": "clipboard_write",
+                "args": {"text": m.group(1)},
+            }
+
+        if q in {"git status", "status do git"}:
+            return {
+                "type": "skill",
+                "skill": "git",
+                "action": "git_status",
+                "args": {"repo": context.cwd if context else "."},
+            }
+        if q in {"git diff", "diff do git"}:
+            return {
+                "type": "skill",
+                "skill": "git",
+                "action": "git_diff",
+                "args": {"repo": context.cwd if context else "."},
+            }
+        if q in {"qual branch", "branch atual", "git branch"}:
+            return {
+                "type": "skill",
+                "skill": "git",
+                "action": "git_branch",
+                "args": {"repo": context.cwd if context else "."},
+            }
+
+        if q in {"rode os testes", "rodar testes", "run tests", "pytest"}:
+            return {
+                "type": "skill",
+                "skill": "coding",
+                "action": "run_tests",
+                "args": {"root": context.cwd if context else "."},
+            }
+
         return None
 
     @staticmethod
     def _json(raw: str) -> dict[str, Any]:
         cleaned = raw.strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
+        fence = chr(96) * 3
+        if cleaned.startswith(fence):
+            cleaned = re.sub(r"^" + re.escape(fence) + r"(?:json)?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*" + re.escape(fence) + r"$", "", cleaned)
         try:
             value = json.loads(cleaned)
         except Exception:
