@@ -133,6 +133,7 @@ class AstraDaemon:
                 wakeword_threshold=float(
                     voice_cfg.get("dedicated_wakeword", {}).get("threshold", 0.55)
                 ),
+                piper_model=voice_cfg.get("piper_model") or None,
             )
             threading.Thread(
                 target=self.voice_assistant.run,
