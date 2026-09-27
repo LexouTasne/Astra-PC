@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astra-pc"
+version = "0.1.0"
+description = "Fast local-first gesture and voice desktop controller"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {text = "MIT"}
+authors = [{name = "Richard Mateus / Lex"}]
+dependencies = [
+  "numpy>=1.26,<3",
+  "opencv-python>=4.9",
+  "mediapipe>=0.10.14",
+  "pynput>=1.7.7"
+]
+
+[project.optional-dependencies]
+voice = ["vosk>=0.3.45", "sounddevice>=0.4.7"]
+
+[project.scripts]
+astra = "astra_pc.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["astra_pc*"]
