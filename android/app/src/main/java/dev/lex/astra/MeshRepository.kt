@@ -7,6 +7,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import dev.lex.astra.localai.LocalAiManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,7 +31,13 @@ import java.util.concurrent.TimeUnit
 class MeshRepository private constructor(private val appContext: Context) {
     private val secure = SecureStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val _state = MutableStateFlow(MeshUiState())
+    private val localAi = LocalAiManager(appContext)
+    private val _state = MutableStateFlow(
+        MeshUiState(
+            localAiReady = localAi.filesReady(),
+            localAiStatus = localAi.status
+        )
+    )
     val state: StateFlow<MeshUiState> = _state.asStateFlow()
 
     private var client: OkHttpClient? = null
@@ -138,22 +145,72 @@ class MeshRepository private constructor(private val appContext: Context) {
         webSocket = null
         client = null
         secure.clearPairing()
-        _state.value = MeshUiState(discovered = _state.value.discovered)
+        _state.value = MeshUiState(
+            discovered = _state.value.discovered,
+            localAiReady = localAi.filesReady(),
+            localAiStatus = localAi.status
+        )
     }
 
     fun sendAsk(text: String) {
         val clean = text.trim()
         if (clean.isEmpty()) return
         appendMessage(false, clean)
-        val requestId = UUID.randomUUID().toString()
-        val json = JSONObject()
-            .put("v", 1)
-            .put("type", "ask")
-            .put("request_id", requestId)
-            .put("text", clean)
-        if (webSocket?.send(json.toString()) != true) {
-            appendMessage(true, "Astra Mesh não está conectada.")
+
+        if (_state.value.connected) {
+            val requestId = UUID.randomUUID().toString()
+            val json = JSONObject()
+                .put("v", 1)
+                .put("type", "ask")
+                .put("request_id", requestId)
+                .put("text", clean)
+            if (webSocket?.send(json.toString()) == true) return
         }
+
+        if (localAi.filesReady()) {
+            scope.launch {
+                try {
+                    val answer = localAi.ask(clean)
+                    appendMessage(true, answer)
+                    refreshLocalAiState()
+                } catch (e: Exception) {
+                    appendMessage(true, "Qwen local falhou: ${e.message ?: "erro"}")
+                    refreshLocalAiState()
+                }
+            }
+        } else {
+            appendMessage(
+                true,
+                "Astra Mesh está offline e o Qwen local ainda não foi importado."
+            )
+        }
+    }
+
+    fun importLocalModel(uri: Uri) {
+        scope.launch {
+            try {
+                localAi.importModel(uri)
+            } catch (e: Exception) {
+                appendMessage(true, "Falha importando ONNX: ${e.message}")
+            }
+            refreshLocalAiState()
+        }
+    }
+
+    fun importLocalTokenizer(uri: Uri) {
+        scope.launch {
+            try {
+                localAi.importTokenizer(uri)
+            } catch (e: Exception) {
+                appendMessage(true, "Falha importando tokenizer: ${e.message}")
+            }
+            refreshLocalAiState()
+        }
+    }
+
+    fun removeLocalModel() {
+        localAi.removeModel()
+        refreshLocalAiState()
     }
 
     fun requestContext() {
@@ -403,6 +460,13 @@ class MeshRepository private constructor(private val appContext: Context) {
             .readTimeout(30, TimeUnit.SECONDS)
             .pingInterval(20, TimeUnit.SECONDS)
             .build()
+    }
+
+    private fun refreshLocalAiState() {
+        _state.value = _state.value.copy(
+            localAiReady = localAi.filesReady(),
+            localAiStatus = localAi.status
+        )
     }
 
     private fun appendMessage(fromAstra: Boolean, text: String) {
