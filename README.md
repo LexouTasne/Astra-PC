@@ -1,6 +1,6 @@
 # Astra-PC
 
-**Astra** is a fast, local-first desktop assistant for Windows and Linux.
+**Astra** is a fast, local-first desktop assistant for Windows, Linux/Bazzite and macOS.
 
 It combines:
 
@@ -14,6 +14,109 @@ It combines:
 - optional local image/video generation through ComfyUI
 
 No OpenRouter/OpenAI/API key is required.
+
+## Install in one command
+
+The universal bootstrap does the steps in order:
+
+```text
+download/update Astra
+      ↓
+install/find uv
+      ↓
+install managed Python 3.12
+      ↓
+create .venv
+      ↓
+run hardware diagnostics
+      ↓
+install Astra + voice + local AI
+      ↓
+configure autostart
+      ↓
+start Astra
+```
+
+### Linux / Bazzite / Fedora Atomic / macOS
+
+Recommended install:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.sh)
+```
+
+Everything, including the optional 4B model and ComfyUI setup:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.sh) --full
+```
+
+### Windows PowerShell
+
+Recommended install:
+
+```powershell
+irm https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.ps1 | iex
+```
+
+Full install:
+
+```powershell
+$env:ASTRA_FULL="1"; irm https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.ps1 | iex
+```
+
+The bootstrap can work even when the system Python is newer than Astra's tested runtime.
+For example, a machine with Python 3.14 does **not** need to downgrade or replace it:
+Astra installs its own isolated Python 3.12 under `.venv`.
+
+### Already cloned the repository?
+
+Just run:
+
+```bash
+python installer.py --yes --autostart --start --awareness-extras
+```
+
+If that `python` is 3.13/3.14 or another unsupported runtime, `installer.py`
+automatically provisions Python 3.12 with `uv` and relaunches itself.
+
+Full setup from an existing clone:
+
+```bash
+python installer.py --full
+```
+
+### Manual install
+
+If you do not want to execute a remote bootstrap script:
+
+```bash
+git clone --recursive https://github.com/LexouTasne/Astra-PC.git
+cd Astra-PC
+python installer.py
+```
+
+The guided installer can bootstrap the isolated runtime itself.
+
+## Compatibility
+
+| Platform | Astra core | Voice / AI | Gestures | Notes |
+|---|---:|---:|---:|---|
+| Windows 10/11 x64 | ✅ | ✅ | ✅ | Native input via pynput/UI Automation |
+| Windows ARM64 | ✅ | ✅ | ✅ | Current MediaPipe publishes Windows ARM64 wheels |
+| Linux x86_64 glibc | ✅ | ✅ | ✅ | X11 native; Wayland prefers ydotool |
+| Linux ARM64 glibc | ✅ | ✅ | ✅ | Current MediaPipe publishes Linux ARM64 wheels |
+| Bazzite / Fedora Atomic | ✅ | ✅ | ✅ | User-space Python/Ollama preferred; no rpm-ostree layering by default |
+| macOS Apple Silicon | ✅ | ✅ | ✅ | Grant Accessibility/camera/microphone permissions when requested |
+| macOS Intel | ✅ | ✅ | ⚠️ | Current MediaPipe releases do not publish an Intel Mac wheel, so gesture/pose support is not guaranteed |
+
+Astra targets a **managed Python 3.12 runtime** regardless of the host Python version.
+This avoids breaking the OS Python and makes machines with Python 3.13/3.14 usable without a downgrade.
+
+On immutable Linux such as Bazzite, Astra avoids `rpm-ostree` package layering by default.
+If a system-level dependency is truly required, the installer explains it and only layers when
+explicitly run with `--allow-layering`.
+
 
 ## Astra 0.7 — Awareness
 
@@ -233,7 +336,7 @@ Astra keeps it completely outside the latency-sensitive gesture loop.
            │               │                │
        GESTURES          VOICE             AI
            │               │                │
-      MediaPipe          Vosk          Qwen3-VL 2B
+      MediaPipe      faster-whisper     model router
            │               │                │
    deterministic FSM       │       ┌────────┼────────┐
            │               │       │        │        │
@@ -248,39 +351,25 @@ Optional heavy lane:
 prompt -> ComfyUI -> local image/video model
 ```
 
-## Install
-
-Recommended:
+## Installer options
 
 ```bash
-git clone https://github.com/LexouTasne/Astra-PC
-cd Astra-PC
-python3 installer.py
+python installer.py --diagnose-only
+python installer.py --yes
+python installer.py --autostart --start
+python installer.py --strong-ai
+python installer.py --awareness-extras
+python installer.py --media
+python installer.py --full
 ```
 
-The installer checks and can configure:
+`--full` enables the optional strong model, Awareness extras, ComfyUI setup,
+autostart, and starts Astra after installation.
 
-- supported Python
-- camera availability
-- real OpenCV camera capture
-- microphones
-- X11 / Wayland
-- ydotool
-- Vosk
-- local TTS
-- Ollama
-- Qwen3-VL 2B
-- DroidCam fallback
-- optional ComfyUI setup
-
-Useful installer modes:
+On immutable Linux, system package layering is disabled unless you explicitly add:
 
 ```bash
-python3 installer.py --diagnose-only
-python3 installer.py --no-voice
-python3 installer.py --no-ai
-python3 installer.py --media
-python3 installer.py --yes
+python installer.py --allow-layering
 ```
 
 ## Gesture control
@@ -471,28 +560,36 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 
 ### Astra 0.7
 
-- [x] gesture engine
-- [x] two-hand interaction
-- [x] Windows/X11 control
-- [x] Wayland backend
-- [x] installer + diagnostics
+- [x] real-time gesture engine
+- [x] two-hand zoom/rotation
+- [x] multi-monitor geometry
+- [x] per-app gesture context
+- [x] Windows / X11 input
+- [x] Wayland ydotool backend
+- [x] Bazzite/Fedora Atomic-aware installer
+- [x] automatic isolated Python 3.12 runtime
+- [x] one-command Linux/macOS/Windows bootstrap
 - [x] DroidCam fallback
-- [x] offline voice STT
-- [x] offline TTS
-- [x] Qwen3-VL 2B local brain
-- [x] image understanding
-- [x] screen understanding
-- [x] video understanding
-- [x] constrained visual desktop agent
-- [x] ComfyUI workflow runner
-- [x] generic image workflow
-- [x] generic video-workflow support
-- [ ] transparent spatial HUD
-- [ ] radial gesture menu
-- [ ] per-app gesture context
-- [ ] user-recorded gestures
-- [ ] accessibility-tree backend
-- [ ] OpenXR bridge
+- [x] faster-whisper + VAD voice
+- [x] continuous conversation + barge-in
+- [x] optional dedicated wake word
+- [x] optional Piper neural TTS
+- [x] local Qwen model routing
+- [x] semantic memory + response cache
+- [x] accessibility-tree backends
+- [x] browser DOM integration
+- [x] vision/accessibility fusion
+- [x] verified visual desktop agent
+- [x] learned mouse/keyboard macro replay
+- [x] plug-in Skill SDK
+- [x] gaze / pose / multi-camera modules
+- [x] depth and stereo-depth extension points
+- [x] OpenXR bridge
+- [x] spatial workspace model
+- [x] mobile sensor bridge
+- [ ] polished transparent spatial HUD
+- [ ] production radial gesture menu
+- [ ] calibrated gaze+pinch selection wizard
 
 ## Privacy
 
@@ -505,7 +602,7 @@ MIT
 
 ## Ultra-low-latency profile
 
-Astra 0.5 is tuned around a response-time budget instead of maximum model size.
+Astra 0.7 is tuned around a response-time budget instead of maximum model size.
 
 ### Voice fast path
 
