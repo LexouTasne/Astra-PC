@@ -105,12 +105,14 @@ class AstraDaemon:
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
+        self.mesh_server = None
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
-        print(f"Astra 0.7 daemon starting on {self.host}:{self.port}")
+        print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
         self.brain.preload()
         threading.Thread(target=self._warm_vision, daemon=True).start()
         threading.Thread(target=self._context_loop, daemon=True).start()
+        self._start_mesh()
 
         if voice:
             from astra_pc.voice.assistant import AstraVoiceAssistant
@@ -163,9 +165,50 @@ class AstraDaemon:
 
     def stop(self) -> None:
         self._stop.set()
+        if self.mesh_server:
+            try:
+                self.mesh_server.stop()
+            except Exception:
+                pass
         if self.voice_assistant:
             try:
                 self.voice_assistant.stop()
+            except Exception:
+                pass
+
+    def _start_mesh(self) -> None:
+        mesh_cfg = self.config.data.get("mesh", {})
+        if not mesh_cfg.get("enabled", True):
+            return
+        try:
+            from astra_pc.mesh.server import AstraMeshServer
+            root = mesh_cfg.get(
+                "state_path",
+                str(Path.home() / ".local" / "share" / "astra-pc" / "mesh"),
+            )
+            self.mesh_server = AstraMeshServer(
+                root=root,
+                host=mesh_cfg.get("host", "0.0.0.0"),
+                port=int(mesh_cfg.get("port", 8767)),
+                name=mesh_cfg.get("name") or "Astra",
+                request_handler=self.handle,
+                event_handler=self._mesh_event,
+            )
+            self.mesh_server.start()
+        except Exception as exc:
+            self.mesh_server = None
+            print(f"[mesh] unavailable: {exc}")
+
+    def _mesh_event(self, name: str, payload: dict[str, Any]) -> None:
+        self.bus.publish(name, **payload)
+        if name == "mesh.camera_snapshot":
+            try:
+                device = payload.get("device", {})
+                self.semantic.remember(
+                    f"Snapshot recebido de {device.get('name', 'device')}: {payload.get('path', '')}",
+                    kind="mesh",
+                    metadata=payload,
+                )
             except Exception:
                 pass
 
@@ -225,11 +268,18 @@ class AstraDaemon:
         try:
             value = round(float(event.payload.get("value", 0)), 1)
             label = "CPU" if "cpu" in event.name else "RAM"
+            message = f"{label} está em {value}%."
             self.skills.execute(
                 "notifications",
                 "notify",
-                {"title": "Astra", "message": f"{label} está em {value}%."},
+                {"title": "Astra", "message": message},
             )
+            if self.mesh_server:
+                from astra_pc.mesh.protocol import envelope
+                self.mesh_server.broadcast(
+                    envelope("notification", title="Astra", message=message),
+                    scope="notifications.receive",
+                )
         except Exception:
             pass
 
@@ -251,11 +301,56 @@ class AstraDaemon:
         kind = str(request.get("type", "ask"))
 
         if kind == "ping":
-            return {"ok": True, "version": "0.7", "status": "ready"}
+            return {"ok": True, "version": "0.8", "status": "ready"}
 
         if kind == "stop":
             self.stop()
             return {"ok": True, "message": "stopping"}
+
+        if kind == "mesh.pair_code":
+            if not self.mesh_server:
+                return {"ok": False, "error": "mesh_not_running"}
+            ttl = int(request.get("ttl", 300))
+            data = self.mesh_server.pair_code(ttl)
+            output = request.get("qr")
+            if output:
+                try:
+                    from astra_pc.mesh.qr import save_qr
+                    save_qr(data["uri"], output)
+                    data["qr_path"] = str(Path(output).expanduser())
+                except Exception as exc:
+                    data["qr_error"] = str(exc)
+            return {"ok": True, **data}
+
+        if kind == "mesh.devices":
+            if not self.mesh_server:
+                return {"ok": False, "error": "mesh_not_running"}
+            return {
+                "ok": True,
+                "devices": self.mesh_server.registry.list_public(),
+                "fingerprint": self.mesh_server.fingerprint,
+            }
+
+        if kind == "mesh.revoke":
+            if not self.mesh_server:
+                return {"ok": False, "error": "mesh_not_running"}
+            device_id = str(request.get("device_id", ""))
+            return {"ok": self.mesh_server.registry.revoke(device_id)}
+
+        if kind == "mesh.clipboard":
+            text = str(request.get("text", ""))[:100000]
+            result = self.skills.execute(
+                "clipboard",
+                "clipboard_write",
+                {"text": text},
+            )
+            device = request.get("mesh_device") or {}
+            self.bus.publish(
+                "mesh.clipboard",
+                device=device,
+                length=len(text),
+            )
+            return {"ok": result.ok, "message": result.message}
 
         if kind in {"context", "awareness"}:
             perf = self.governor.state()
@@ -277,6 +372,19 @@ class AstraDaemon:
                     "vision_max_width": perf.vision_max_width,
                 },
                 "skills": self.skills.describe(),
+                "mesh": {
+                    "enabled": self.mesh_server is not None,
+                    "port": (
+                        self.mesh_server.port if self.mesh_server else None
+                    ),
+                    "fingerprint": (
+                        self.mesh_server.fingerprint if self.mesh_server else None
+                    ),
+                    "devices": (
+                        self.mesh_server.registry.list_public()
+                        if self.mesh_server else []
+                    ),
+                },
             }
 
         if kind == "memory.search":
