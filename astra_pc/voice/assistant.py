@@ -113,6 +113,8 @@ class AstraVoiceAssistant:
         language: str = "pt",
         request_handler: Callable[[str], str] | None = None,
         conversation_window: float = 9.0,
+        wakeword_model: str | Path | None = None,
+        wakeword_threshold: float = 0.55,
     ):
         self.brain = brain
         self.model_path = model_path
@@ -124,6 +126,18 @@ class AstraVoiceAssistant:
         self.speaker = FastSpeaker() if speak else None
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
         self._stop = threading.Event()
+        self._dedicated_wake_until = 0.0
+        self._wake_detector = None
+        if wakeword_model:
+            try:
+                from astra_pc.voice.wakeword import OpenWakeWordDetector
+                self._wake_detector = OpenWakeWordDetector(
+                    wakeword_model,
+                    self._on_dedicated_wake,
+                    threshold=wakeword_threshold,
+                )
+            except Exception as exc:
+                print(f"[wakeword] dedicated detector unavailable: {exc}")
 
         if engine == "fast":
             self._voice = FastWhisperVoiceEngine(
@@ -132,6 +146,9 @@ class AstraVoiceAssistant:
                 language=language,
                 silence_ms=330,
                 pre_roll_ms=240,
+                raw_frame_callback=(
+                    self._wake_detector.process_pcm if self._wake_detector else None
+                ),
             )
         else:
             if model_path is None:
@@ -178,6 +195,13 @@ class AstraVoiceAssistant:
         except Exception as exc:
             print(f"[warmup] vision model skipped: {exc}")
 
+    def _on_dedicated_wake(self) -> None:
+        self._dedicated_wake_until = time.monotonic() + 3.0
+        self._conversation_until = time.monotonic() + self.conversation_window
+        if self.speaker:
+            self.speaker.cancel()
+        print("[wakeword] Astra detected")
+
     def _on_text(self, text: str) -> None:
         normalized = text.lower().strip()
         pos = normalized.find(self.wake_word)
@@ -188,6 +212,10 @@ class AstraVoiceAssistant:
             self._conversation_until = now + self.conversation_window
             if self.speaker:
                 self.speaker.cancel()
+        elif now <= self._dedicated_wake_until:
+            request = text.strip(" ,:;-")
+            self._dedicated_wake_until = 0.0
+            self._conversation_until = now + self.conversation_window
         elif now <= self._conversation_until:
             request = text.strip(" ,:;-")
         else:
