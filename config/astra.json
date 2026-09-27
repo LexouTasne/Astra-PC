@@ -1,0 +1,13 @@
+{
+  "camera": {"index": 0, "width": 640, "height": 360, "target_fps": 30, "mirror": true},
+  "tracking": {"max_hands": 2, "min_detection_confidence": 0.55, "min_tracking_confidence": 0.5, "model_complexity": 0},
+  "pointer": {"enabled": true, "active_margin": 0.10, "smoothing": 0.38, "deadzone_px": 2.0},
+  "gestures": {
+    "pinch_threshold": 0.045,
+    "click_release_threshold": 0.065,
+    "drag_hold_ms": 220,
+    "pause_cooldown_ms": 900,
+    "scroll_gain": 8.0,
+    "scroll_deadzone": 0.007
+  }
+}
