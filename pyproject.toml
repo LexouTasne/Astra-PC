@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fast local-first gesture and voice desktop controller"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -19,6 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 voice = ["vosk>=0.3.45", "sounddevice>=0.4.7"]
+dev = ["pytest>=8"]
 
 [project.scripts]
 astra = "astra_pc.__main__:main"
