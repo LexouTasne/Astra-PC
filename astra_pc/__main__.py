@@ -59,12 +59,14 @@ def _run_video(args, config) -> None:
     from .media.video_understanding import understand_video
 
     brain, _ = _brain(config)
-    print(understand_video(
-        brain,
-        args.video,
-        args.prompt,
-        frame_count=args.frames,
-    ))
+    print(
+        understand_video(
+            brain,
+            args.video,
+            args.prompt,
+            frame_count=args.frames,
+        )
+    )
 
 
 def _run_chat(args, config) -> None:
@@ -87,6 +89,19 @@ def _run_chat(args, config) -> None:
         print("Astra>", brain.ask(text))
 
 
+def _run_agent(args, config) -> None:
+    from .ai.desktop_agent import VisualDesktopAgent
+
+    _, client = _brain(config)
+    if not client.available():
+        raise SystemExit(
+            "Ollama is not reachable. Run installer.py or start 'ollama serve'."
+        )
+    agent = VisualDesktopAgent(client, max_steps=args.max_steps)
+    result = agent.run(args.goal, auto_confirm=args.yes)
+    print("Astra>", result)
+
+
 def _run_generate(args, config) -> None:
     from .media.comfyui import ComfyUIClient
 
@@ -107,6 +122,12 @@ def _run_generate(args, config) -> None:
         raise SystemExit("No ComfyUI workflow configured. Use --workflow.")
 
     checkpoint = args.checkpoint or comfy_cfg.get("checkpoint", "")
+    if not checkpoint:
+        raise SystemExit(
+            "No ComfyUI checkpoint configured. Set media.comfyui.checkpoint "
+            "in config/astra.json or pass --checkpoint."
+        )
+
     replacements = {
         "PROMPT": args.prompt,
         "NEGATIVE": args.negative,
@@ -154,7 +175,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("chat", help="interactive local Astra chat")
 
-    generate = sub.add_parser("generate", help="run a local ComfyUI image/video workflow")
+    agent = sub.add_parser("agent", help="screen-aware local desktop agent")
+    agent.add_argument("goal")
+    agent.add_argument("--max-steps", type=int, default=8)
+    agent.add_argument(
+        "--yes",
+        action="store_true",
+        help="execute allowed agent actions without per-step confirmation",
+    )
+
+    generate = sub.add_parser("generate", help="run a local ComfyUI media workflow")
     generate.add_argument("prompt")
     generate.add_argument("--workflow", type=Path)
     generate.add_argument("--checkpoint", default=None)
@@ -172,7 +202,6 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    # Backwards-compatible behavior: no subcommand starts gestures.
     command = args.command or "gestures"
     if args.command is None:
         args.show_camera = False
@@ -186,6 +215,7 @@ def main() -> None:
         "screen": _run_screen,
         "video": _run_video,
         "chat": _run_chat,
+        "agent": _run_agent,
         "generate": _run_generate,
     }
     runners[command](args, config)
