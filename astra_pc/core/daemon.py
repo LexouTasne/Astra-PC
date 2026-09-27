@@ -106,6 +106,7 @@ class AstraDaemon:
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
         self.mesh_server = None
+        self.mesh_sensor_state: dict[str, dict[str, Any]] = {}
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
@@ -200,6 +201,21 @@ class AstraDaemon:
             print(f"[mesh] unavailable: {exc}")
 
     def _mesh_event(self, name: str, payload: dict[str, Any]) -> None:
+        if name == "mesh.sensor":
+            device = payload.get("device", {})
+            device_id = str(device.get("device_id", "unknown"))
+            sensor = str(payload.get("sensor", "unknown"))
+            state = self.mesh_sensor_state.setdefault(device_id, {
+                "device": device,
+                "sensors": {},
+                "updated": 0.0,
+            })
+            state["device"] = device
+            state["sensors"][sensor] = {
+                "data": payload.get("data"),
+                "ts": payload.get("ts"),
+            }
+            state["updated"] = time.time()
         self.bus.publish(name, **payload)
         if name == "mesh.camera_snapshot":
             try:
@@ -253,7 +269,7 @@ class AstraDaemon:
             time.sleep(self.context_interval)
 
     def _remember_event(self, event) -> None:
-        if event.name.startswith("context."):
+        if event.name.startswith("context.") or event.name == "mesh.sensor":
             return
         self.memory.add(
             "event",
@@ -384,6 +400,7 @@ class AstraDaemon:
                         self.mesh_server.registry.list_public()
                         if self.mesh_server else []
                     ),
+                    "live_sensors": list(self.mesh_sensor_state.values()),
                 },
             }
 
