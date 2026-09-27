@@ -65,9 +65,6 @@ if (-not $uv) { throw "uv nao foi encontrado depois da instalacao." }
 
 Set-Location $Dest
 Say "Garantindo Python 3.12 isolado..."
-& $uv python install 3.12
-if ($LASTEXITCODE -ne 0) { throw "Falha instalando Python 3.12." }
-
 $venvPy = Join-Path $Dest ".venv\Scripts\python.exe"
 $needVenv = $true
 if (Test-Path $venvPy) {
@@ -75,8 +72,15 @@ if (Test-Path $venvPy) {
     if ($version -eq "3.12") { $needVenv = $false }
 }
 if ($needVenv) {
-    & $uv venv --clear --python 3.12 (Join-Path $Dest ".venv")
+    & $uv venv --clear --seed --python 3.12 (Join-Path $Dest ".venv")
     if ($LASTEXITCODE -ne 0) { throw "Falha criando .venv." }
+}
+
+& $venvPy -m pip --version *> $null
+if ($LASTEXITCODE -ne 0) {
+    Say "Reparando ambiente sem pip..."
+    & $uv pip install --python $venvPy pip setuptools wheel
+    if ($LASTEXITCODE -ne 0) { throw "Falha reparando pip na .venv." }
 }
 
 Say "Executando Astra installer..."
