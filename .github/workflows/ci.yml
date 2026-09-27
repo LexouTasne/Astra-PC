@@ -80,6 +80,23 @@ jobs:
       - name: Reproduce unsupported-host-Python install path
         run: python installer.py --diagnose-only --yes
 
+  repair-pipless-venv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Create old-style uv venv without pip
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          "$HOME/.local/bin/uv" venv --clear --python 3.12 .venv
+          test ! -e .venv/bin/pip
+      - name: Installer repairs pipless venv
+        run: |
+          python installer.py --diagnose-only --yes
+          .venv/bin/python -m pip --version
+
 
   android:
     runs-on: ubuntu-latest
