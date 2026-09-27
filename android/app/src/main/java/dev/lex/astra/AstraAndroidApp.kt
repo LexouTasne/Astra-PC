@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -177,15 +176,15 @@ fun AstraAndroidApp(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            Button(onClick = onVoice, modifier = Modifier.weight(1f)) {
+                            Button(onClick = onVoice, modifier = Modifier) {
                                 Text("VOZ")
                             }
-                            Button(onClick = onCamera, modifier = Modifier.weight(1f)) {
+                            Button(onClick = onCamera, modifier = Modifier) {
                                 Text("CÂMERA")
                             }
                             Button(
                                 onClick = { repository.requestContext() },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
                             ) {
                                 Text("PC")
                             }
@@ -199,15 +198,15 @@ fun AstraAndroidApp(
                         ) {
                             OutlinedButton(
                                 onClick = onStartSensors,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
                             ) { Text("SENSORES ON") }
                             OutlinedButton(
                                 onClick = onStopSensors,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
                             ) { Text("SENSORES OFF") }
                             OutlinedButton(
                                 onClick = onSendClipboard,
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier
                             ) { Text("CLIPBOARD") }
                         }
                     }
