@@ -15,11 +15,14 @@ class AppsSkill(Skill):
 
     APP_ALIASES = {
         "browser": ["firefox", "google-chrome", "chromium", "brave-browser"],
+        "navegador": ["firefox", "google-chrome", "chromium", "brave-browser"],
         "chrome": ["google-chrome", "chrome", "chromium"],
         "firefox": ["firefox"],
         "discord": ["discord", "Discord"],
         "spotify": ["spotify", "Spotify"],
         "vscode": ["code", "code-insiders"],
+        "codigo": ["code", "code-insiders"],
+        "código": ["code", "code-insiders"],
         "terminal": ["konsole", "gnome-terminal", "kgx", "xterm"],
     }
 
