@@ -23,7 +23,7 @@ jobs:
       - name: Install Astra with gestures
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[gesture,dev]"
+          pip install -e ".[gesture,mesh,dev]"
       - name: Validate bootstrap shell
         run: bash -n install.sh
       - name: Compile
@@ -42,7 +42,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[gesture,dev]"
+          pip install -e ".[gesture,mesh,dev]"
       - name: Validate PowerShell bootstrap syntax
         shell: pwsh
         run: |
@@ -62,7 +62,7 @@ jobs:
       - name: Install Astra with gestures
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[gesture,dev]"
+          pip install -e ".[gesture,mesh,dev]"
       - name: Validate bootstrap shell
         run: bash -n install.sh
       - name: Compile
