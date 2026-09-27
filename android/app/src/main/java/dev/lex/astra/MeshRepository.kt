@@ -1,5 +1,9 @@
 package dev.lex.astra
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
@@ -19,6 +23,7 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
+import androidx.core.app.NotificationCompat
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -266,6 +271,25 @@ class MeshRepository private constructor(private val appContext: Context) {
                         .put("v", 1)
                         .put("type", "hello")
                         .put("device_id", deviceId)
+                        .put("app_version", "0.8.0")
+                        .put("os_version", android.os.Build.VERSION.RELEASE)
+                        .put("model", android.os.Build.MODEL)
+                        .put(
+                            "capabilities",
+                            org.json.JSONArray(
+                                listOf(
+                                    "chat",
+                                    "voice",
+                                    "accelerometer",
+                                    "gyroscope",
+                                    "rotation_vector",
+                                    "camera_snapshot",
+                                    "clipboard_send",
+                                    "clipboard_receive",
+                                    "notifications"
+                                )
+                            )
+                        )
                         .toString()
                 )
             }
@@ -294,6 +318,12 @@ class MeshRepository private constructor(private val appContext: Context) {
                             val message = json.optString("message")
                             appendMessage(true, "$title: $message")
                         }
+                        "device.command" -> {
+                            handleDeviceCommand(
+                                json.optString("action"),
+                                json.optJSONObject("payload") ?: JSONObject()
+                            )
+                        }
                         "error" -> {
                             appendMessage(true, "Mesh: ${json.optString("error")}")
                         }
@@ -316,6 +346,52 @@ class MeshRepository private constructor(private val appContext: Context) {
                 )
             }
         })
+    }
+
+    private fun handleDeviceCommand(action: String, payload: JSONObject) {
+        when (action) {
+            "notify" -> {
+                val text = payload.optString("text").take(1000)
+                if (text.isNotBlank()) {
+                    appendMessage(true, text)
+                    showNotification("Astra", text)
+                }
+            }
+            "clipboard.set" -> {
+                val text = payload.optString("text").take(100_000)
+                if (text.isNotBlank()) {
+                    val clipboard = appContext.getSystemService(Context.CLIPBOARD_SERVICE)
+                        as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Astra Mesh", text))
+                    appendMessage(true, "Clipboard recebido do PC.")
+                }
+            }
+        }
+    }
+
+    private fun showNotification(title: String, text: String) {
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE)
+            as NotificationManager
+        val channel = "astra_mesh_messages"
+        manager.createNotificationChannel(
+            NotificationChannel(
+                channel,
+                "Astra Mesh messages",
+                NotificationManager.IMPORTANCE_DEFAULT
+            )
+        )
+        try {
+            manager.notify(
+                81,
+                NotificationCompat.Builder(appContext, channel)
+                    .setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setAutoCancel(true)
+                    .build()
+            )
+        } catch (_: SecurityException) {
+        }
     }
 
     private fun pinnedClient(fingerprint: String): OkHttpClient {
