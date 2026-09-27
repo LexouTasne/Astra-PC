@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from pynput.mouse import Button, Controller
+from pynput.keyboard import Controller as KeyboardController, Key
+from pynput.mouse import Button, Controller as MouseController
 
 from .base import InputBackend
 
 
 class PynputBackend(InputBackend):
     def __init__(self):
-        self.mouse = Controller()
+        self.mouse = MouseController()
+        self.keyboard = KeyboardController()
         self._left_down = False
 
     def screen_size(self) -> tuple[int, int]:
@@ -30,6 +32,33 @@ class PynputBackend(InputBackend):
         (self.mouse.press if down else self.mouse.release)(Button.left)
         self._left_down = down
 
+    def right_click(self) -> None:
+        self.mouse.click(Button.right, 1)
+
     def scroll(self, amount: int) -> None:
         if amount:
             self.mouse.scroll(0, amount)
+
+    def hotkey(self, keys: list[str]) -> None:
+        if not keys:
+            return
+        mapped = [self._key(k) for k in keys]
+        for key in mapped:
+            self.keyboard.press(key)
+        for key in reversed(mapped):
+            self.keyboard.release(key)
+
+    @staticmethod
+    def _key(name: str):
+        aliases = {
+            "ctrl": Key.ctrl,
+            "alt": Key.alt,
+            "shift": Key.shift,
+            "win": Key.cmd,
+            "cmd": Key.cmd,
+            "tab": Key.tab,
+            "enter": Key.enter,
+            "esc": Key.esc,
+            "space": Key.space,
+        }
+        return aliases.get(name.lower(), name)
