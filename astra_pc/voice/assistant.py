@@ -6,6 +6,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 from astra_pc.ai.agent import AstraBrain
 from astra_pc.screen.capture import capture_screen
@@ -110,11 +111,13 @@ class AstraVoiceAssistant:
         engine: str = "fast",
         whisper_model: str = "base",
         language: str = "pt",
+        request_handler: Callable[[str], str] | None = None,
     ):
         self.brain = brain
         self.model_path = model_path
         self.wake_word = wake_word.lower()
         self.router = CommandRouter()
+        self.request_handler = request_handler
         self.speaker = FastSpeaker() if speak else None
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
         self._stop = threading.Event()
@@ -210,6 +213,9 @@ class AstraVoiceAssistant:
             finally:
                 shot.unlink(missing_ok=True)
             path = "vision"
+        elif self.request_handler is not None:
+            answer = self.request_handler(request)
+            path = "daemon"
         else:
             answer = self.brain.ask(self._short_prompt(request))
             path = "text"
