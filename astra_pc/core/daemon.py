@@ -123,6 +123,14 @@ class AstraDaemon:
                 language=voice_cfg.get("language", "pt"),
                 request_handler=self._voice_request,
                 conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
+                wakeword_model=(
+                    voice_cfg.get("dedicated_wakeword", {}).get("model_path")
+                    if voice_cfg.get("dedicated_wakeword", {}).get("enabled")
+                    else None
+                ),
+                wakeword_threshold=float(
+                    voice_cfg.get("dedicated_wakeword", {}).get("threshold", 0.55)
+                ),
             )
             threading.Thread(
                 target=self.voice_assistant.run,
