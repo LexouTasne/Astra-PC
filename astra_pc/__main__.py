@@ -166,6 +166,7 @@ def _run_voice(args, config) -> None:
         raise SystemExit(
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
+    voice_cfg = config.data.get("voice", {})
     assistant = AstraVoiceAssistant(
         brain,
         args.voice_model,
@@ -174,6 +175,9 @@ def _run_voice(args, config) -> None:
         engine=args.engine,
         whisper_model=args.whisper_model,
         language=args.language,
+        conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
+        wakeword_model=args.wakeword_model,
+        wakeword_threshold=args.wakeword_threshold,
     )
     assistant.run()
 
@@ -399,6 +403,8 @@ def build_parser() -> argparse.ArgumentParser:
     voice.add_argument("--whisper-model", default="base", help="faster-whisper model: tiny/base/small")
     voice.add_argument("--language", default="pt")
     voice.add_argument("--no-speak", action="store_true")
+    voice.add_argument("--wakeword-model", type=Path, default=None)
+    voice.add_argument("--wakeword-threshold", type=float, default=0.55)
 
     benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
     benchmark.add_argument("--rounds", type=int, default=3)
