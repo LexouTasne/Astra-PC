@@ -178,6 +178,7 @@ def _run_voice(args, config) -> None:
         conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
         wakeword_model=args.wakeword_model,
         wakeword_threshold=args.wakeword_threshold,
+        piper_model=voice_cfg.get("piper_model") or None,
     )
     assistant.run()
 
