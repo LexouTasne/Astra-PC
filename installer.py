@@ -1360,6 +1360,17 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
     already_installed = droidcam_client_installed()
     if already_installed:
         print("DroidCam client already installed:", droidcam_binary())
+        driver_ready, reboot_required = ensure_v4l2loopback(
+            pm,
+            assume_yes,
+            allow_layering,
+        )
+        if reboot_required:
+            print("\nReboot the PC, then run: astra setup camera")
+            return True
+        if driver_ready:
+            launch_droidcam_and_wait(assume_yes)
+            return True
 
     try:
         url = _latest_droidcam_linux_url()
