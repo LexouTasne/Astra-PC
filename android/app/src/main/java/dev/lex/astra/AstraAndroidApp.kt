@@ -51,7 +51,10 @@ fun AstraAndroidApp(
     onCamera: () -> Unit,
     onStartSensors: () -> Unit,
     onStopSensors: () -> Unit,
-    onSendClipboard: () -> Unit
+    onSendClipboard: () -> Unit,
+    onImportModel: () -> Unit,
+    onImportTokenizer: () -> Unit,
+    onRemoveLocalModel: () -> Unit
 ) {
     val state by repository.state.collectAsState()
     var host by remember { mutableStateOf("") }
@@ -63,9 +66,7 @@ fun AstraAndroidApp(
     MaterialTheme(colorScheme = AstraColors) {
         Surface(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
@@ -76,11 +77,57 @@ fun AstraAndroidApp(
                         color = MaterialTheme.colorScheme.primary
                     )
                     Text(
-                        if (state.nodeName.isBlank()) state.status
-                        else "${state.nodeName} • ${state.status}",
-                        color = if (state.connected) MaterialTheme.colorScheme.secondary
-                        else MaterialTheme.colorScheme.onSurfaceVariant
+                        when {
+                            state.connected -> "${state.nodeName.ifBlank { state.host }} • MESH ONLINE"
+                            state.localAiReady -> "QWEN LOCAL • STANDALONE READY"
+                            else -> state.status
+                        },
+                        color = if (state.connected || state.localAiReady)
+                            MaterialTheme.colorScheme.secondary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Column(
+                            Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("Cérebro local", fontWeight = FontWeight.Bold)
+                            Text(
+                                state.localAiStatus,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Text(
+                                "Opcional: importe Qwen3 0.6B ONNX + tokenizer.json. " +
+                                    "Quando a Mesh cair, Astra responde no próprio celular.",
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = onImportModel) {
+                                    Text("MODEL.ONNX")
+                                }
+                                OutlinedButton(onClick = onImportTokenizer) {
+                                    Text("TOKENIZER")
+                                }
+                            }
+                            if (state.localAiReady) {
+                                OutlinedButton(
+                                    onClick = onRemoveLocalModel,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("REMOVER MODELO LOCAL")
+                                }
+                            }
+                        }
+                    }
                 }
 
                 if (!state.paired) {
@@ -95,7 +142,7 @@ fun AstraAndroidApp(
                                 Modifier.padding(16.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Parear dispositivo", fontWeight = FontWeight.Bold)
+                                Text("Parear com um Astra", fontWeight = FontWeight.Bold)
                                 Button(onClick = onScanQr, modifier = Modifier.fillMaxWidth()) {
                                     Text("ESCANEAR QR DO PC")
                                 }
@@ -149,7 +196,7 @@ fun AstraAndroidApp(
 
                     if (state.discovered.isNotEmpty()) {
                         item {
-                            Text("Astra Mesh encontrada na rede", fontWeight = FontWeight.Bold)
+                            Text("Nós Astra encontrados", fontWeight = FontWeight.Bold)
                         }
                         items(state.discovered) { node ->
                             OutlinedButton(
@@ -170,89 +217,112 @@ fun AstraAndroidApp(
                             }
                         }
                     }
-                } else {
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(onClick = onVoice, modifier = Modifier) {
-                                Text("VOZ")
-                            }
-                            Button(onClick = onCamera, modifier = Modifier) {
-                                Text("CÂMERA")
-                            }
-                            Button(
-                                onClick = { repository.requestContext() },
-                                modifier = Modifier
-                            ) {
-                                Text("PC")
-                            }
-                        }
-                    }
+                }
 
-                    item {
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedButton(
-                                onClick = onStartSensors,
-                                modifier = Modifier
-                            ) { Text("SENSORES ON") }
-                            OutlinedButton(
-                                onClick = onStopSensors,
-                                modifier = Modifier
-                            ) { Text("SENSORES OFF") }
-                            OutlinedButton(
-                                onClick = onSendClipboard,
-                                modifier = Modifier
-                            ) { Text("CLIPBOARD") }
-                        }
-                    }
-
-                    item {
-                        OutlinedTextField(
-                            value = prompt,
-                            onValueChange = { prompt = it },
-                            label = { Text("Falar com Astra no PC") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 2
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                repository.sendAsk(prompt)
-                                prompt = ""
-                            },
-                            enabled = state.connected && prompt.isNotBlank(),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("ENVIAR PARA ASTRA")
-                        }
-                    }
-
-                    items(state.messages) { message ->
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = if (message.fromAstra) Alignment.CenterStart
-                            else Alignment.CenterEnd
+                item {
+                    Card(shape = RoundedCornerShape(20.dp)) {
+                        Column(
+                            Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Text(
-                                message.text,
-                                modifier = Modifier
-                                    .background(
-                                        if (message.fromAstra)
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                        else
-                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
-                                        RoundedCornerShape(14.dp)
-                                    )
-                                    .padding(12.dp)
+                                if (state.connected) "Astra distribuída"
+                                else "Astra local",
+                                fontWeight = FontWeight.Bold
                             )
+                            OutlinedTextField(
+                                value = prompt,
+                                onValueChange = { prompt = it },
+                                label = {
+                                    Text(
+                                        if (state.connected)
+                                            "Perguntar ao cérebro Mesh"
+                                        else
+                                            "Perguntar ao Qwen local"
+                                    )
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 2
+                            )
+                            Button(
+                                onClick = {
+                                    repository.sendAsk(prompt)
+                                    prompt = ""
+                                },
+                                enabled = prompt.isNotBlank() &&
+                                    (state.connected || state.localAiReady),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    if (state.connected)
+                                        "ENVIAR PELA MESH"
+                                    else
+                                        "RODAR NO CELULAR"
+                                )
+                            }
+                            OutlinedButton(
+                                onClick = onVoice,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("VOZ")
+                            }
                         }
                     }
+                }
 
+                if (state.paired) {
+                    item {
+                        Card(shape = RoundedCornerShape(20.dp)) {
+                            Column(
+                                Modifier.padding(16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Text("Dispositivo Mesh", fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(onClick = onCamera) { Text("CÂMERA") }
+                                    Button(onClick = { repository.requestContext() }) { Text("PC") }
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedButton(onClick = onStartSensors) {
+                                        Text("SENSORES ON")
+                                    }
+                                    OutlinedButton(onClick = onStopSensors) {
+                                        Text("SENSORES OFF")
+                                    }
+                                }
+                                OutlinedButton(
+                                    onClick = onSendClipboard,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("MANDAR CLIPBOARD PRO PC")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                items(state.messages) { message ->
+                    Box(
+                        modifier = Modifier.fillMaxWidth(),
+                        contentAlignment = if (message.fromAstra)
+                            Alignment.CenterStart else Alignment.CenterEnd
+                    ) {
+                        Text(
+                            message.text,
+                            modifier = Modifier
+                                .background(
+                                    if (message.fromAstra)
+                                        MaterialTheme.colorScheme.surfaceVariant
+                                    else
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
+                                    RoundedCornerShape(14.dp)
+                                )
+                                .padding(12.dp)
+                        )
+                    }
+                }
+
+                if (state.paired) {
                     item {
                         OutlinedButton(
                             onClick = { repository.disconnectAndForget() },
