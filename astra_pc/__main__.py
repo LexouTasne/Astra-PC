@@ -28,7 +28,12 @@ def _brain(config):
         timeout=timeout,
         keep_alive=keep_alive,
     )
-    return AstraBrain(text_client, vision_client), text_client
+    strong_name = str(ai.get("strong_model", "")).strip()
+    strong_client = (
+        OllamaClient(strong_name, host=host, timeout=timeout, keep_alive="5m")
+        if strong_name else None
+    )
+    return AstraBrain(text_client, vision_client, strong_client), text_client
 
 
 def _run_gestures(args, config) -> None:
@@ -69,7 +74,22 @@ def _run_see(args, config) -> None:
 
 
 def _run_screen(args, config) -> None:
+    from .core.ipc import daemon_request
     from .screen.capture import capture_screen
+
+    daemon_cfg = config.data.get("daemon", {})
+    try:
+        result = daemon_request(
+            {"type": "screen", "text": args.prompt},
+            host=daemon_cfg.get("host", "127.0.0.1"),
+            port=int(daemon_cfg.get("port", 8765)),
+            timeout=60.0,
+        )
+        if result.get("ok"):
+            print(result.get("message", ""))
+            return
+    except Exception:
+        pass
 
     brain, _ = _brain(config)
     shot = capture_screen()
@@ -222,6 +242,58 @@ def _run_routine(args, config) -> None:
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
+def _run_awareness(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+    daemon_cfg = config.data.get("daemon", {})
+    result = daemon_request(
+        {"type": "awareness"},
+        host=daemon_cfg.get("host", "127.0.0.1"),
+        port=int(daemon_cfg.get("port", 8765)),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _run_memory(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+    daemon_cfg = config.data.get("daemon", {})
+    result = daemon_request(
+        {"type": "memory.search", "text": args.query},
+        host=daemon_cfg.get("host", "127.0.0.1"),
+        port=int(daemon_cfg.get("port", 8765)),
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _run_learn(args, config) -> None:
+    from .automation.recorder import ActionRecorder
+    print("Learning mode: perform the task now. Press ESC to finish recording.")
+    path = ActionRecorder().record(args.name, max_seconds=args.max_seconds)
+    print(path)
+
+
+def _run_replay(args, config) -> None:
+    from pathlib import Path
+    from .automation.replay import ActionReplayer
+    base = Path.home() / ".local" / "share" / "astra-pc" / "macros"
+    path = Path(args.path_or_name).expanduser()
+    if not path.exists():
+        path = base / (args.path_or_name.lower().replace(" ", "-") + ".json")
+    ActionReplayer().replay(path, speed=args.speed)
+    print("Replay complete.")
+
+
+def _run_mobile(args, config) -> None:
+    from .mobile.server import MobileCompanionServer
+    mobile = config.data.get("mobile", {})
+    MobileCompanionServer(
+        host=args.host or mobile.get("host", "0.0.0.0"),
+        port=args.port or int(mobile.get("port", 8766)),
+        token=args.token,
+    ).run()
+
+
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
 
@@ -331,6 +403,24 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
     benchmark.add_argument("--rounds", type=int, default=3)
 
+    sub.add_parser("awareness", help="show Astra's current context/perception state")
+
+    memory = sub.add_parser("memory", help="semantic search through local Astra memory")
+    memory.add_argument("query")
+
+    learn = sub.add_parser("learn", help="observe mouse/keyboard actions and save a local macro")
+    learn.add_argument("name")
+    learn.add_argument("--max-seconds", type=int, default=120)
+
+    replay = sub.add_parser("replay", help="replay an explicitly learned local macro")
+    replay.add_argument("path_or_name")
+    replay.add_argument("--speed", type=float, default=1.0)
+
+    mobile = sub.add_parser("mobile", help="run the local phone/sensor companion bridge")
+    mobile.add_argument("--host", default=None)
+    mobile.add_argument("--port", type=int, default=None)
+    mobile.add_argument("--token", default=None)
+
     daemon = sub.add_parser("daemon", help="run the resident Astra core")
     daemon.add_argument("--voice", action="store_true", help="keep Astra listening in the daemon")
     daemon.add_argument("--no-speak", action="store_true", help="disable spoken replies")
@@ -398,6 +488,11 @@ def main() -> None:
         "chat": _run_chat,
         "voice": _run_voice,
         "benchmark": _run_benchmark,
+        "awareness": _run_awareness,
+        "memory": _run_memory,
+        "learn": _run_learn,
+        "replay": _run_replay,
+        "mobile": _run_mobile,
         "daemon": _run_daemon,
         "ctl": _run_ctl,
         "profile": _run_profile,
