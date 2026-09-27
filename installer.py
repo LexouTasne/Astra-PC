@@ -378,17 +378,52 @@ def probe_cameras_opencv(limit: int = 8) -> list[tuple[int, int, int]]:
 
     import cv2
 
+    # OpenCV can print several backend errors for every invalid index.
+    # Keep diagnostics readable while we probe.
+    previous_level = None
+    try:
+        if hasattr(cv2, "getLogLevel") and hasattr(cv2, "setLogLevel"):
+            previous_level = cv2.getLogLevel()
+            cv2.setLogLevel(0)
+    except Exception:
+        previous_level = None
+
+    if platform.system() == "Linux":
+        candidates: list[tuple[int, str | int]] = []
+        for path in sorted(glob.glob("/dev/video*"))[:limit]:
+            name = Path(path).name
+            suffix = name.removeprefix("video")
+            if suffix.isdigit():
+                candidates.append((int(suffix), path))
+    else:
+        candidates = [(index, index) for index in range(limit)]
+
     found: list[tuple[int, int, int]] = []
-    for index in range(limit):
-        cap = cv2.VideoCapture(index)
-        if not cap.isOpened():
-            cap.release()
-            continue
-        ok, frame = cap.read()
-        if ok and frame is not None:
-            h, w = frame.shape[:2]
-            found.append((index, w, h))
-        cap.release()
+    try:
+        for index, source in candidates:
+            try:
+                if platform.system() == "Linux":
+                    cap = cv2.VideoCapture(source, cv2.CAP_V4L2)
+                else:
+                    cap = cv2.VideoCapture(source)
+            except Exception:
+                continue
+            try:
+                if not cap.isOpened():
+                    continue
+                ok, frame = cap.read()
+                if ok and frame is not None and getattr(frame, "size", 0):
+                    h, w = frame.shape[:2]
+                    found.append((index, w, h))
+            finally:
+                cap.release()
+    finally:
+        if previous_level is not None:
+            try:
+                cv2.setLogLevel(previous_level)
+            except Exception:
+                pass
+
     return found
 
 
@@ -508,13 +543,18 @@ def start_ollama() -> bool:
             return True
 
     if command_exists("brew"):
-        # Works on macOS and Bazzite/Homebrew Linux; failure is harmless because
-        # we still fall back to a detached "ollama serve" below.
-        run(["brew", "services", "start", "ollama"])
-        for _ in range(8):
-            if ollama_api_available():
-                return True
-            time.sleep(0.25)
+        owned_by_brew = subprocess.run(
+            ["brew", "list", "--formula", "ollama"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        ).returncode == 0
+        if owned_by_brew:
+            run(["brew", "services", "start", "ollama"])
+            for _ in range(8):
+                if ollama_api_available():
+                    return True
+                time.sleep(0.25)
 
     print("Starting local Ollama server...")
     try:
@@ -792,19 +832,61 @@ def install_autostart(with_voice: bool = True) -> bool:
     return False
 
 
+def _daemon_reachable() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", 8765), timeout=0.4):
+            return True
+    except Exception:
+        return False
+
+
+def _print_linux_service_diagnostics() -> None:
+    if not command_exists("systemctl"):
+        return
+    print("\n[Astra service diagnostics]")
+    subprocess.run(
+        ["systemctl", "--user", "--no-pager", "--full", "status", "astra-pc.service"],
+        check=False,
+    )
+    if command_exists("journalctl"):
+        subprocess.run(
+            ["journalctl", "--user", "-u", "astra-pc.service", "-n", "40", "--no-pager"],
+            check=False,
+        )
+
+
 def start_astra(with_voice: bool = True) -> bool:
-    """Start Astra now without blocking the installer terminal."""
+    """Start Astra now and verify that local IPC becomes reachable."""
+    if _daemon_reachable():
+        print("Astra daemon is already running.")
+        return True
+
     cmd = [str(sys.executable), "-m", "astra_pc", "daemon"]
     if with_voice:
         cmd.append("--voice")
 
-    # If the daemon is already reachable, don't start a duplicate.
-    try:
-        with socket.create_connection(("127.0.0.1", 8765), timeout=0.4):
-            print("Astra daemon is already running.")
-            return True
-    except Exception:
-        pass
+    # When autostart is installed, systemd owns the process. Do not spawn a
+    # second daemon while the service is still starting/warming models.
+    service = Path.home() / ".config" / "systemd" / "user" / "astra-pc.service"
+    if platform.system() == "Linux" and command_exists("systemctl") and service.exists():
+        print("Starting/restarting Astra through systemd --user...")
+        run(["systemctl", "--user", "restart", "astra-pc.service"])
+        for _ in range(120):
+            if _daemon_reachable():
+                print("Astra daemon started.")
+                return True
+            state = subprocess.run(
+                ["systemctl", "--user", "is-failed", "astra-pc.service"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            if state.returncode == 0:
+                break
+            time.sleep(0.25)
+        print("Astra systemd service did not become reachable.")
+        _print_linux_service_diagnostics()
+        return False
 
     log_dir = (
         Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC" / "logs"
@@ -835,16 +917,21 @@ def start_astra(with_voice: bool = True) -> bool:
         print("Could not start Astra:", exc)
         return False
 
-    for _ in range(20):
-        try:
-            with socket.create_connection(("127.0.0.1", 8765), timeout=0.3):
-                print("Astra daemon started.")
-                return True
-        except Exception:
-            time.sleep(0.25)
+    for _ in range(120):
+        if _daemon_reachable():
+            print("Astra daemon started.")
+            return True
+        time.sleep(0.25)
 
-    print("Astra was launched, but the daemon did not become reachable yet.")
+    print("Astra was launched, but the daemon did not become reachable after 30 seconds.")
     print("Check log:", log_dir / "astra.err.log")
+    try:
+        tail = (log_dir / "astra.err.log").read_text(encoding="utf-8", errors="ignore").splitlines()[-25:]
+        if tail:
+            print("\nLast Astra errors:")
+            print("\n".join(tail))
+    except Exception:
+        pass
     return False
 
 
@@ -908,6 +995,36 @@ def configure_mesh_firewall(port: int, assume_yes: bool = False) -> None:
                 f"-Action Allow -Protocol TCP -LocalPort {port} | Out-Null"
             )
             run([ps, "-NoProfile", "-Command", command])
+
+
+def install_awareness_extras() -> bool:
+    print("\n[AWARENESS EXTRAS]")
+    print("  Browser DOM -> Playwright")
+    print("  Dedicated wake word -> openWakeWord ONNX backend")
+
+    browser_ok = uv_install_into(
+        sys.executable,
+        "-e",
+        f"{ROOT}[browser]",
+    )
+
+    wake_deps_ok = uv_install_into(
+        sys.executable,
+        "-e",
+        f"{ROOT}[wakeword]",
+    )
+
+    wake_pkg_ok = True
+    if platform.system() == "Linux" and sys.version_info >= (3, 12):
+        print("  Linux/Python 3.12: installing openWakeWord without broken TFLite dependency.")
+        print("  Astra uses .onnx wake-word models on this runtime.")
+        wake_pkg_ok = uv_install_into(
+            sys.executable,
+            "--no-deps",
+            "openwakeword>=0.6.0,<1",
+        )
+
+    return browser_ok and wake_deps_ok and wake_pkg_ok
 
 
 def install_voice() -> bool:
@@ -1105,9 +1222,15 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
             return False
 
         client_installer.chmod(client_installer.stat().st_mode | 0o111)
-        if run(["sudo", str(client_installer)], cwd=target).returncode != 0:
-            print("DroidCam client installation failed.")
-            return False
+        client_result = run(["sudo", str(client_installer)], cwd=target)
+        if client_result.returncode != 0:
+            # Dev47's installer may fail only at xdg-desktop-menu on immutable
+            # desktops after the actual binaries were already copied.
+            if command_exists("droidcam") or command_exists("droidcam-cli"):
+                print("DroidCam binaries are installed; desktop-menu integration failed and was ignored.")
+            else:
+                print("DroidCam client installation failed before a usable binary was installed.")
+                return False
 
         if not video_installer.exists():
             print("DroidCam client installed, but install-video was not present.")
@@ -1312,12 +1435,8 @@ def main() -> int:
             print("Astra resident daemon autostart enabled.")
 
     if args.awareness_extras:
-        print("\n[AWARENESS EXTRAS] Installing dedicated wake-word + optional browser DOM support.")
-        uv_install_into(
-            sys.executable,
-            "-e",
-            f"{ROOT}[wakeword,browser]",
-        )
+        if not install_awareness_extras():
+            print("Awareness extras were only partially installed; core Astra remains usable.")
 
     if args.media:
         if comfyui_available():
@@ -1357,10 +1476,14 @@ def main() -> int:
     if system == "Linux" and pm == "rpm-ostree":
         print("\nNOTE: package layering on Bazzite/Fedora Atomic may require a reboot.")
 
-    print("\nSafe first run:")
-    print(f"  {sys.executable} -m astra_pc gestures --dry-run --show-camera")
-    print("\nReal gesture control:")
-    print(f"  {sys.executable} -m astra_pc gestures")
+    if cameras:
+        print("\nSafe first run:")
+        print(f"  {sys.executable} -m astra_pc gestures --dry-run --show-camera")
+        print("\nReal gesture control:")
+        print(f"  {sys.executable} -m astra_pc gestures")
+    else:
+        print("\nGesture control: waiting for a working camera source.")
+        print("Voice, AI, screen understanding and Astra Mesh can run without a camera.")
     print("\nLocal Astra chat:")
     print(f'  {sys.executable} -m astra_pc ask "O que voce consegue fazer?"')
     print("\nUnderstand the screen:")
