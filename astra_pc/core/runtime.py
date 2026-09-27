@@ -6,8 +6,10 @@ from pathlib import Path
 import cv2
 
 from astra_pc.config import AstraConfig
+from astra_pc.gestures.context_mapper import GestureContextMapper
 from astra_pc.gestures.engine import GestureEngine
 from astra_pc.input.factory import create_input_backend
+from astra_pc.perception.monitors import get_monitors
 from astra_pc.vision.hands import HandTracker
 from astra_pc.voice.commands import CommandRouter
 
@@ -34,6 +36,10 @@ class AstraRuntime:
         self.margin = float(pointer["active_margin"])
         self._smooth_xy: tuple[float, float] | None = None
         self.actions = config.data.get("actions", {})
+        self.context_mapper = GestureContextMapper(
+            config.data.get("gesture_profiles", {})
+        )
+        self.screen_origin = (0, 0)
 
     def run(self) -> None:
         cam_cfg = self.config.section("camera")
@@ -50,10 +56,19 @@ class AstraRuntime:
             tracker.close()
             raise RuntimeError("Astra could not open the configured camera.")
 
-        screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
+        monitors = get_monitors()
+        if monitors:
+            left = min(m.x for m in monitors)
+            top = min(m.y for m in monitors)
+            right = max(m.x + m.width for m in monitors)
+            bottom = max(m.y + m.height for m in monitors)
+            self.screen_origin = (left, top)
+            screen_w, screen_h = (right - left, bottom - top)
+        else:
+            screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
         self._start_voice_if_requested(gestures)
 
-        print("Astra v0.2 online.")
+        print("Astra v0.7 gesture engine online.")
         print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
@@ -98,7 +113,7 @@ class AstraRuntime:
                     color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
                     cv2.putText(
                         frame,
-                        f"ASTRA 0.2 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
+                        f"ASTRA 0.7 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
                         (18, 32),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
@@ -136,7 +151,8 @@ class AstraRuntime:
             print("Astra offline.")
 
     def _dispatch_action(self, name: str) -> None:
-        keys = self.actions.get(name, [])
+        actions = self.context_mapper.actions(self.actions)
+        keys = actions.get(name, [])
         if self.dry_run:
             if keys:
                 print(f"[gesture] {name}: {'+'.join(keys)}")
@@ -166,7 +182,8 @@ class AstraRuntime:
                 ny = sy
             self._smooth_xy = (nx, ny)
 
-        return int(self._smooth_xy[0]), int(self._smooth_xy[1])
+        ox, oy = self.screen_origin
+        return int(self._smooth_xy[0] + ox), int(self._smooth_xy[1] + oy)
 
     def _start_voice_if_requested(self, gestures: GestureEngine) -> None:
         if self.voice_model is None:
