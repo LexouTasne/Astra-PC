@@ -7,6 +7,7 @@ import importlib.util
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -560,6 +561,103 @@ def install_autostart(with_voice: bool = True) -> bool:
         print("Startup script installed:", script)
         return True
 
+    if platform.system() == "Darwin":
+        launch_dir = Path.home() / "Library" / "LaunchAgents"
+        launch_dir.mkdir(parents=True, exist_ok=True)
+        plist = launch_dir / "com.astra.pc.plist"
+        args_xml = [
+            str(sys.executable),
+            "-m",
+            "astra_pc",
+            "daemon",
+        ]
+        if with_voice:
+            args_xml.append("--voice")
+        arg_lines = "\n".join(f"      <string>{x}</string>" for x in args_xml)
+        log_dir = Path.home() / "Library" / "Logs" / "Astra-PC"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        plist.write_text(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+            "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" "
+            "\"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
+            "<plist version=\"1.0\"><dict>\n"
+            "  <key>Label</key><string>com.astra.pc</string>\n"
+            "  <key>ProgramArguments</key><array>\n"
+            f"{arg_lines}\n"
+            "  </array>\n"
+            f"  <key>WorkingDirectory</key><string>{ROOT}</string>\n"
+            "  <key>RunAtLoad</key><true/>\n"
+            "  <key>KeepAlive</key><true/>\n"
+            f"  <key>StandardOutPath</key><string>{log_dir / 'astra.log'}</string>\n"
+            f"  <key>StandardErrorPath</key><string>{log_dir / 'astra.err.log'}</string>\n"
+            "</dict></plist>\n",
+            encoding="utf-8",
+        )
+        uid = str(os.getuid())
+        run(["launchctl", "bootout", f"gui/{uid}", str(plist)])
+        result = run(["launchctl", "bootstrap", f"gui/{uid}", str(plist)])
+        if result.returncode == 0:
+            print("Astra LaunchAgent enabled:", plist)
+            return True
+        print("LaunchAgent was written but could not be started automatically.")
+        return False
+
+    return False
+
+
+def start_astra(with_voice: bool = True) -> bool:
+    """Start Astra now without blocking the installer terminal."""
+    cmd = [str(sys.executable), "-m", "astra_pc", "daemon"]
+    if with_voice:
+        cmd.append("--voice")
+
+    # If the daemon is already reachable, don't start a duplicate.
+    try:
+        with socket.create_connection(("127.0.0.1", 8765), timeout=0.4):
+            print("Astra daemon is already running.")
+            return True
+    except Exception:
+        pass
+
+    log_dir = (
+        Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC" / "logs"
+        if platform.system() == "Windows"
+        else Path.home() / ".local" / "state" / "astra-pc"
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout = open(log_dir / "astra.log", "a", encoding="utf-8")
+    stderr = open(log_dir / "astra.err.log", "a", encoding="utf-8")
+
+    kwargs = {
+        "cwd": str(ROOT),
+        "stdout": stdout,
+        "stderr": stderr,
+        "stdin": subprocess.DEVNULL,
+    }
+    if platform.system() == "Windows":
+        kwargs["creationflags"] = (
+            getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+        )
+    else:
+        kwargs["start_new_session"] = True
+
+    try:
+        subprocess.Popen(cmd, **kwargs)
+    except Exception as exc:
+        print("Could not start Astra:", exc)
+        return False
+
+    for _ in range(20):
+        try:
+            with socket.create_connection(("127.0.0.1", 8765), timeout=0.3):
+                print("Astra daemon started.")
+                return True
+        except Exception:
+            time.sleep(0.25)
+
+    print("Astra was launched, but the daemon did not become reachable yet.")
+    print("Check log:", log_dir / "astra.err.log")
     return False
 
 
@@ -830,8 +928,17 @@ def main() -> int:
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     parser.add_argument("--start", action="store_true", help="start Astra after installation")
+    parser.add_argument("--full", action="store_true", help="install all Astra features, autostart and start now")
     parser.add_argument("--allow-layering", action="store_true", help="allow rpm-ostree package layering on immutable Linux")
     args = parser.parse_args()
+
+    if args.full:
+        args.yes = True
+        args.strong_ai = True
+        args.awareness_extras = True
+        args.autostart = True
+        args.media = True
+        args.start = True
 
     ensure_runtime(args.yes)
     banner()
@@ -841,7 +948,7 @@ def main() -> int:
     pm = detect_package_manager()
 
     checks = [
-        Check("Operating system", system in {"Windows", "Linux"}, f"{system} {platform.release()}"),
+        Check("Operating system", system in {"Windows", "Linux", "Darwin"}, f"{system} {platform.release()}"),
         Check("Architecture", True, platform.machine(), False),
         Check(
             "Python runtime",
@@ -877,9 +984,14 @@ def main() -> int:
     if args.diagnose_only:
         return 0
 
-    if system not in {"Windows", "Linux"}:
-        print("\nAstra currently targets Windows and Linux.")
+    if system not in {"Windows", "Linux", "Darwin"}:
+        print("\nAstra currently targets Windows, Linux and Apple Silicon macOS.")
         return 2
+
+    if system == "Darwin" and platform.machine().lower() not in {"arm64", "aarch64"}:
+        print("\nIntel macOS detected.")
+        print("Astra AI/voice can work, but current MediaPipe releases do not ship an Intel Mac wheel.")
+        print("Gesture/pose features are therefore not guaranteed on this machine.")
 
     if ask("\nInstall/update Astra core dependencies?", True, args.yes):
         if not install_python_core():
@@ -978,6 +1090,11 @@ def main() -> int:
     print(f"  {sys.executable} -m astra_pc benchmark")
     print("\nFast voice:")
     print(f"  {sys.executable} -m astra_pc voice --engine fast")
+
+    if args.start:
+        print("\n[START]")
+        start_astra(with_voice=not args.no_voice)
+
     return 0
 
 
