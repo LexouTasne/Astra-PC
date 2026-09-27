@@ -42,9 +42,20 @@
   "ai": {
     "provider": "ollama",
     "host": "http://127.0.0.1:11434",
-    "model": "qwen3-vl:2b-instruct",
+    "text_model": "qwen3:0.6b",
+    "vision_model": "qwen3-vl:2b-instruct",
     "timeout": 180,
-    "context": 8192
+    "keep_alive": "-1",
+    "fast_context": 3072,
+    "vision_context": 6144
+  },
+  "voice": {
+    "engine": "fast",
+    "whisper_model": "base",
+    "language": "pt",
+    "wake_word": "astra",
+    "silence_ms": 330,
+    "target_response_ms": 7000
   },
   "media": {
     "comfyui": {
