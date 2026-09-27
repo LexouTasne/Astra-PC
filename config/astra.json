@@ -187,7 +187,7 @@
   "mobile": {
     "host": "0.0.0.0",
     "port": 8766,
-    "enabled": false
+    "enabled": true
   },
   "gaze": {
     "enabled": false
@@ -205,5 +205,18 @@
   "face_profiles": {
     "enabled": false,
     "local_only": true
+  },
+  "mesh": {
+    "enabled": true,
+    "host": "0.0.0.0",
+    "port": 8767,
+    "name": "",
+    "state_path": "~/.local/share/astra-pc/mesh",
+    "discovery": true,
+    "pairing_ttl": 300,
+    "sensor_rate_limit_hz": 30,
+    "sync_memory": false,
+    "sync_clipboard": "manual",
+    "allow_remote_over_vpn": true
   }
 }
