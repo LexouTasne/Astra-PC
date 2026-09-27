@@ -1435,6 +1435,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
     already_installed = droidcam_client_installed()
     if already_installed:
         print("DroidCam client already installed:", droidcam_binary())
+        ensure_droidcam_user_desktop_entry()
         driver_ready, reboot_required = ensure_v4l2loopback(
             pm,
             assume_yes,
