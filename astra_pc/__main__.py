@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import random
+import subprocess
+import sys
 from pathlib import Path
 
 from .config import load_config
@@ -39,12 +41,125 @@ def _brain(config):
 def _run_gestures(args, config) -> None:
     from .core.runtime import AstraRuntime
 
-    AstraRuntime(
-        config=config,
-        show_camera=args.show_camera,
-        dry_run=args.dry_run,
-        voice_model=args.voice_model,
-    ).run()
+    try:
+        AstraRuntime(
+            config=config,
+            show_camera=args.show_camera,
+            dry_run=args.dry_run,
+            voice_model=args.voice_model,
+        ).run()
+    except RuntimeError as exc:
+        if str(exc).startswith("camera_unavailable:"):
+            print("Astra não encontrou nenhuma câmera produzindo frames.")
+            print("Rode: astra setup camera")
+            print("Se estiver usando DroidCam, conecte o celular e depois tente novamente.")
+            raise SystemExit(2)
+        raise
+
+
+def _run_setup(args, config) -> None:
+    installer = Path(__file__).resolve().parent.parent / "installer.py"
+    if not installer.exists():
+        raise SystemExit("installer.py não foi encontrado.")
+
+    cmd = [sys.executable, str(installer)]
+    if args.setup_command == "camera":
+        cmd.append("--camera-only")
+    elif args.setup_command == "full":
+        pass
+    else:
+        raise SystemExit("setup inválido")
+
+    if getattr(args, "yes", False):
+        cmd.append("--yes")
+    if getattr(args, "allow_layering", False):
+        cmd.append("--allow-layering")
+
+    raise SystemExit(subprocess.call(cmd, cwd=str(installer.parent)))
+
+
+def _run_home(args, config) -> None:
+    from .core.ipc import daemon_request
+    from .vision.camera_source import open_first_camera
+
+    daemon_cfg = config.data.get("daemon", {})
+    daemon_online = False
+    awareness = None
+    try:
+        awareness = daemon_request(
+            {"type": "awareness"},
+            host=daemon_cfg.get("host", "127.0.0.1"),
+            port=int(daemon_cfg.get("port", 8765)),
+            timeout=1.2,
+        )
+        daemon_online = bool(awareness.get("ok"))
+    except Exception:
+        pass
+
+    camera = open_first_camera(
+        preferred=int(config.data.get("camera", {}).get("index", 0)),
+        width=320,
+        height=180,
+        fps=15,
+        limit=16,
+        warmup_reads=3,
+    )
+    if camera:
+        camera_label = f"OK (camera {camera.index})"
+        camera.cap.release()
+    else:
+        camera_label = "indisponível"
+
+    mesh_online = bool((awareness or {}).get("mesh", {}).get("enabled"))
+    print("============================================================")
+    print(" ASTRA 0.8 // MESH")
+    print("============================================================")
+    print(f"Daemon : {'ONLINE' if daemon_online else 'OFFLINE'}")
+    print(f"Mesh   : {'ONLINE' if mesh_online else 'OFFLINE'}")
+    print(f"Camera : {camera_label}")
+    print()
+    print("1 - Chat")
+    print("2 - Voz")
+    print("3 - Gestos")
+    print("4 - Parear Android / outro dispositivo")
+    print("5 - Awareness / status")
+    print("6 - Configurar/reparar câmera")
+    print("7 - Rodar instalador completo")
+    print("0 - Sair")
+
+    if not sys.stdin.isatty():
+        print()
+        print("Comandos úteis:")
+        print("  astra chat")
+        print("  astra voice --engine fast")
+        print("  astra gestures")
+        print("  astra mesh pair-code")
+        print("  astra setup camera")
+        return
+
+    while True:
+        try:
+            choice = input("\nAstra> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+
+        commands = {
+            "1": ["chat"],
+            "2": ["voice", "--engine", "fast"],
+            "3": ["gestures"],
+            "4": ["mesh", "pair-code"],
+            "5": ["awareness"],
+            "6": ["setup", "camera"],
+            "7": ["setup", "full"],
+        }
+        if choice in {"0", "q", "quit", "sair"}:
+            return
+        command = commands.get(choice)
+        if not command:
+            print("Escolha 0-7.")
+            continue
+        subprocess.call([sys.executable, "-m", "astra_pc", *command])
 
 
 def _run_ask(args, config) -> None:
@@ -532,6 +647,15 @@ def build_parser() -> argparse.ArgumentParser:
     mesh_pair.add_argument("--name", default=None)
     mesh_pair.add_argument("--device-id", default=None)
 
+    setup = sub.add_parser("setup", help="guided Astra setup/repair")
+    setup_sub = setup.add_subparsers(dest="setup_command", required=True)
+    setup_camera = setup_sub.add_parser("camera", help="detect/install/configure camera or DroidCam")
+    setup_camera.add_argument("--yes", action="store_true")
+    setup_camera.add_argument("--allow-layering", action="store_true")
+    setup_full = setup_sub.add_parser("full", help="run the complete guided installer")
+    setup_full.add_argument("--yes", action="store_true")
+    setup_full.add_argument("--allow-layering", action="store_true")
+
     daemon = sub.add_parser("daemon", help="run the resident Astra core")
     daemon.add_argument("--voice", action="store_true", help="keep Astra listening in the daemon")
     daemon.add_argument("--no-speak", action="store_true", help="disable spoken replies")
@@ -584,13 +708,11 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    command = args.command or "gestures"
-    if args.command is None:
-        args.show_camera = False
-        args.dry_run = False
-        args.voice_model = None
+    command = args.command or "home"
 
     runners = {
+        "home": _run_home,
+        "setup": _run_setup,
         "gestures": _run_gestures,
         "ask": _run_ask,
         "see": _run_see,
