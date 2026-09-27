@@ -30,5 +30,7 @@ data class MeshUiState(
     val status: String = "Desconectado",
     val host: String = "",
     val discovered: List<DiscoveredNode> = emptyList(),
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+    val localAiReady: Boolean = false,
+    val localAiStatus: String = "Qwen local não instalado"
 )
