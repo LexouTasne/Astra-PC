@@ -62,12 +62,31 @@ class AstraDaemon:
         self.planner = AstraPlanner(self.brain, self.skills)
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
+        self.voice_assistant = None
 
-    def run(self) -> None:
+    def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra daemon starting on {self.host}:{self.port}")
         self.brain.preload()
         threading.Thread(target=self._warm_vision, daemon=True).start()
         threading.Thread(target=self._context_loop, daemon=True).start()
+
+        if voice:
+            from astra_pc.voice.assistant import AstraVoiceAssistant
+            voice_cfg = self.config.data.get("voice", {})
+            self.voice_assistant = AstraVoiceAssistant(
+                self.brain,
+                None,
+                wake_word=voice_cfg.get("wake_word", "astra"),
+                speak=not no_speak,
+                engine=voice_cfg.get("engine", "fast"),
+                whisper_model=voice_cfg.get("whisper_model", "base"),
+                language=voice_cfg.get("language", "pt"),
+            )
+            threading.Thread(
+                target=self.voice_assistant.run,
+                name="astra-resident-voice",
+                daemon=True,
+            ).start()
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -91,6 +110,11 @@ class AstraDaemon:
 
     def stop(self) -> None:
         self._stop.set()
+        if self.voice_assistant:
+            try:
+                self.voice_assistant.stop()
+            except Exception:
+                pass
 
     def _warm_vision(self) -> None:
         try:
