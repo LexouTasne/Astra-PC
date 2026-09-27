@@ -1136,6 +1136,28 @@ def enable_ydotool_service() -> bool:
     return False
 
 
+def droidcam_binary() -> Path | None:
+    names = ("droidcam", "droidcam-cli")
+    for name in names:
+        resolved = shutil.which(name)
+        if resolved:
+            return Path(resolved)
+    for candidate in (
+        Path("/usr/local/bin/droidcam"),
+        Path("/usr/local/bin/droidcam-cli"),
+        Path("/usr/bin/droidcam"),
+        Path("/usr/bin/droidcam-cli"),
+        Path("/opt/droidcam/droidcam"),
+    ):
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def droidcam_client_installed() -> bool:
+    return droidcam_binary() is not None
+
+
 def install_droidcam_windows() -> bool:
     if not command_exists("winget"):
         print("winget was not found.")
@@ -1194,6 +1216,10 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
     print("\n[DROIDCAM] Phone-as-webcam fallback for Linux.")
     print("The client is resolved from Dev47Apps' official Linux page at install time.")
 
+    already_installed = droidcam_client_installed()
+    if already_installed:
+        print("DroidCam client already installed:", droidcam_binary())
+
     try:
         url = _latest_droidcam_linux_url()
     except Exception as exc:
@@ -1221,16 +1247,26 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
             print("The official archive did not contain install-client.")
             return False
 
-        client_installer.chmod(client_installer.stat().st_mode | 0o111)
-        client_result = run(["sudo", str(client_installer)], cwd=target)
-        if client_result.returncode != 0:
-            # Dev47's installer may fail only at xdg-desktop-menu on immutable
-            # desktops after the actual binaries were already copied.
-            if command_exists("droidcam") or command_exists("droidcam-cli"):
-                print("DroidCam binaries are installed; desktop-menu integration failed and was ignored.")
-            else:
-                print("DroidCam client installation failed before a usable binary was installed.")
-                return False
+        if not already_installed:
+            client_installer.chmod(client_installer.stat().st_mode | 0o111)
+            client_result = run(["sudo", str(client_installer)], cwd=target)
+            if client_result.returncode != 0:
+                # Dev47 may fail at xdg-desktop-menu after /usr/local/bin files
+                # were already copied. Flatpak/VS Code terminals can also omit
+                # /usr/local/bin from PATH, so check the filesystem directly.
+                if droidcam_client_installed():
+                    print(
+                        "DroidCam binaries are installed; desktop-menu integration "
+                        "failed and was ignored."
+                    )
+                else:
+                    print(
+                        "DroidCam client installation failed before a usable binary "
+                        "was installed."
+                    )
+                    return False
+        else:
+            print("Skipping DroidCam client reinstall.")
 
         if not video_installer.exists():
             print("DroidCam client installed, but install-video was not present.")
