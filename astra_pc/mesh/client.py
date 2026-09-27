@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import hmac
 import json
 import ssl
 import uuid
@@ -84,7 +85,7 @@ class MeshHttpClient:
             cert = sock.getpeercert(binary_form=True)
             actual = hashlib.sha256(cert).hexdigest()
             expected = self.peer.fingerprint.lower().replace(":", "")
-            if not hashlib.compare_digest(actual.lower(), expected):
+            if not hmac.compare_digest(actual.lower(), expected):
                 raise FingerprintMismatch(
                     f"TLS fingerprint mismatch: expected {expected}, got {actual}"
                 )
