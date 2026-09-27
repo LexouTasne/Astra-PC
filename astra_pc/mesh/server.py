@@ -119,6 +119,23 @@ class AstraMeshServer:
             self._loop.call_soon_threadsafe(lambda: None)
         self.discovery.stop()
 
+    def send_to_device(
+        self,
+        device_id: str,
+        message: dict[str, Any],
+        required_scope: str | None = None,
+    ) -> bool:
+        if not self._loop:
+            return False
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_to_device(device_id, message, required_scope),
+            self._loop,
+        )
+        try:
+            return bool(future.result(timeout=3))
+        except Exception:
+            return False
+
     def broadcast(self, message: dict[str, Any], scope: str | None = None) -> None:
         if not self._loop:
             return
@@ -304,6 +321,20 @@ class AstraMeshServer:
             await ws.send_json(envelope("pong", ts=time.time()))
             return
 
+        if kind == "hello":
+            capabilities = payload.get("capabilities", [])
+            if not isinstance(capabilities, list):
+                capabilities = []
+            self.registry.update_metadata(
+                str(device["device_id"]),
+                capabilities=[str(x)[:80] for x in capabilities[:40]],
+                app_version=str(payload.get("app_version", ""))[:30],
+                os_version=str(payload.get("os_version", ""))[:50],
+                model=str(payload.get("model", ""))[:100],
+            )
+            await ws.send_json(envelope("ack", request_id=payload.get("request_id")))
+            return
+
         if kind == "ask":
             if not self.registry.has_scope(device, "assistant.ask"):
                 await ws.send_json(envelope("error", error="scope_denied"))
@@ -367,6 +398,30 @@ class AstraMeshServer:
             return
 
         await ws.send_json(envelope("error", error="unsupported_message_type"))
+
+    async def _send_to_device(
+        self,
+        device_id: str,
+        message: dict[str, Any],
+        required_scope: str | None,
+    ) -> bool:
+        with self._sockets_lock:
+            ws = self._sockets.get(device_id)
+        if not ws or ws.closed:
+            return False
+        device = next(
+            (d for d in self.registry.list_public() if d["device_id"] == device_id),
+            None,
+        )
+        if required_scope and (
+            not device or required_scope not in set(device.get("scopes", []))
+        ):
+            return False
+        try:
+            await ws.send_json(message)
+            return True
+        except Exception:
+            return False
 
     async def _broadcast(self, message: dict[str, Any], scope: str | None) -> None:
         with self._sockets_lock:
