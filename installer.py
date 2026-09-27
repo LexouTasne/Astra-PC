@@ -30,9 +30,9 @@ class Check:
 
 def banner() -> None:
     print("=" * 68)
-    print(" ASTRA-PC 0.2 INSTALLER / HARDWARE DIAGNOSTIC")
+    print(" ASTRA-PC 0.5 LOW-LATENCY INSTALLER / DIAGNOSTIC")
     print("=" * 68)
-    print("Gesture engine + optional offline voice + camera fallback.\n")
+    print("Gesture engine + fast voice + dual local AI + camera fallback.\n")
 
 
 def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
@@ -212,32 +212,37 @@ def start_ollama() -> bool:
     return False
 
 
-def ensure_astra_model(model: str = "qwen3-vl:2b-instruct") -> bool:
+def ensure_astra_models() -> bool:
     if not command_exists("ollama"):
         return False
     if not start_ollama():
         print("Ollama was installed but its local service is not reachable yet.")
         return False
 
-    print("\n[LOCAL AI] Astra default model:")
-    print(" ", model)
-    print("  multimodal: text + image")
-    print("  local Q4 model: about 1.9 GB")
-    print("  used for chat, screenshots, images and sampled video frames")
+    models = [
+        ("qwen3:0.6b", "fast text/voice brain", "~523 MB"),
+        ("qwen3-vl:2b-instruct", "vision/screen/video brain", "~1.9 GB"),
+    ]
 
     listed = subprocess.run(
         ["ollama", "list"],
         capture_output=True,
         text=True,
         check=False,
-    )
-    if model.split(":")[0] in listed.stdout and "2b" in listed.stdout:
-        print("Model already available locally.")
-        return True
+    ).stdout
 
-    print("Downloading the Astra model. This is a one-time download.")
-    return run(["ollama", "pull", model]).returncode == 0
-
+    ok = True
+    for model, role, size in models:
+        print(f"\n[LOCAL AI] {model}")
+        print(f"  role: {role}")
+        print(f"  size: {size}")
+        if model in listed:
+            print("  already installed")
+            continue
+        print("  downloading once...")
+        if run(["ollama", "pull", model]).returncode != 0:
+            ok = False
+    return ok
 
 def comfyui_available() -> bool:
     try:
@@ -289,19 +294,31 @@ def install_comfyui() -> bool:
 
 
 def install_voice() -> bool:
-    print("\n[VOICE] Optional offline voice components:")
-    print("  Vosk        -> speech-to-text without an API key")
-    print("  sounddevice -> microphone capture")
-    print("  pyttsx3     -> local text-to-speech")
-    return run([
+    print("\n[FAST VOICE] Low-latency offline voice stack:")
+    print("  faster-whisper -> accurate local transcription")
+    print("  WebRTC VAD     -> detects speech/silence in ~30 ms frames")
+    print("  sounddevice    -> microphone capture")
+    print("  pyttsx3/system TTS -> local spoken replies")
+    print("  Vosk remains available as a lightweight fallback")
+    fast = run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        f"{ROOT}[voice-fast]",
+    ]).returncode == 0
+    if not fast:
+        return False
+    run([
         sys.executable,
         "-m",
         "pip",
         "install",
         "-e",
         f"{ROOT}[voice]",
-    ]).returncode == 0
-
+    ])
+    return True
 
 def install_ydotool(pm: str | None) -> bool:
     if command_exists("ydotool"):
@@ -529,7 +546,7 @@ def main() -> int:
         return 2
 
     if not ((3, 11) <= sys.version_info[:2] < (3, 13)):
-        print("\nAstra 0.2 currently supports Python 3.11 or 3.12.")
+        print("\nAstra 0.5 currently supports Python 3.11 or 3.12.")
         return 2
 
     if ask("\nInstall/update Astra core dependencies?", True, args.yes):
@@ -560,9 +577,9 @@ def main() -> int:
             install_voice()
 
     if not args.no_ai:
-        if ask("\nInstall Astra local AI (Ollama + Qwen3-VL 2B)?", True, args.yes):
+        if ask("\nInstall Astra low-latency local AI (Qwen3 0.6B + Qwen3-VL 2B)?", True, args.yes):
             if install_ollama():
-                ensure_astra_model()
+                ensure_astra_models()
 
     if args.media:
         if comfyui_available():
@@ -585,7 +602,8 @@ def main() -> int:
     print("Cameras usable by OpenCV:", len(cameras))
     print("Desktop session:", session)
     print("ydotool:", "yes" if command_exists("ydotool") else "no")
-    print("Offline voice libraries:", "yes" if importlib.util.find_spec("vosk") else "no")
+    print("Fast voice:", "yes" if importlib.util.find_spec("faster_whisper") else "no")
+    print("Vosk fallback:", "yes" if importlib.util.find_spec("vosk") else "no")
     print("Ollama:", "yes" if command_exists("ollama") else "no")
     print("Ollama API:", "yes" if ollama_api_available() else "no")
     print("ComfyUI API:", "yes" if comfyui_available() else "no")
@@ -601,6 +619,10 @@ def main() -> int:
     print(f'  {sys.executable} -m astra_pc ask "O que voce consegue fazer?"')
     print("\nUnderstand the screen:")
     print(f'  {sys.executable} -m astra_pc screen "O que esta acontecendo aqui?"')
+    print("\nLatency benchmark:")
+    print(f"  {sys.executable} -m astra_pc benchmark")
+    print("\nFast voice:")
+    print(f"  {sys.executable} -m astra_pc voice --engine fast")
     return 0
 
 
