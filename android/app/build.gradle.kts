@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "dev.lex.astra"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "dev.lex.astra"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 8
         versionName = "0.8.0"
     }
