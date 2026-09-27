@@ -34,6 +34,10 @@ jobs:
           assert hasattr(mp.solutions, "hands")
           print("MediaPipe Solutions API OK")
           PY
+      - name: Bare Astra without camera must not crash
+        run: |
+          python -m astra_pc </dev/null
+          python -m astra_pc setup camera --help
       - name: Compile
         run: python -m compileall -q astra_pc installer.py
       - name: Test
