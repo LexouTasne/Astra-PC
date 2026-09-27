@@ -30,6 +30,7 @@ class AstraMeshServer:
         name: str,
         request_handler: Callable[[dict[str, Any]], dict[str, Any]],
         event_handler: Callable[[str, dict[str, Any]], None] | None = None,
+        sensor_rate_limit_hz: float = 30.0,
     ):
         self.root = Path(root).expanduser()
         self.root.mkdir(parents=True, exist_ok=True)
@@ -40,6 +41,9 @@ class AstraMeshServer:
         self.pairing = PairingManager(self.root / "pairing.json")
         self.request_handler = request_handler
         self.event_handler = event_handler
+        self.sensor_rate_limit_hz = max(1.0, min(120.0, float(sensor_rate_limit_hz)))
+        self._sensor_last: dict[tuple[str, str], float] = {}
+        self._pair_attempts: dict[str, list[float]] = {}
         self.discovery = MeshDiscovery(
             name=self.identity.name,
             port=self.port,
@@ -193,6 +197,12 @@ class AstraMeshServer:
         })
 
     async def _pair(self, request: web.Request) -> web.Response:
+        remote = request.remote or "unknown"
+        if not self._pair_attempt_allowed(remote):
+            return web.json_response(
+                {"ok": False, "error": "pairing_rate_limited"},
+                status=429,
+            )
         payload = await request.json()
         code = str(payload.get("code", "")).strip()
         device_id = str(payload.get("device_id", "")).strip()
@@ -233,7 +243,7 @@ class AstraMeshServer:
         if not self.registry.has_scope(device, "assistant.ask"):
             return web.json_response({"ok": False, "error": "scope_denied"}, status=403)
         payload = await request.json()
-        text = str(payload.get("text", "")).strip()
+        text = str(payload.get("text", "")).strip()[:16000]
         if not text:
             return web.json_response({"ok": False, "error": "empty_request"}, status=400)
         result = await asyncio.to_thread(
@@ -271,7 +281,11 @@ class AstraMeshServer:
         if not device:
             return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
 
-        ws = web.WebSocketResponse(heartbeat=20, receive_timeout=90)
+        ws = web.WebSocketResponse(
+            heartbeat=20,
+            receive_timeout=90,
+            max_msg_size=256 * 1024,
+        )
         await ws.prepare(request)
         device_id = str(device["device_id"])
         with self._sockets_lock:
@@ -339,7 +353,10 @@ class AstraMeshServer:
             if not self.registry.has_scope(device, "assistant.ask"):
                 await ws.send_json(envelope("error", error="scope_denied"))
                 return
-            text = str(payload.get("text", "")).strip()
+            text = str(payload.get("text", "")).strip()[:16000]
+            if not text:
+                await ws.send_json(envelope("error", error="empty_request"))
+                return
             result = await asyncio.to_thread(
                 self.request_handler,
                 {"type": "ask", "text": text, "mesh_device": self._public(device)},
@@ -370,8 +387,24 @@ class AstraMeshServer:
             if not self.registry.has_scope(device, "sensor.write"):
                 await ws.send_json(envelope("error", error="scope_denied"))
                 return
-            data = payload.get("data")
             sensor = str(payload.get("sensor", "unknown"))[:50]
+            device_id = str(device.get("device_id", "unknown"))
+            now = time.monotonic()
+            rate_key = (device_id, sensor)
+            min_interval = 1.0 / self.sensor_rate_limit_hz
+            previous = self._sensor_last.get(rate_key, 0.0)
+            if now - previous < min_interval:
+                return
+            self._sensor_last[rate_key] = now
+
+            data = payload.get("data")
+            if isinstance(data, list):
+                data = data[:32]
+            elif isinstance(data, dict):
+                data = dict(list(data.items())[:32])
+            elif not isinstance(data, (str, int, float, bool, type(None))):
+                data = str(data)[:1000]
+
             self._emit("mesh.sensor", {
                 "device": self._public(device),
                 "sensor": sensor,
@@ -422,6 +455,21 @@ class AstraMeshServer:
             return True
         except Exception:
             return False
+
+    def _pair_attempt_allowed(self, remote: str) -> bool:
+        now = time.monotonic()
+        window = 60.0
+        limit = 8
+        attempts = [
+            t for t in self._pair_attempts.get(remote, [])
+            if now - t < window
+        ]
+        if len(attempts) >= limit:
+            self._pair_attempts[remote] = attempts
+            return False
+        attempts.append(now)
+        self._pair_attempts[remote] = attempts
+        return True
 
     async def _broadcast(self, message: dict[str, Any], scope: str | None) -> None:
         with self._sockets_lock:
