@@ -43,6 +43,22 @@ def _run_gestures(args, config) -> None:
 
 
 def _run_ask(args, config) -> None:
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    try:
+        result = daemon_request(
+            {"type": "ask", "text": args.prompt},
+            host=daemon_cfg.get("host", "127.0.0.1"),
+            port=int(daemon_cfg.get("port", 8765)),
+            timeout=8.0,
+        )
+        if result.get("ok"):
+            print(result.get("message", ""))
+            return
+    except Exception:
+        pass
+
     brain, _ = _brain(config)
     print(brain.ask(args.prompt))
 
@@ -81,12 +97,14 @@ def _run_video(args, config) -> None:
 
 
 def _run_chat(args, config) -> None:
-    brain, client = _brain(config)
-    if not client.available():
-        raise SystemExit(
-            "Ollama is not reachable. Run installer.py or start 'ollama serve'."
-        )
-    print("Astra local chat. Type /exit to leave.")
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    brain = client = None
+    print("Astra chat. Uses resident daemon when available. Type /exit to leave.")
     while True:
         try:
             text = input("You> ").strip()
@@ -97,6 +115,26 @@ def _run_chat(args, config) -> None:
             continue
         if text in {"/exit", "/quit"}:
             return
+
+        try:
+            result = daemon_request(
+                {"type": "ask", "text": text},
+                host=host,
+                port=port,
+                timeout=30.0,
+            )
+            if result.get("ok"):
+                print("Astra>", result.get("message", ""))
+                continue
+        except Exception:
+            pass
+
+        if brain is None:
+            brain, client = _brain(config)
+            if not client.available():
+                raise SystemExit(
+                    "Ollama is not reachable. Run installer.py or start 'ollama serve'."
+                )
         print("Astra>", brain.ask(text))
 
 
@@ -122,7 +160,10 @@ def _run_voice(args, config) -> None:
 
 def _run_daemon(args, config) -> None:
     from .core.daemon import AstraDaemon
-    AstraDaemon(config).run()
+    AstraDaemon(config).run(
+        voice=args.voice,
+        no_speak=args.no_speak,
+    )
 
 
 def _run_ctl(args, config) -> None:
@@ -290,7 +331,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
     benchmark.add_argument("--rounds", type=int, default=3)
 
-    sub.add_parser("daemon", help="run the resident Astra core")
+    daemon = sub.add_parser("daemon", help="run the resident Astra core")
+    daemon.add_argument("--voice", action="store_true", help="keep Astra listening in the daemon")
+    daemon.add_argument("--no-speak", action="store_true", help="disable spoken replies")
 
     ctl = sub.add_parser("ctl", help="talk to the resident Astra daemon")
     ctl.add_argument("type", choices=["ping", "ask", "context", "stop"])
