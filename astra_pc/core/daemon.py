@@ -9,14 +9,24 @@ from typing import Any
 
 from astra_pc.accessibility import create_accessibility_provider
 from astra_pc.ai.agent import AstraBrain
+from astra_pc.ai.embeddings import EmbeddingClient
 from astra_pc.ai.ollama_client import OllamaClient
+from astra_pc.browser.dom import BrowserDOM
+from astra_pc.core.cache import ResponseCache
 from astra_pc.core.context import ContextEngine
 from astra_pc.core.events import EventBus
+from astra_pc.core.governor import PerformanceGovernor
 from astra_pc.core.memory import SessionMemory
 from astra_pc.core.permissions import PermissionLayer
 from astra_pc.core.planner import AstraPlanner
+from astra_pc.core.prediction import PredictionEngine
 from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
+from astra_pc.core.semantic_memory import SemanticMemory
+from astra_pc.perception.fusion import PerceptionFusion
+from astra_pc.perception.monitors import get_monitors
+from astra_pc.perception.reference import ReferenceResolver
+from astra_pc.screen.capture import capture_screen
 from astra_pc.skills.manager import SkillManager
 
 
@@ -28,19 +38,11 @@ class AstraDaemon:
         timeout = int(ai.get("timeout", 180))
         keep = ai.get("keep_alive", "-1")
 
-        self.text_client = OllamaClient(
-            ai.get("text_model", "qwen3:0.6b"),
-            host,
-            timeout,
-            keep,
-        )
-        self.vision_client = OllamaClient(
-            ai.get("vision_model", "qwen3-vl:2b-instruct"),
-            host,
-            timeout,
-            keep,
-        )
-        self.brain = AstraBrain(self.text_client, self.vision_client)
+        self.text_client = OllamaClient(ai.get("text_model", "qwen3:0.6b"), host, timeout, keep)
+        self.vision_client = OllamaClient(ai.get("vision_model", "qwen3-vl:2b-instruct"), host, timeout, keep)
+        strong_name = str(ai.get("strong_model", "")).strip()
+        self.strong_client = OllamaClient(strong_name, host, timeout, "5m") if strong_name else None
+        self.brain = AstraBrain(self.text_client, self.vision_client, self.strong_client)
 
         daemon_cfg = config.data.get("daemon", {})
         self.host = daemon_cfg.get("host", "127.0.0.1")
@@ -50,17 +52,43 @@ class AstraDaemon:
             "memory_path",
             str(Path.home() / ".local" / "share" / "astra-pc" / "astra.db"),
         )
+        cache_path = daemon_cfg.get(
+            "cache_path",
+            str(Path.home() / ".cache" / "astra-pc" / "responses.db"),
+        )
 
         self.bus = EventBus()
         self.memory = SessionMemory(memory_path)
-        self.context = ContextEngine(
-            profile=config.data.get("profiles", {}).get("active", "default")
+        embed_cfg = config.data.get("memory", {})
+        self.embedding_client = EmbeddingClient(
+            model=embed_cfg.get("embedding_model", "qwen3-embedding:0.6b"),
+            host=host,
+            timeout=int(embed_cfg.get("embedding_timeout", 25)),
         )
+        self.semantic = SemanticMemory(memory_path, self.embedding_client)
+        self.cache = ResponseCache(cache_path, ttl=int(daemon_cfg.get("cache_ttl", 86400)))
+
+        stored_profile = self.memory.get("active_profile", None)
+        active_profile = stored_profile or config.data.get("profiles", {}).get("active", "default")
+        self.context = ContextEngine(profile=active_profile)
         self.accessibility = create_accessibility_provider()
         self.permissions = PermissionLayer()
-        self.skills = SkillManager(self.permissions)
+        plugin_dir = config.data.get("skills", {}).get(
+            "plugin_dir",
+            str(Path.home() / ".local" / "share" / "astra-pc" / "skills"),
+        )
+        self.skills = SkillManager(self.permissions, plugin_dir=plugin_dir)
         self.routines = RoutineManager(self.memory, self.skills)
         self.planner = AstraPlanner(self.brain, self.skills)
+        self.prediction = PredictionEngine(self.memory)
+        self.reference = ReferenceResolver()
+        self.fusion = PerceptionFusion(self.brain)
+        self.browser = BrowserDOM(config.data.get("browser", {}).get("cdp", "http://127.0.0.1:9222"))
+        self.governor = PerformanceGovernor(
+            cpu_high=float(config.data.get("performance", {}).get("cpu_high", 85)),
+            ram_high=float(config.data.get("performance", {}).get("ram_high", 88)),
+        )
+
         proactive_cfg = config.data.get("proactive", {})
         self.proactive = ProactiveMonitor(
             self.bus,
@@ -69,12 +97,15 @@ class AstraDaemon:
             interval=float(proactive_cfg.get("interval", 5)),
         )
         self.bus.subscribe("*", self._remember_event)
+        self.bus.subscribe("system.cpu_high", self._notify_system_event)
+        self.bus.subscribe("system.ram_high", self._notify_system_event)
+
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
-        print(f"Astra daemon starting on {self.host}:{self.port}")
+        print(f"Astra 0.7 daemon starting on {self.host}:{self.port}")
         self.brain.preload()
         threading.Thread(target=self._warm_vision, daemon=True).start()
         threading.Thread(target=self._context_loop, daemon=True).start()
@@ -91,6 +122,7 @@ class AstraDaemon:
                 whisper_model=voice_cfg.get("whisper_model", "base"),
                 language=voice_cfg.get("language", "pt"),
                 request_handler=self._voice_request,
+                conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
             )
             threading.Thread(
                 target=self.voice_assistant.run,
@@ -178,6 +210,18 @@ class AstraDaemon:
             },
         )
 
+    def _notify_system_event(self, event) -> None:
+        try:
+            value = round(float(event.payload.get("value", 0)), 1)
+            label = "CPU" if "cpu" in event.name else "RAM"
+            self.skills.execute(
+                "notifications",
+                "notify",
+                {"title": "Astra", "message": f"{label} está em {value}%."},
+            )
+        except Exception:
+            pass
+
     def _handle_connection(self, conn: socket.socket) -> None:
         with conn:
             file = conn.makefile("rwb")
@@ -196,19 +240,50 @@ class AstraDaemon:
         kind = str(request.get("type", "ask"))
 
         if kind == "ping":
-            return {"ok": True, "version": "0.6", "status": "ready"}
+            return {"ok": True, "version": "0.7", "status": "ready"}
 
         if kind == "stop":
             self.stop()
             return {"ok": True, "message": "stopping"}
 
-        if kind == "context":
+        if kind in {"context", "awareness"}:
+            perf = self.governor.state()
             return {
                 "ok": True,
                 "context": self.context.current.as_dict(),
                 "accessibility": self._accessibility_cache[:80],
+                "monitors": [m.as_dict() for m in get_monitors()],
                 "routines": self.routines.list(),
+                "predicted_next_windows": self.prediction.next_windows(
+                    self.context.current.active_window
+                ),
+                "performance": {
+                    "mode": perf.mode,
+                    "cpu": perf.cpu,
+                    "ram": perf.ram,
+                    "video_frames": perf.video_frames,
+                    "vision_max_width": perf.vision_max_width,
+                },
+                "skills": self.skills.describe(),
             }
+
+        if kind == "memory.search":
+            query = str(request.get("text", "")).strip()
+            return {"ok": True, "results": self.semantic.search(query, limit=8)}
+
+        if kind == "screen":
+            question = str(request.get("text", "")).strip() or "O que há na minha tela?"
+            shot = capture_screen()
+            try:
+                answer = self.fusion.describe(shot, self._accessibility_cache, question)
+            finally:
+                shot.unlink(missing_ok=True)
+            self.semantic.remember(
+                f"Pergunta de tela: {question}\nResposta: {answer}",
+                kind="vision",
+                metadata={"window": self.context.current.active_window},
+            )
+            return {"ok": True, "message": answer}
 
         if kind == "profile":
             profile = str(request.get("profile", "")).strip() or "default"
@@ -263,10 +338,34 @@ class AstraDaemon:
             message = results[-1].get("message", "") if results else "Rotina vazia."
             return {"ok": ok, "message": message, "results": results}
 
+        cacheable = not any(
+            word in lowered
+            for word in ("agora", "hoje", "tela", "isso", "isto", "aqui", "status", "processo")
+        )
+        cache_key = self.cache.key(text, self.context.current.profile)
+        if cacheable:
+            cached = self.cache.get(cache_key)
+            if cached is not None:
+                return {"ok": True, "message": cached, "cached": True}
+
+        memories = self.semantic.search(text, limit=5)
+        reference = self.reference.resolve(
+            text,
+            active_window=self.context.current.active_window,
+            accessibility=self._accessibility_cache,
+        )
+        browser_dom = []
+        title = self.context.current.active_window.lower()
+        if any(x in title for x in ("chrome", "chromium", "firefox", "brave", "edge")):
+            browser_dom = self.browser.snapshot(limit=45)
+
         plan = self.planner.plan(
             text,
             self.context.current,
             self._accessibility_cache,
+            memories=memories,
+            reference=reference,
+            browser_dom=browser_dom,
         )
         self.memory.add("request", {"text": text, "plan": plan})
 
@@ -277,12 +376,28 @@ class AstraDaemon:
                 dict(plan.get("args", {})),
                 confirmed=bool(request.get("confirmed", False)),
             )
-            return {
+            reply = {
                 "ok": result.ok,
                 "message": result.message,
                 "data": result.data,
                 "plan": plan,
             }
+            self.semantic.remember(
+                f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
+                kind="action",
+                metadata={"ok": result.ok, "profile": self.context.current.profile},
+            )
+            return reply
 
         answer = str(plan.get("answer") or self.brain.ask(text))
+        self.semantic.remember(
+            f"Usuário: {text}\nAstra: {answer}",
+            kind="conversation",
+            metadata={
+                "profile": self.context.current.profile,
+                "window": self.context.current.active_window,
+            },
+        )
+        if cacheable and answer:
+            self.cache.put(cache_key, answer)
         return {"ok": True, "message": answer, "plan": plan}
