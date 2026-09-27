@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.7.0"
-description = "Awareness-first resident local multimodal desktop assistant"
+version = "0.8.0"
+description = "Distributed local-first multimodal assistant with Astra Mesh"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
@@ -22,6 +22,12 @@ dependencies = [
 
 [project.optional-dependencies]
 gesture = ["mediapipe>=0.10.14"]
+mesh = [
+  "aiohttp>=3.12",
+  "cryptography>=45",
+  "zeroconf>=0.148",
+  "qrcode[pil]>=8"
+]
 voice = ["vosk>=0.3.45", "sounddevice>=0.4.7", "pyttsx3>=2.90"]
 voice-fast = [
   "faster-whisper>=1.1.0",
