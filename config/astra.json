@@ -108,5 +108,11 @@
   "accessibility": {
     "enabled": true,
     "max_elements": 100
+  },
+  "proactive": {
+    "enabled": true,
+    "interval": 5,
+    "cpu_threshold": 92,
+    "ram_threshold": 92
   }
 }
