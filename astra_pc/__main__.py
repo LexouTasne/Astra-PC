@@ -299,6 +299,71 @@ def _run_mobile(args, config) -> None:
     ).run()
 
 
+def _run_mesh(args, config) -> None:
+    import json
+    import socket
+    from .core.ipc import daemon_request
+    from .mesh.discovery import discover
+    from .mesh.client import MeshHttpClient, MeshPeer
+    from .mesh.qr import render_terminal_qr
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    if args.mesh_command == "pair-code":
+        payload = {"type": "mesh.pair_code", "ttl": args.ttl}
+        if args.qr:
+            payload["qr"] = str(args.qr)
+        result = daemon_request(payload, host=host, port=port)
+        if result.get("ok"):
+            print(f"Pairing code: {result.get('code')}")
+            print(f"Host: {result.get('host')}:{result.get('port')}")
+            print(f"Fingerprint: {result.get('fingerprint')}")
+            print(f"Expires: {result.get('expires_at')}")
+            print()
+            render_terminal_qr(str(result.get("uri", "")))
+            if result.get("qr_path"):
+                print("\nQR image:", result["qr_path"])
+        else:
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.mesh_command == "devices":
+        result = daemon_request({"type": "mesh.devices"}, host=host, port=port)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.mesh_command == "revoke":
+        result = daemon_request(
+            {"type": "mesh.revoke", "device_id": args.device_id},
+            host=host,
+            port=port,
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    if args.mesh_command == "discover":
+        print(json.dumps(discover(args.timeout_ms), ensure_ascii=False, indent=2))
+        return
+
+    if args.mesh_command == "pair":
+        peer = MeshPeer(
+            host=args.host,
+            port=args.port,
+            fingerprint=args.fingerprint,
+        )
+        client = MeshHttpClient(peer)
+        result = client.pair(
+            args.code,
+            name=args.name or socket.gethostname(),
+            device_id=args.device_id,
+            platform="desktop",
+        )
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
 
@@ -428,6 +493,29 @@ def build_parser() -> argparse.ArgumentParser:
     mobile.add_argument("--port", type=int, default=None)
     mobile.add_argument("--token", default=None)
 
+    mesh = sub.add_parser("mesh", help="Astra Mesh multi-device networking")
+    mesh_sub = mesh.add_subparsers(dest="mesh_command", required=True)
+
+    mesh_pair_code = mesh_sub.add_parser("pair-code", help="create a one-time Android/PC pairing code")
+    mesh_pair_code.add_argument("--ttl", type=int, default=300)
+    mesh_pair_code.add_argument("--qr", type=Path, default=None)
+
+    mesh_sub.add_parser("devices", help="list paired Mesh devices")
+
+    mesh_revoke = mesh_sub.add_parser("revoke", help="revoke a paired device")
+    mesh_revoke.add_argument("device_id")
+
+    mesh_discover = mesh_sub.add_parser("discover", help="discover Astra Mesh nodes on the LAN")
+    mesh_discover.add_argument("--timeout-ms", type=int, default=1800)
+
+    mesh_pair = mesh_sub.add_parser("pair", help="pair this desktop to another Astra Mesh node")
+    mesh_pair.add_argument("host")
+    mesh_pair.add_argument("port", type=int)
+    mesh_pair.add_argument("fingerprint")
+    mesh_pair.add_argument("code")
+    mesh_pair.add_argument("--name", default=None)
+    mesh_pair.add_argument("--device-id", default=None)
+
     daemon = sub.add_parser("daemon", help="run the resident Astra core")
     daemon.add_argument("--voice", action="store_true", help="keep Astra listening in the daemon")
     daemon.add_argument("--no-speak", action="store_true", help="disable spoken replies")
@@ -500,6 +588,7 @@ def main() -> None:
         "learn": _run_learn,
         "replay": _run_replay,
         "mobile": _run_mobile,
+        "mesh": _run_mesh,
         "daemon": _run_daemon,
         "ctl": _run_ctl,
         "profile": _run_profile,
