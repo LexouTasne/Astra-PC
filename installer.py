@@ -28,10 +28,10 @@ class Check:
 
 
 def banner() -> None:
-    print("=" * 66)
-    print(" ASTRA-PC INSTALLER / DIAGNOSTIC")
-    print("=" * 66)
-    print("Local-first setup for gesture control, voice and cameras.\n")
+    print("=" * 68)
+    print(" ASTRA-PC 0.2 INSTALLER / HARDWARE DIAGNOSTIC")
+    print("=" * 68)
+    print("Gesture engine + optional offline voice + camera fallback.\n")
 
 
 def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
@@ -45,9 +45,9 @@ def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
     return answer in {"y", "yes", "s", "sim"}
 
 
-def run(cmd: list[str], *, check: bool = False) -> subprocess.CompletedProcess:
+def run(cmd: list[str]) -> subprocess.CompletedProcess:
     print("  $", " ".join(cmd))
-    return subprocess.run(cmd, check=check)
+    return subprocess.run(cmd, check=False)
 
 
 def command_exists(name: str) -> bool:
@@ -75,23 +75,28 @@ def basic_camera_candidates() -> list[str]:
     system = platform.system()
     if system == "Linux":
         return sorted(glob.glob("/dev/video*"))
+
     if system == "Windows":
         ps = shutil.which("powershell") or shutil.which("pwsh")
         if ps:
             cmd = [
-                ps, "-NoProfile", "-Command",
+                ps,
+                "-NoProfile",
+                "-Command",
                 "Get-PnpDevice -PresentOnly | Where-Object { "
                 "$_.Class -eq 'Camera' -or $_.FriendlyName -match 'camera|webcam|droidcam' "
                 "} | Select-Object -ExpandProperty FriendlyName",
             ]
             p = subprocess.run(cmd, capture_output=True, text=True)
             return [x.strip() for x in p.stdout.splitlines() if x.strip()]
+
     return []
 
 
 def probe_cameras_opencv(limit: int = 8) -> list[tuple[int, int, int]]:
     if importlib.util.find_spec("cv2") is None:
         return []
+
     import cv2
 
     found: list[tuple[int, int, int]] = []
@@ -111,8 +116,10 @@ def probe_cameras_opencv(limit: int = 8) -> list[tuple[int, int, int]]:
 def probe_microphones() -> list[str]:
     if importlib.util.find_spec("sounddevice") is None:
         return []
+
     try:
         import sounddevice as sd
+
         result = []
         for dev in sd.query_devices():
             if int(dev.get("max_input_channels", 0)) > 0:
@@ -123,21 +130,26 @@ def probe_microphones() -> list[str]:
 
 
 def install_python_core() -> bool:
-    print("\n[CORE] Installing Astra gesture engine dependencies")
-    print("  - OpenCV: camera capture")
-    print("  - MediaPipe: hand landmark tracking")
-    print("  - pynput: mouse/keyboard input on Windows/X11")
-    print("  - NumPy: lightweight numeric operations")
-    p = run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)])
-    return p.returncode == 0
+    print("\n[CORE] Components required by the gesture engine:")
+    print("  OpenCV    -> capture frames from the camera")
+    print("  MediaPipe -> track 21 hand landmarks")
+    print("  pynput    -> native mouse/keyboard actions on Windows/X11")
+    print("  NumPy     -> low-overhead numeric processing")
+    return run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)]).returncode == 0
 
 
 def install_voice() -> bool:
-    print("\n[VOICE] Installing optional offline voice stack")
-    print("  - Vosk: offline speech-to-text")
-    print("  - sounddevice: microphone capture")
-    p = run([sys.executable, "-m", "pip", "install", "-e", f"{ROOT}[voice]"])
-    return p.returncode == 0
+    print("\n[VOICE] Optional offline voice components:")
+    print("  Vosk        -> speech-to-text without an API key")
+    print("  sounddevice -> microphone capture")
+    return run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        f"{ROOT}[voice]",
+    ]).returncode == 0
 
 
 def install_ydotool(pm: str | None) -> bool:
@@ -145,12 +157,12 @@ def install_ydotool(pm: str | None) -> bool:
         print("ydotool already installed.")
         return True
 
-    print("\n[WAYLAND] ydotool injects mouse/keyboard events on Wayland.")
+    print("\n[WAYLAND] ydotool is used for low-latency mouse/keyboard injection.")
     if pm == "dnf":
         return run(["sudo", "dnf", "install", "-y", "ydotool"]).returncode == 0
     if pm == "rpm-ostree":
-        print("Bazzite/Fedora Atomic detected.")
-        print("This layers the Fedora ydotool package and may require a reboot.")
+        print("Fedora Atomic/Bazzite detected.")
+        print("Layering ydotool may require a reboot before it becomes available.")
         return run(["sudo", "rpm-ostree", "install", "ydotool"]).returncode == 0
     if pm == "apt":
         return run(["sudo", "apt", "install", "-y", "ydotool"]).returncode == 0
@@ -159,7 +171,7 @@ def install_ydotool(pm: str | None) -> bool:
     if pm == "zypper":
         return run(["sudo", "zypper", "--non-interactive", "install", "ydotool"]).returncode == 0
 
-    print("Automatic ydotool installation is not available for this system.")
+    print("Automatic ydotool installation is unavailable for this system.")
     return False
 
 
@@ -168,42 +180,68 @@ def enable_ydotool_service() -> None:
         return
     if not command_exists("ydotool"):
         return
-    print("\n[WAYLAND] Enabling ydotool daemon...")
+
+    print("\n[WAYLAND] Enabling ydotoold...")
     p = run(["sudo", "systemctl", "enable", "--now", "ydotool"])
     if p.returncode != 0:
-        print("Could not enable ydotool service automatically.")
-        print("You can try: sudo systemctl enable --now ydotool")
+        print("Could not enable ydotool automatically.")
+        print("Try manually: sudo systemctl enable --now ydotool")
 
 
 def install_droidcam_windows() -> bool:
     if not command_exists("winget"):
-        print("winget was not found. Open the official DroidCam page:")
-        print("https://www.dev47apps.com/droidcam/windows/")
+        print("winget was not found.")
+        print("Official installer: https://www.dev47apps.com/droidcam/windows/")
         return False
-    print("\n[DROIDCAM] Installing DroidCam Classic through winget.")
+
+    print("\n[DROIDCAM] Installing DroidCam Classic using winget.")
     return run([
-        "winget", "install", "--id", "dev47apps.DroidCam", "--exact",
-        "--accept-source-agreements", "--accept-package-agreements"
+        "winget",
+        "install",
+        "--id",
+        "dev47apps.DroidCam",
+        "--exact",
+        "--accept-source-agreements",
+        "--accept-package-agreements",
     ]).returncode == 0
 
 
 def _latest_droidcam_linux_url() -> str:
     page = urllib.request.urlopen(
-        "https://www.dev47apps.com/droidcam/linux/", timeout=15
+        "https://www.dev47apps.com/droidcam/linux/",
+        timeout=15,
     ).read().decode("utf-8", "ignore")
+
     marker = "https://files.dev47apps.net/linux/droidcam_"
     start = page.find(marker)
     if start < 0:
-        raise RuntimeError("Could not find current DroidCam Linux download URL")
+        raise RuntimeError("current DroidCam Linux download was not found")
     end = page.find(".zip", start)
     if end < 0:
-        raise RuntimeError("Could not parse DroidCam Linux download URL")
+        raise RuntimeError("DroidCam Linux download URL could not be parsed")
     return page[start:end + 4]
 
 
-def install_droidcam_linux(pm: str | None) -> bool:
+def install_linux_build_tools(pm: str | None) -> None:
+    print("\n[DROIDCAM VIDEO] A virtual V4L2 camera requires kernel/build tools.")
+    if pm == "dnf":
+        run(["sudo", "dnf", "install", "-y", "gcc", "make", "kernel-devel", "kernel-headers"])
+    elif pm == "apt":
+        run(["sudo", "apt", "install", "-y", "gcc", "make", f"linux-headers-{platform.release()}"])
+    elif pm == "pacman":
+        run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "base-devel", "linux-headers"])
+    elif pm == "zypper":
+        run(["sudo", "zypper", "--non-interactive", "install", "gcc", "make", "kernel-devel"])
+    elif pm == "rpm-ostree":
+        print("Bazzite/Fedora Atomic uses an immutable base system.")
+        print("Kernel-module build dependencies can require package layering + reboot.")
+        run(["sudo", "rpm-ostree", "install", "gcc", "make", "kernel-devel", "kernel-headers"])
+
+
+def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
     print("\n[DROIDCAM] Phone-as-webcam fallback for Linux.")
-    print("Astra will download the current client from Dev47Apps' official page.")
+    print("The client is resolved from Dev47Apps' official Linux page at install time.")
+
     try:
         url = _latest_droidcam_linux_url()
     except Exception as exc:
@@ -211,47 +249,86 @@ def install_droidcam_linux(pm: str | None) -> bool:
         print("Official instructions: https://www.dev47apps.com/droidcam/linux/")
         return False
 
-    if pm in {"dnf", "rpm-ostree"} and not command_exists("unzip"):
+    if not command_exists("unzip"):
         if pm == "dnf":
             run(["sudo", "dnf", "install", "-y", "unzip"])
-        else:
+        elif pm == "apt":
+            run(["sudo", "apt", "install", "-y", "unzip"])
+        elif pm == "pacman":
+            run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "unzip"])
+        elif pm == "rpm-ostree":
+            print("unzip is missing on this Atomic system.")
+            print("Install it with rpm-ostree or extract the archive manually after reboot.")
             run(["sudo", "rpm-ostree", "install", "unzip"])
-    elif pm == "apt" and not command_exists("unzip"):
-        run(["sudo", "apt", "install", "-y", "unzip"])
 
     with tempfile.TemporaryDirectory(prefix="astra-droidcam-") as td:
         archive = Path(td) / "droidcam.zip"
         target = Path(td) / "droidcam"
-        print("Downloading:", url)
+
+        print("Downloading official package:")
+        print(" ", url)
         urllib.request.urlretrieve(url, archive)
+
         with zipfile.ZipFile(archive) as zf:
             zf.extractall(target)
-        installer = target / "install-client"
-        if not installer.exists():
-            print("DroidCam archive did not contain install-client.")
+
+        client_installer = target / "install-client"
+        video_installer = target / "install-video"
+
+        if not client_installer.exists():
+            print("The official archive did not contain install-client.")
             return False
-        installer.chmod(installer.stat().st_mode | 0o111)
-        return run(["sudo", str(installer)]).returncode == 0
+
+        client_installer.chmod(client_installer.stat().st_mode | 0o111)
+        if run(["sudo", str(client_installer)]).returncode != 0:
+            print("DroidCam client installation failed.")
+            return False
+
+        if not video_installer.exists():
+            print("DroidCam client installed, but install-video was not present.")
+            return True
+
+        print("\nDroidCam's Linux client is installed.")
+        print("For Astra to see the phone as /dev/video*, DroidCam normally needs")
+        print("a V4L2 loopback camera driver.")
+        if not ask("Install DroidCam's video driver too?", True, assume_yes):
+            return True
+
+        install_linux_build_tools(pm)
+        video_installer.chmod(video_installer.stat().st_mode | 0o111)
+        result = run(["sudo", str(video_installer)])
+
+        if result.returncode != 0:
+            print("\nThe video driver could not be installed automatically.")
+            print("Common reasons: missing matching kernel headers or Secure Boot.")
+            if pm == "rpm-ostree":
+                print("On Bazzite/Fedora Atomic, reboot after package layering and run installer.py again.")
+            return True
+
+        return True
 
 
 def maybe_install_droidcam(pm: str | None, assume_yes: bool) -> None:
-    print("\nNo working camera was detected.")
-    print("Astra needs a camera for hand tracking.")
-    print("You can connect a USB webcam, use your laptop camera, or use a phone.")
-    if not ask("Install DroidCam so a phone can be used as the camera?", True, assume_yes):
+    print("\n[CAMERA FALLBACK]")
+    print("No working camera was detected.")
+    print("Astra's gesture engine requires a webcam-like video source.")
+    print("You can connect a webcam, use a built-in camera, or turn a phone into one.")
+
+    if not ask("Install DroidCam as a phone-camera fallback?", True, assume_yes):
         return
+
     if platform.system() == "Windows":
         install_droidcam_windows()
     elif platform.system() == "Linux":
-        install_droidcam_linux(pm)
+        install_droidcam_linux(pm, assume_yes)
     else:
-        print("Automatic DroidCam installation is only implemented for Windows/Linux.")
+        print("Automatic DroidCam installation is currently implemented for Windows/Linux.")
 
 
 def summary(checks: list[Check]) -> None:
-    print("\n" + "=" * 66)
+    print("\n" + "=" * 68)
     print(" ASTRA DIAGNOSTIC")
-    print("=" * 66)
+    print("=" * 68)
     for c in checks:
         icon = "OK " if c.ok else ("ERR" if c.required else "WARN")
         print(f"[{icon}] {c.name}: {c.detail}")
@@ -261,16 +338,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Astra-PC guided installer")
     parser.add_argument("--yes", action="store_true", help="accept recommended installations")
     parser.add_argument("--no-voice", action="store_true", help="skip offline voice dependencies")
-    parser.add_argument("--diagnose-only", action="store_true", help="do not install anything")
+    parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     args = parser.parse_args()
 
     banner()
+
     system = platform.system()
     session = detect_session()
     pm = detect_package_manager()
 
     checks = [
         Check("Operating system", system in {"Windows", "Linux"}, f"{system} {platform.release()}"),
+        Check("Architecture", True, platform.machine(), False),
         Check("Python", sys.version_info >= (3, 11), platform.python_version()),
         Check("Desktop session", True, session, False),
         Check("Package manager", pm is not None, pm or "not detected", False),
@@ -284,19 +363,33 @@ def main() -> int:
         False,
     ))
 
+    if system == "Linux" and session.lower() == "wayland":
+        checks.append(Check(
+            "Wayland input backend",
+            command_exists("ydotool"),
+            "ydotool found" if command_exists("ydotool") else "ydotool missing",
+            False,
+        ))
+
     summary(checks)
+
     if args.diagnose_only:
         return 0
 
-    if sys.version_info < (3, 11):
-        print("\nPython 3.11+ is required. Install a supported Python version first.")
+    if system not in {"Windows", "Linux"}:
+        print("\nAstra currently targets Windows and Linux.")
         return 2
 
-    if not ask("\nInstall/update Astra core dependencies?", True, args.yes):
+    if not ((3, 11) <= sys.version_info[:2] < (3, 13)):
+        print("\nAstra 0.2 currently supports Python 3.11 or 3.12.")
+        return 2
+
+    if ask("\nInstall/update Astra core dependencies?", True, args.yes):
+        if not install_python_core():
+            print("Core installation failed.")
+            return 3
+    else:
         print("Core dependency installation skipped.")
-    elif not install_python_core():
-        print("Core installation failed.")
-        return 3
 
     cameras = probe_cameras_opencv()
     if cameras:
@@ -308,14 +401,14 @@ def main() -> int:
 
     if system == "Linux" and session.lower() == "wayland":
         if not command_exists("ydotool"):
-            if ask("\nInstall ydotool for low-latency Wayland input?", True, args.yes):
+            if ask("\nInstall ydotool for Wayland gesture control?", True, args.yes):
                 if install_ydotool(pm):
                     enable_ydotool_service()
         else:
             enable_ydotool_service()
 
     if not args.no_voice:
-        if ask("\nInstall offline voice support (Vosk + microphone capture)?", True, args.yes):
+        if ask("\nInstall offline voice support?", True, args.yes):
             install_voice()
 
     microphones = probe_microphones()
@@ -324,18 +417,23 @@ def main() -> int:
         for name in microphones[:8]:
             print(" ", name)
     else:
-        print("  No microphone detected yet, or sounddevice was not installed.")
+        print("  No usable microphone reported.")
 
-    print("\n[FINAL CHECK]")
+    print("\n" + "=" * 68)
+    print(" FINAL CHECK")
+    print("=" * 68)
     cameras = probe_cameras_opencv()
-    print("  Cameras:", len(cameras))
-    print("  Session:", session)
-    print("  ydotool:", "yes" if command_exists("ydotool") else "no")
-    print("  Voice libs:", "yes" if importlib.util.find_spec("vosk") else "no")
+    print("Cameras usable by OpenCV:", len(cameras))
+    print("Desktop session:", session)
+    print("ydotool:", "yes" if command_exists("ydotool") else "no")
+    print("Offline voice libraries:", "yes" if importlib.util.find_spec("vosk") else "no")
 
-    print("\nRecommended first run:")
+    if system == "Linux" and pm == "rpm-ostree":
+        print("\nNOTE: package layering on Bazzite/Fedora Atomic may require a reboot.")
+
+    print("\nSafe first run:")
     print(f"  {sys.executable} -m astra_pc --dry-run --show-camera")
-    print("\nThen enable real control:")
+    print("\nReal gesture control:")
     print(f"  {sys.executable} -m astra_pc")
     return 0
 
