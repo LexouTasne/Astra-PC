@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import re
+import time
 
+import cv2
+import numpy as np
 from PIL import Image
 
+from astra_pc.accessibility import create_accessibility_provider
 from astra_pc.screen.capture import capture_screen
 
 from .ollama_client import OllamaClient
@@ -12,24 +16,23 @@ from .tools import DesktopTools
 
 
 AGENT_PROMPT = """You are Astra's visual desktop planner.
-You receive a goal and a fresh screenshot. Choose exactly ONE next action.
-Return JSON only. No markdown, no explanation outside JSON.
+You receive a goal, a screenshot, structural UI elements and verification history.
+Choose exactly ONE next action. Return JSON only.
 
 Allowed actions:
-{"action":"click","x":123,"y":456,"reason":"..."}
-{"action":"right_click","x":123,"y":456,"reason":"..."}
-{"action":"type","text":"...","reason":"..."}
-{"action":"hotkey","keys":["ctrl","l"],"reason":"..."}
-{"action":"scroll","amount":-3,"reason":"..."}
-{"action":"open_url","url":"https://...","reason":"..."}
-{"action":"wait","seconds":1,"reason":"..."}
+{"action":"click","x":123,"y":456,"reason":"...","expected":"what should visibly change"}
+{"action":"right_click","x":123,"y":456,"reason":"...","expected":"..."}
+{"action":"type","text":"...","reason":"...","expected":"..."}
+{"action":"hotkey","keys":["ctrl","l"],"reason":"...","expected":"..."}
+{"action":"scroll","amount":-3,"reason":"...","expected":"..."}
+{"action":"open_url","url":"https://...","reason":"...","expected":"..."}
+{"action":"wait","seconds":1,"reason":"...","expected":"..."}
 {"action":"done","message":"...","reason":"..."}
 
-Coordinates are screenshot pixels. Never invent UI elements.
-Prefer keyboard shortcuts when clearly safer and more reliable.
-Never use terminal or shell commands.
-Never purchase, delete files, send messages, change passwords, or confirm irreversible actions.
-If the goal requires one of those, return done and explain that manual confirmation is needed.
+Use structural UI names/roles when they are available. Coordinates are screenshot pixels.
+Never invent UI elements. Prefer keyboard shortcuts when clearly safer and more reliable.
+Never use terminal or shell commands. Never purchase, delete files, send messages,
+change passwords, or confirm irreversible actions.
 """
 
 
@@ -38,36 +41,56 @@ class VisualDesktopAgent:
         self.client = client
         self.max_steps = max_steps
         self.tools = DesktopTools()
+        self.accessibility = create_accessibility_provider()
 
     def run(self, goal: str, auto_confirm: bool = False) -> str:
         history: list[str] = []
+        previous_signature = None
 
         for step in range(1, self.max_steps + 1):
             screenshot = capture_screen()
             try:
                 with Image.open(screenshot) as im:
                     width, height = im.size
+                signature = self._signature(screenshot)
+                ui = []
+                if self.accessibility.available():
+                    try:
+                        ui = [x.as_dict() for x in self.accessibility.snapshot(limit=70)]
+                    except Exception:
+                        ui = []
+
+                changed = None
+                if previous_signature is not None:
+                    changed = self._difference(previous_signature, signature)
 
                 prompt = (
                     f"Goal: {goal}\n"
                     f"Screenshot size: {width}x{height}\n"
-                    f"Previous actions: {history[-5:] or ['none']}\n"
-                    "Choose the next single action."
+                    f"Structural UI: {json.dumps(ui[:50], ensure_ascii=False)}\n"
+                    f"Verification history: {history[-6:] or ['none']}\n"
+                    f"Screen change since previous step: {changed}\n"
+                    "Choose the next single action. If the goal is already achieved, return done."
                 )
                 raw = self.client.chat(
                     prompt,
                     images=[screenshot],
                     system=AGENT_PROMPT,
-                    temperature=0.1,
+                    temperature=0.05,
                     num_ctx=12288,
+                    num_predict=180,
                 )
+                previous_signature = signature
             finally:
                 screenshot.unlink(missing_ok=True)
 
             action = self._parse_action(raw)
             name = str(action.get("action", ""))
             reason = str(action.get("reason", ""))
+            expected = str(action.get("expected", ""))
             print(f"[Astra agent {step}/{self.max_steps}] {name}: {reason}")
+            if expected:
+                print(f"  expected: {expected}")
 
             if name == "done":
                 return str(action.get("message", "Done."))
@@ -78,11 +101,38 @@ class VisualDesktopAgent:
                     return "Stopped by user."
 
             result = self.tools.execute(action)
-            history.append(result.message)
+            time.sleep(0.18)
+            verify_path = capture_screen()
+            try:
+                after = self._signature(verify_path)
+                delta = self._difference(previous_signature, after)
+            finally:
+                verify_path.unlink(missing_ok=True)
+
+            history.append(
+                f"{result.message}; expected={expected or 'unspecified'}; "
+                f"screen_delta={delta:.4f}"
+            )
+            previous_signature = after
+
             if not result.ok:
                 history.append("tool error: " + result.message)
 
         return "Stopped after reaching the maximum number of agent steps."
+
+    @staticmethod
+    def _signature(path) -> np.ndarray:
+        frame = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        if frame is None:
+            return np.zeros((90, 160), dtype=np.uint8)
+        return cv2.resize(frame, (160, 90), interpolation=cv2.INTER_AREA)
+
+    @staticmethod
+    def _difference(a: np.ndarray, b: np.ndarray) -> float:
+        if a.shape != b.shape:
+            return 1.0
+        diff = cv2.absdiff(a, b)
+        return round(float(np.count_nonzero(diff > 12)) / float(diff.size), 4)
 
     @staticmethod
     def _parse_action(text: str) -> dict:
