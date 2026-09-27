@@ -38,6 +38,10 @@ class GestureEngine:
     def paused(self) -> bool:
         return self._paused
 
+    def set_paused(self, value: bool) -> None:
+        self._paused = bool(value)
+        self._reset()
+
     def update(self, hand: Hand) -> GestureOutput:
         now = time.monotonic()
         thumb, index, middle = hand[4], hand[8], hand[12]
