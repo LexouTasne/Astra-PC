@@ -60,7 +60,8 @@
     "timeout": 180,
     "keep_alive": "-1",
     "fast_context": 3072,
-    "vision_context": 6144
+    "vision_context": 6144,
+    "strong_model": "qwen3:4b"
   },
   "voice": {
     "engine": "fast",
@@ -68,7 +69,13 @@
     "language": "pt",
     "wake_word": "astra",
     "silence_ms": 330,
-    "target_response_ms": 7000
+    "target_response_ms": 7000,
+    "conversation_window": 9,
+    "dedicated_wakeword": {
+      "enabled": false,
+      "model_path": "",
+      "threshold": 0.55
+    }
   },
   "media": {
     "comfyui": {
@@ -83,7 +90,9 @@
     "port": 8765,
     "context_interval": 0.75,
     "memory_path": "~/.local/share/astra-pc/astra.db",
-    "autostart": false
+    "autostart": false,
+    "cache_path": "~/.cache/astra-pc/responses.db",
+    "cache_ttl": 86400
   },
   "profiles": {
     "active": "default",
@@ -114,5 +123,79 @@
     "interval": 5,
     "cpu_threshold": 92,
     "ram_threshold": 92
+  },
+  "memory": {
+    "embedding_model": "qwen3-embedding:0.6b",
+    "embedding_timeout": 25,
+    "max_results": 6
+  },
+  "skills": {
+    "plugin_dir": "~/.local/share/astra-pc/skills"
+  },
+  "browser": {
+    "cdp": "http://127.0.0.1:9222"
+  },
+  "performance": {
+    "cpu_high": 85,
+    "ram_high": 88
+  },
+  "gesture_profiles": {
+    "browser": {
+      "match": [
+        "firefox",
+        "chrome",
+        "chromium",
+        "brave",
+        "edge"
+      ],
+      "actions": {
+        "zoom_in": [
+          "ctrl",
+          "+"
+        ],
+        "zoom_out": [
+          "ctrl",
+          "-"
+        ],
+        "swipe_right": [
+          "alt",
+          "right"
+        ],
+        "swipe_left": [
+          "alt",
+          "left"
+        ]
+      }
+    },
+    "blender": {
+      "match": [
+        "blender"
+      ],
+      "actions": {
+        "zoom_in": [
+          "+"
+        ],
+        "zoom_out": [
+          "-"
+        ],
+        "rotate_right": [],
+        "rotate_left": []
+      }
+    }
+  },
+  "mobile": {
+    "host": "0.0.0.0",
+    "port": 8766,
+    "enabled": false
+  },
+  "gaze": {
+    "enabled": false
+  },
+  "depth": {
+    "enabled": false,
+    "model_path": ""
+  },
+  "spatial": {
+    "openxr": false
   }
 }
