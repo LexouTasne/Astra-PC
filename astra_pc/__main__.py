@@ -123,14 +123,26 @@ def _run_voice(args, config) -> None:
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
 
-    _, client = _brain(config)
-    if not client.available():
+    brain, text_client = _brain(config)
+    client = brain.vision_client
+    if not text_client.available():
         raise SystemExit(
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
     agent = VisualDesktopAgent(client, max_steps=args.max_steps)
     result = agent.run(args.goal, auto_confirm=args.yes)
     print("Astra>", result)
+
+
+def _run_benchmark(args, config) -> None:
+    from .performance import benchmark_brain
+
+    brain, client = _brain(config)
+    if not client.available():
+        raise SystemExit(
+            "Ollama is not reachable. Run installer.py or start 'ollama serve'."
+        )
+    benchmark_brain(brain, rounds=args.rounds)
 
 
 def _run_generate(args, config) -> None:
@@ -214,6 +226,9 @@ def build_parser() -> argparse.ArgumentParser:
     voice.add_argument("--language", default="pt")
     voice.add_argument("--no-speak", action="store_true")
 
+    benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
+    benchmark.add_argument("--rounds", type=int, default=3)
+
     agent = sub.add_parser("agent", help="screen-aware local desktop agent")
     agent.add_argument("goal")
     agent.add_argument("--max-steps", type=int, default=8)
@@ -255,6 +270,7 @@ def main() -> None:
         "video": _run_video,
         "chat": _run_chat,
         "voice": _run_voice,
+        "benchmark": _run_benchmark,
         "agent": _run_agent,
         "generate": _run_generate,
     }
