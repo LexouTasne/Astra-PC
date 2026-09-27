@@ -6,6 +6,8 @@ from astra_pc.core.permissions import PermissionLayer
 
 from .apps import AppsSkill
 from .base import SkillResult
+from .files import FilesSkill
+from .git import GitSkill
 from .system import SystemSkill
 
 
@@ -15,6 +17,8 @@ class SkillManager:
         self.skills = {
             "apps": AppsSkill(),
             "system": SystemSkill(),
+            "files": FilesSkill(),
+            "git": GitSkill(),
         }
 
     def describe(self) -> list[dict[str, str]]:
