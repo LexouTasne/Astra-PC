@@ -782,3 +782,47 @@ These features are implemented as opt-in modules so the normal daemon stays ligh
 - `PiperSpeaker`: optional local neural Piper voice when a model is configured.
 
 None of these are required by the low-latency gesture/voice core.
+
+
+## Camera / DroidCam repair
+
+Astra no longer assumes that `/dev/video0` is a working camera.
+
+The gesture runtime probes actual video devices and only loads MediaPipe after one produces frames.
+
+Run the guided camera setup:
+
+```bash
+astra setup camera
+```
+
+The guided flow asks before each relevant step:
+
+1. use an existing working webcam if one exists;
+2. install DroidCam if no camera produces frames;
+3. reuse an already installed DroidCam client;
+4. detect/load `v4l2loopback` or `v4l2loopback_dc`;
+5. on Bazzite/Atomic, ask before host package layering;
+6. launch DroidCam;
+7. wait for the phone connection;
+8. verify that OpenCV receives real frames.
+
+For fully automatic recommended answers:
+
+```bash
+astra setup camera --yes
+```
+
+Host package layering on immutable Linux is still explicit:
+
+```bash
+astra setup camera --yes --allow-layering
+```
+
+Running just:
+
+```bash
+astra
+```
+
+opens Astra's lightweight launcher/status menu. It does **not** start gesture tracking blindly.
