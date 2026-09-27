@@ -83,21 +83,30 @@ class ContextEngine:
 
             if os.getenv("DISPLAY"):
                 try:
-                    wid = subprocess.check_output(
+                    wid_p = subprocess.run(
                         ["xdotool", "getactivewindow"],
+                        capture_output=True,
                         text=True,
                         timeout=0.3,
-                    ).strip()
-                    title = subprocess.check_output(
+                    )
+                    if wid_p.returncode != 0:
+                        raise RuntimeError("no active X11 window")
+                    wid = wid_p.stdout.strip()
+
+                    title_p = subprocess.run(
                         ["xdotool", "getwindowname", wid],
+                        capture_output=True,
                         text=True,
                         timeout=0.3,
-                    ).strip()
-                    pid = subprocess.check_output(
+                    )
+                    pid_p = subprocess.run(
                         ["xdotool", "getwindowpid", wid],
+                        capture_output=True,
                         text=True,
                         timeout=0.3,
-                    ).strip()
+                    )
+                    title = title_p.stdout.strip() if title_p.returncode == 0 else ""
+                    pid = pid_p.stdout.strip() if pid_p.returncode == 0 else ""
                     return title, pid
                 except Exception:
                     pass
