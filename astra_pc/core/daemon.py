@@ -22,6 +22,7 @@ from astra_pc.core.planner import AstraPlanner
 from astra_pc.core.prediction import PredictionEngine
 from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
+from astra_pc.core.routine_suggestions import RoutineSuggestionEngine
 from astra_pc.core.semantic_memory import SemanticMemory
 from astra_pc.perception.fusion import PerceptionFusion
 from astra_pc.perception.monitors import get_monitors
@@ -79,6 +80,7 @@ class AstraDaemon:
         )
         self.skills = SkillManager(self.permissions, plugin_dir=plugin_dir)
         self.routines = RoutineManager(self.memory, self.skills)
+        self.routine_suggestions = RoutineSuggestionEngine(self.memory)
         self.planner = AstraPlanner(self.brain, self.skills)
         self.prediction = PredictionEngine(self.memory)
         self.reference = ReferenceResolver()
@@ -262,6 +264,7 @@ class AstraDaemon:
                 "accessibility": self._accessibility_cache[:80],
                 "monitors": [m.as_dict() for m in get_monitors()],
                 "routines": self.routines.list(),
+                "routine_suggestions": self.routine_suggestions.suggest(),
                 "predicted_next_windows": self.prediction.next_windows(
                     self.context.current.active_window
                 ),
