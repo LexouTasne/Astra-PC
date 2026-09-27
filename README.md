@@ -15,6 +15,62 @@ It combines:
 
 No OpenRouter/OpenAI/API key is required.
 
+## Astra 0.8 — Mesh
+
+Astra is now designed as a **multi-device assistant**.
+
+```text
+                       ASTRA MESH
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+        PC #1          Android            PC #2
+          │                │                │
+       local AI         sensors         another node
+       gestures         voice           dev/workstation
+       screen           camera          local tools
+       files/git        clipboard       context
+          │                │                │
+          └────────────────┼────────────────┘
+                           │
+                  one shared Astra
+```
+
+Devices do not join automatically. Pairing is explicit and authenticated.
+
+### What Android can do
+
+- chat with the same Astra running on the PC
+- push-to-talk voice commands
+- discover Astra PCs on the LAN
+- pair by QR or manual code
+- stream accelerometer / gyroscope / rotation data
+- send clipboard text on explicit user action
+- send a camera snapshot to Astra
+- request PC Awareness/context
+- receive Astra notifications while connected
+
+### Secure pairing
+
+Mesh uses:
+
+- HTTPS + WSS
+- per-PC TLS certificate
+- SHA-256 certificate fingerprint pinning
+- one-time six-digit pairing codes
+- random per-device tokens
+- token hashes stored on the PC
+- Android Keystore for the phone token
+- per-device capability scopes
+
+Default Android pairing does **not** grant shell, destructive file access, password management, or unrestricted PC control.
+
+Full docs:
+
+- `docs/MESH.md`
+- `docs/ANDROID.md`
+
+
 ## Install in one command
 
 The universal bootstrap does the steps in order:
@@ -98,17 +154,57 @@ python installer.py
 
 The guided installer can bootstrap the isolated runtime itself.
 
+## Connect Android
+
+After desktop installation, Astra Mesh starts with the normal daemon.
+
+Create a one-time pairing QR:
+
+```bash
+astra mesh pair-code
+```
+
+Optional PNG:
+
+```bash
+astra mesh pair-code --qr ~/.cache/astra-pair.png
+```
+
+Then install/open the Android companion and scan the QR.
+
+### Android APK
+
+Every GitHub Actions run builds a debug APK artifact named:
+
+```text
+astra-android-debug
+```
+
+Local build:
+
+```bash
+gradle -p android :app:assembleDebug
+```
+
+APK path:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+See `docs/ANDROID.md` for the complete guide.
+
 ## Compatibility
 
-| Platform | Astra core | Voice / AI | Gestures | Notes |
-|---|---:|---:|---:|---|
-| Windows 10/11 x64 | ✅ | ✅ | ✅ | Native input via pynput/UI Automation |
-| Windows ARM64 | ✅ | ✅ | ✅ | Current MediaPipe publishes Windows ARM64 wheels |
-| Linux x86_64 glibc | ✅ | ✅ | ✅ | X11 native; Wayland prefers ydotool |
-| Linux ARM64 glibc | ✅ | ✅ | ✅ | Current MediaPipe publishes Linux ARM64 wheels |
-| Bazzite / Fedora Atomic | ✅ | ✅ | ✅ | User-space Python/Ollama preferred; no rpm-ostree layering by default |
-| macOS Apple Silicon | ✅ | ✅ | ✅ | Grant Accessibility/camera/microphone permissions when requested |
-| macOS Intel | ✅ | ✅ | ⚠️ | Current MediaPipe releases do not publish an Intel Mac wheel, so gesture/pose support is not guaranteed |
+| Platform | Astra core | Voice / AI | Gestures | Mesh | Notes |
+|---|---:|---:|---:|---:|---|
+| Windows 10/11 x64 | ✅ | ✅ | ✅ | ✅ | Native input via pynput/UI Automation |
+| Windows ARM64 | ✅ | ✅ | ✅ | ✅ | Current MediaPipe publishes Windows ARM64 wheels |
+| Linux x86_64 glibc | ✅ | ✅ | ✅ | ✅ | X11 native; Wayland prefers ydotool |
+| Linux ARM64 glibc | ✅ | ✅ | ✅ | ✅ | Current MediaPipe publishes Linux ARM64 wheels |
+| Bazzite / Fedora Atomic | ✅ | ✅ | ✅ | ✅ | User-space Python/Ollama preferred; no rpm-ostree layering by default |
+| macOS Apple Silicon | ✅ | ✅ | ✅ | ✅ | Grant Accessibility/camera/microphone permissions when requested |
+| macOS Intel | ✅ | ✅ | ⚠️ | ✅ | Gesture/pose support depends on MediaPipe availability |
 
 Astra targets a **managed Python 3.12 runtime** regardless of the host Python version.
 This avoids breaking the OS Python and makes machines with Python 3.13/3.14 usable without a downgrade.
@@ -558,7 +654,7 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 
 ## Current status
 
-### Astra 0.7
+### Astra 0.8
 
 - [x] real-time gesture engine
 - [x] two-hand zoom/rotation
@@ -587,6 +683,12 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 - [x] OpenXR bridge
 - [x] spatial workspace model
 - [x] mobile sensor bridge
+- [x] secure Astra Mesh HTTPS/WSS server
+- [x] mDNS discovery
+- [x] one-time QR/code pairing
+- [x] Android companion app
+- [x] Android Keystore token storage
+- [x] Android live sensors / clipboard / camera snapshot
 - [ ] polished transparent spatial HUD
 - [ ] production radial gesture menu
 - [ ] calibrated gaze+pinch selection wizard
