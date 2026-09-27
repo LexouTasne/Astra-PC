@@ -28,6 +28,16 @@ class MainActivity : ComponentActivity() {
         repo.parsePairUri(raw)?.let { repo.pair(it) }
     }
 
+    private val modelLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { repo.importLocalModel(it) }
+        }
+
+    private val tokenizerLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { repo.importLocalTokenizer(it) }
+        }
+
     private val cameraLauncher =
         registerForActivityResult(ActivityResultContracts.TakePicturePreview()) { bitmap ->
             bitmap?.let { repo.uploadBitmap(it) }
@@ -56,7 +66,10 @@ class MainActivity : ComponentActivity() {
                 onCamera = { cameraLauncher.launch(null) },
                 onStartSensors = { startSensors() },
                 onStopSensors = { stopService(Intent(this, SensorService::class.java)) },
-                onSendClipboard = { sendClipboard() }
+                onSendClipboard = { sendClipboard() },
+                onImportModel = { modelLauncher.launch(arrayOf("*/*")) },
+                onImportTokenizer = { tokenizerLauncher.launch(arrayOf("application/json", "text/plain")) },
+                onRemoveLocalModel = { repo.removeLocalModel() }
             )
         }
     }
