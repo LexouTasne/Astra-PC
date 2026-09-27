@@ -7,6 +7,7 @@ import importlib.util
 import os
 import platform
 import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -582,6 +583,45 @@ def install_accessibility_support() -> bool:
     return False
 
 
+def install_user_launcher() -> Path | None:
+    if platform.system() == "Windows":
+        base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC" / "bin"
+        base.mkdir(parents=True, exist_ok=True)
+        launcher = base / "astra.cmd"
+        launcher.write_text(
+            "@echo off\r\n"
+            f'"{sys.executable}" -m astra_pc %*\r\n',
+            encoding="utf-8",
+        )
+        ps = shutil.which("powershell") or shutil.which("pwsh")
+        if ps:
+            script = (
+                f"$p='{str(base).replace(chr(39), chr(39)*2)}'; "
+                "$old=[Environment]::GetEnvironmentVariable('Path','User'); "
+                "if (-not (($old -split ';') -contains $p)) { "
+                "[Environment]::SetEnvironmentVariable('Path', "
+                "($old.TrimEnd(';') + ';' + $p), 'User') }"
+            )
+            run([ps, "-NoProfile", "-Command", script])
+        print("Astra launcher:", launcher)
+        print("Open a new terminal if the 'astra' command is not visible yet.")
+        return launcher
+
+    base = Path.home() / ".local" / "bin"
+    base.mkdir(parents=True, exist_ok=True)
+    launcher = base / "astra"
+    launcher.write_text(
+        "#!/usr/bin/env sh\n"
+        f"exec {shlex.quote(str(sys.executable))} -m astra_pc \"$@\"\n",
+        encoding="utf-8",
+    )
+    launcher.chmod(0o755)
+    print("Astra launcher:", launcher)
+    if str(base) not in os.getenv("PATH", "").split(os.pathsep):
+        print(f"NOTE: add {base} to PATH to run 'astra' from any terminal.")
+    return launcher
+
+
 def install_autostart(with_voice: bool = True) -> bool:
     args = ["-m", "astra_pc", "daemon"]
     if with_voice:
@@ -1148,6 +1188,11 @@ def main() -> int:
     else:
         print("Core dependency installation skipped.")
 
+    try:
+        install_user_launcher()
+    except Exception as exc:
+        print("Could not create the 'astra' launcher:", exc)
+
     cameras = probe_cameras_opencv()
     if cameras:
         print("\n[CAMERA] Working camera(s):")
@@ -1248,6 +1293,8 @@ def main() -> int:
     print(f"  {sys.executable} -m astra_pc benchmark")
     print("\nFast voice:")
     print(f"  {sys.executable} -m astra_pc voice --engine fast")
+    print("\nMesh pairing:")
+    print("  astra mesh pair-code")
 
     if args.start:
         print("\n[START]")
