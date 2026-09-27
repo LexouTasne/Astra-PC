@@ -18,6 +18,10 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
+RUNTIME_PYTHON = "3.12"
+SUPPORTED_PYTHON_MIN = (3, 11)
+SUPPORTED_PYTHON_MAX = (3, 13)
+BOOTSTRAP_ENV = "ASTRA_MANAGED_RUNTIME"
 
 
 @dataclass(slots=True)
@@ -53,6 +57,137 @@ def run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProce
 
 def command_exists(name: str) -> bool:
     return shutil.which(name) is not None
+
+
+def runtime_supported() -> bool:
+    return SUPPORTED_PYTHON_MIN <= sys.version_info[:2] < SUPPORTED_PYTHON_MAX
+
+
+def venv_python() -> Path:
+    if platform.system() == "Windows":
+        return ROOT / ".venv" / "Scripts" / "python.exe"
+    return ROOT / ".venv" / "bin" / "python"
+
+
+def find_uv() -> str | None:
+    direct = shutil.which("uv")
+    if direct:
+        return direct
+    candidates = [
+        Path.home() / ".local" / "bin" / ("uv.exe" if platform.system() == "Windows" else "uv"),
+        Path.home() / ".cargo" / "bin" / ("uv.exe" if platform.system() == "Windows" else "uv"),
+    ]
+    if platform.system() == "Windows":
+        local = os.getenv("LOCALAPPDATA")
+        if local:
+            candidates.append(Path(local) / "Programs" / "uv" / "uv.exe")
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def install_uv() -> str | None:
+    existing = find_uv()
+    if existing:
+        return existing
+
+    print("\n[PYTHON RUNTIME] Installing uv in user space...")
+    try:
+        if platform.system() == "Windows":
+            ps = shutil.which("powershell") or shutil.which("pwsh")
+            if not ps:
+                print("PowerShell was not found, so uv cannot be bootstrapped automatically.")
+                return None
+            command = (
+                "$ErrorActionPreference='Stop'; "
+                "irm https://astral.sh/uv/install.ps1 | iex"
+            )
+            result = run([ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command])
+        else:
+            with tempfile.TemporaryDirectory(prefix="astra-uv-") as td:
+                script = Path(td) / "uv-install.sh"
+                urllib.request.urlretrieve("https://astral.sh/uv/install.sh", script)
+                script.chmod(script.stat().st_mode | 0o111)
+                result = run(["sh", str(script)])
+        if result.returncode != 0:
+            return None
+    except Exception as exc:
+        print("Could not install uv:", exc)
+        return None
+
+    return find_uv()
+
+
+def ensure_runtime(assume_yes: bool = False) -> None:
+    if runtime_supported():
+        return
+
+    managed = venv_python()
+    print("\n" + "=" * 68)
+    print(" PYTHON COMPATIBILITY")
+    print("=" * 68)
+    print(f"System Python: {platform.python_version()}")
+    print(f"Astra's tested runtime: Python {RUNTIME_PYTHON}")
+    print("Your system Python will NOT be replaced or modified.")
+    print("Astra can create its own .venv with a managed Python automatically.")
+
+    if os.getenv(BOOTSTRAP_ENV) == "1":
+        raise SystemExit(
+            "Managed Astra runtime is still incompatible. "
+            "Delete .venv and rerun the installer."
+        )
+
+    if not ask(
+        f"Create/use Astra's isolated Python {RUNTIME_PYTHON} runtime?",
+        True,
+        assume_yes,
+    ):
+        raise SystemExit(2)
+
+    uv = find_uv() or install_uv()
+    if not uv:
+        print("\nCould not provision a compatible Python automatically.")
+        print("Install uv manually, then rerun installer.py.")
+        raise SystemExit(2)
+
+    print(f"\n[PYTHON RUNTIME] Ensuring Python {RUNTIME_PYTHON}...")
+    if run([uv, "python", "install", RUNTIME_PYTHON]).returncode != 0:
+        raise SystemExit("uv could not install the Astra Python runtime.")
+
+    needs_create = True
+    if managed.exists():
+        probe = subprocess.run(
+            [str(managed), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        needs_create = probe.stdout.strip() != RUNTIME_PYTHON
+
+    if needs_create:
+        print("[PYTHON RUNTIME] Creating isolated .venv...")
+        result = run([
+            uv,
+            "venv",
+            "--clear",
+            "--python",
+            RUNTIME_PYTHON,
+            str(ROOT / ".venv"),
+        ])
+        if result.returncode != 0 or not managed.exists():
+            raise SystemExit("Could not create Astra's managed .venv.")
+
+    env = os.environ.copy()
+    env[BOOTSTRAP_ENV] = "1"
+    print(f"\n[PYTHON RUNTIME] Relaunching installer with {managed}")
+    child = subprocess.run(
+        [str(managed), str(ROOT / "installer.py"), *sys.argv[1:]],
+        cwd=str(ROOT),
+        env=env,
+        check=False,
+    )
+    raise SystemExit(child.returncode)
 
 
 def detect_session() -> str:
@@ -587,8 +722,11 @@ def main() -> int:
     parser.add_argument("--awareness-extras", action="store_true", help="install optional wake-word and browser DOM packages")
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
+    parser.add_argument("--start", action="store_true", help="start Astra after installation")
+    parser.add_argument("--allow-layering", action="store_true", help="allow rpm-ostree package layering on immutable Linux")
     args = parser.parse_args()
 
+    ensure_runtime(args.yes)
     banner()
 
     system = platform.system()
@@ -598,7 +736,11 @@ def main() -> int:
     checks = [
         Check("Operating system", system in {"Windows", "Linux"}, f"{system} {platform.release()}"),
         Check("Architecture", True, platform.machine(), False),
-        Check("Python", sys.version_info >= (3, 11), platform.python_version()),
+        Check(
+            "Python runtime",
+            runtime_supported(),
+            f"{platform.python_version()} (isolated Astra runtime)",
+        ),
         Check("Desktop session", True, session, False),
         Check("Package manager", pm is not None, pm or "not detected", False),
     ]
@@ -626,10 +768,6 @@ def main() -> int:
 
     if system not in {"Windows", "Linux"}:
         print("\nAstra currently targets Windows and Linux.")
-        return 2
-
-    if not ((3, 11) <= sys.version_info[:2] < (3, 13)):
-        print("\nAstra 0.5 currently supports Python 3.11 or 3.12.")
         return 2
 
     if ask("\nInstall/update Astra core dependencies?", True, args.yes):
