@@ -12,6 +12,7 @@ import sys
 import tempfile
 import urllib.request
 import zipfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -136,6 +137,155 @@ def install_python_core() -> bool:
     print("  pynput    -> native mouse/keyboard actions on Windows/X11")
     print("  NumPy     -> low-overhead numeric processing")
     return run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)]).returncode == 0
+
+
+def ollama_api_available() -> bool:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def install_ollama() -> bool:
+    if command_exists("ollama"):
+        print("Ollama already installed.")
+        return True
+
+    system = platform.system()
+    print("\n[LOCAL AI] Ollama runs Astra's Qwen3-VL model locally.")
+    print("No API key or cloud account is required.")
+
+    if system == "Windows":
+        if command_exists("winget"):
+            return run([
+                "winget", "install", "--id", "Ollama.Ollama", "--exact",
+                "--accept-source-agreements", "--accept-package-agreements"
+            ]).returncode == 0
+        print("winget was not found.")
+        print("Official installer: https://ollama.com/download/windows")
+        return False
+
+    if system == "Linux":
+        print("Downloading the current official Ollama installer script.")
+        with tempfile.TemporaryDirectory(prefix="astra-ollama-") as td:
+            script = Path(td) / "install.sh"
+            try:
+                urllib.request.urlretrieve("https://ollama.com/install.sh", script)
+            except Exception as exc:
+                print("Could not download Ollama installer:", exc)
+                return False
+            script.chmod(script.stat().st_mode | 0o111)
+            return run(["sh", str(script)]).returncode == 0
+
+    print("Automatic Ollama installation is currently implemented for Windows/Linux.")
+    return False
+
+
+def start_ollama() -> bool:
+    if ollama_api_available():
+        return True
+    if not command_exists("ollama"):
+        return False
+
+    if platform.system() == "Linux" and command_exists("systemctl"):
+        run(["sudo", "systemctl", "enable", "--now", "ollama"])
+        if ollama_api_available():
+            return True
+
+    print("Starting local Ollama server...")
+    try:
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        print("Could not start Ollama:", exc)
+        return False
+
+    for _ in range(20):
+        if ollama_api_available():
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def ensure_astra_model(model: str = "qwen3-vl:2b-instruct") -> bool:
+    if not command_exists("ollama"):
+        return False
+    if not start_ollama():
+        print("Ollama was installed but its local service is not reachable yet.")
+        return False
+
+    print("\n[LOCAL AI] Astra default model:")
+    print(" ", model)
+    print("  multimodal: text + image")
+    print("  local Q4 model: about 1.9 GB")
+    print("  used for chat, screenshots, images and sampled video frames")
+
+    listed = subprocess.run(
+        ["ollama", "list"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if model.split(":")[0] in listed.stdout and "2b" in listed.stdout:
+        print("Model already available locally.")
+        return True
+
+    print("Downloading the Astra model. This is a one-time download.")
+    return run(["ollama", "pull", model]).returncode == 0
+
+
+def comfyui_available() -> bool:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8188/system_stats", timeout=2) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def comfyui_location() -> Path:
+    if platform.system() == "Windows":
+        base = Path(os.getenv("LOCALAPPDATA", Path.home()))
+        return base / "Astra-PC" / "ComfyUI"
+    return Path.home() / ".local" / "share" / "astra-pc" / "ComfyUI"
+
+
+def install_comfyui() -> bool:
+    target = comfyui_location()
+    print("\n[MEDIA GENERATION] ComfyUI is optional and runs locally.")
+    print("It is kept separate from the gesture engine because diffusion/video models")
+    print("are much heavier than Astra's 2B vision model.")
+    if not command_exists("git"):
+        print("git is required to set up ComfyUI automatically.")
+        return False
+
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if run(["git", "clone", "--depth", "1", "https://github.com/comfyanonymous/ComfyUI.git", str(target)]).returncode != 0:
+            return False
+
+    venv = target / ".venv"
+    if not venv.exists():
+        if run([sys.executable, "-m", "venv", str(venv)]).returncode != 0:
+            return False
+
+    pip = venv / ("Scripts/pip.exe" if platform.system() == "Windows" else "bin/pip")
+    if not pip.exists():
+        return False
+
+    print("Installing ComfyUI Python dependencies. This optional step can be large.")
+    if run([str(pip), "install", "-r", str(target / "requirements.txt")]).returncode != 0:
+        return False
+
+    print("ComfyUI installed at:", target)
+    print("No diffusion/video checkpoint is bundled by Astra.")
+    print("Put a compatible model in ComfyUI/models/checkpoints and set")
+    print("media.comfyui.checkpoint in config/astra.json.")
+    return True
 
 
 def install_voice() -> bool:
@@ -333,6 +483,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Astra-PC guided installer")
     parser.add_argument("--yes", action="store_true", help="accept recommended installations")
     parser.add_argument("--no-voice", action="store_true", help="skip offline voice dependencies")
+    parser.add_argument("--no-ai", action="store_true", help="skip Ollama/Qwen local AI")
+    parser.add_argument("--media", action="store_true", help="offer optional local ComfyUI setup")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     args = parser.parse_args()
 
@@ -406,6 +558,17 @@ def main() -> int:
         if ask("\nInstall offline voice support?", True, args.yes):
             install_voice()
 
+    if not args.no_ai:
+        if ask("\nInstall Astra local AI (Ollama + Qwen3-VL 2B)?", True, args.yes):
+            if install_ollama():
+                ensure_astra_model()
+
+    if args.media:
+        if comfyui_available():
+            print("\n[MEDIA GENERATION] A local ComfyUI server is already reachable.")
+        elif ask("\nSet up optional local ComfyUI media generation?", False, args.yes):
+            install_comfyui()
+
     microphones = probe_microphones()
     print("\n[MICROPHONE]")
     if microphones:
@@ -422,14 +585,21 @@ def main() -> int:
     print("Desktop session:", session)
     print("ydotool:", "yes" if command_exists("ydotool") else "no")
     print("Offline voice libraries:", "yes" if importlib.util.find_spec("vosk") else "no")
+    print("Ollama:", "yes" if command_exists("ollama") else "no")
+    print("Ollama API:", "yes" if ollama_api_available() else "no")
+    print("ComfyUI API:", "yes" if comfyui_available() else "no")
 
     if system == "Linux" and pm == "rpm-ostree":
         print("\nNOTE: package layering on Bazzite/Fedora Atomic may require a reboot.")
 
     print("\nSafe first run:")
-    print(f"  {sys.executable} -m astra_pc --dry-run --show-camera")
+    print(f"  {sys.executable} -m astra_pc gestures --dry-run --show-camera")
     print("\nReal gesture control:")
-    print(f"  {sys.executable} -m astra_pc")
+    print(f"  {sys.executable} -m astra_pc gestures")
+    print("\nLocal Astra chat:")
+    print(f'  {sys.executable} -m astra_pc ask "O que voce consegue fazer?"')
+    print("\nUnderstand the screen:")
+    print(f'  {sys.executable} -m astra_pc screen "O que esta acontecendo aqui?"')
     return 0
 
 
