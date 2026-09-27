@@ -19,6 +19,9 @@ class AstraBrain:
     def preload(self) -> None:
         self.text_client.preload()
 
+    def preload_vision(self) -> None:
+        self.vision_client.preload()
+
     def ask(self, text: str) -> str:
         return self.text_client.chat(
             text,
