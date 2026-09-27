@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import cv2
+
+from astra_pc.config import AstraConfig
+from astra_pc.gestures.engine import GestureEngine
+from astra_pc.input.factory import create_input_backend
+from astra_pc.vision.hands import HandTracker
+from astra_pc.voice.commands import CommandRouter
+
+
+class AstraRuntime:
+    def __init__(
+        self,
+        config: AstraConfig,
+        show_camera: bool = False,
+        dry_run: bool = False,
+        voice_model: Path | None = None,
+    ):
+        self.config = config
+        self.show_camera = show_camera
+        self.dry_run = dry_run
+        self.voice_model = voice_model
+        self.backend = None if dry_run else create_input_backend()
+        self.router = CommandRouter()
+        self.voice = None
+
+        pointer = config.section("pointer")
+        self.smoothing = float(pointer["smoothing"])
+        self.deadzone = float(pointer["deadzone_px"])
+        self.margin = float(pointer["active_margin"])
+        self._smooth_xy: tuple[float, float] | None = None
+
+    def run(self) -> None:
+        cam_cfg = self.config.section("camera")
+        tracker = HandTracker(self.config.section("tracking"))
+        gestures = GestureEngine(self.config.section("gestures"))
+
+        cap = cv2.VideoCapture(int(cam_cfg["index"]))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(cam_cfg["width"]))
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(cam_cfg["height"]))
+        cap.set(cv2.CAP_PROP_FPS, int(cam_cfg["target_fps"]))
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        if not cap.isOpened():
+            tracker.close()
+            raise RuntimeError("Astra could not open the configured camera.")
+
+        screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
+        self._start_voice_if_requested()
+
+        print("Astra v0.1 online.")
+        print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
+
+        target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
+        try:
+            while True:
+                started = time.perf_counter()
+                ok, frame = cap.read()
+                if not ok:
+                    continue
+
+                if bool(cam_cfg.get("mirror", True)):
+                    frame = cv2.flip(frame, 1)
+
+                hands = tracker.process(frame)
+                label = "no-hand"
+                if hands:
+                    out = gestures.update(hands[0])
+                    label = out.label
+
+                    if out.pointer is not None:
+                        x, y = self._map_pointer(out.pointer, screen_w, screen_h)
+                        if self.backend:
+                            self.backend.move(x, y)
+
+                    if out.left_down is not None and self.backend:
+                        self.backend.left_button(out.left_down)
+
+                    if out.scroll and self.backend:
+                        self.backend.scroll(out.scroll)
+
+                if self.show_camera:
+                    color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
+                    cv2.putText(
+                        frame,
+                        f"ASTRA | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
+                        (18, 32),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.7,
+                        color,
+                        2,
+                        cv2.LINE_AA,
+                    )
+                    cv2.imshow("Astra-PC", frame)
+                    if cv2.waitKey(1) & 0xFF in (ord("q"), 27):
+                        break
+
+                elapsed = time.perf_counter() - started
+                if elapsed < target_dt:
+                    time.sleep(target_dt - elapsed)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if self.voice:
+                self.voice.stop()
+            if self.backend:
+                self.backend.left_button(False)
+            tracker.close()
+            cap.release()
+            cv2.destroyAllWindows()
+            print("Astra offline.")
+
+    def _map_pointer(self, normalized: tuple[float, float], w: int, h: int) -> tuple[int, int]:
+        x, y = normalized
+        m = self.margin
+        x = min(1.0, max(0.0, (x - m) / max(0.01, 1.0 - 2.0 * m)))
+        y = min(1.0, max(0.0, (y - m) / max(0.01, 1.0 - 2.0 * m)))
+        target = (x * (w - 1), y * (h - 1))
+
+        if self._smooth_xy is None:
+            self._smooth_xy = target
+        else:
+            sx, sy = self._smooth_xy
+            a = self.smoothing
+            nx = sx + (target[0] - sx) * a
+            ny = sy + (target[1] - sy) * a
+            if abs(nx - sx) < self.deadzone:
+                nx = sx
+            if abs(ny - sy) < self.deadzone:
+                ny = sy
+            self._smooth_xy = (nx, ny)
+
+        return int(self._smooth_xy[0]), int(self._smooth_xy[1])
+
+    def _start_voice_if_requested(self) -> None:
+        if self.voice_model is None:
+            return
+
+        from astra_pc.voice.vosk_engine import VoskVoiceEngine
+
+        def on_text(text: str) -> None:
+            result = self.router.execute(text)
+            print(f"[voice] {text} -> {result.message}")
+
+        self.voice = VoskVoiceEngine(self.voice_model, on_text)
+        self.voice.start()
