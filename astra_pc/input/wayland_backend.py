@@ -16,6 +16,12 @@ _KEYCODES = {
     "enter": 28,
     "esc": 1,
     "space": 57,
+    "backspace": 14,
+    "delete": 111,
+    "up": 103,
+    "down": 108,
+    "left": 105,
+    "right": 106,
     "+": 13,
     "-": 12,
     "[": 26,
@@ -70,3 +76,6 @@ class YdotoolBackend(InputBackend):
                 sequence.append(f"{code}:0")
         if sequence:
             self._run("key", *sequence)
+
+    def type_text(self, text: str) -> None:
+        self._run("type", "--key-delay", "3", text)
