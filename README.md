@@ -15,6 +15,134 @@ It combines:
 
 No OpenRouter/OpenAI/API key is required.
 
+## Astra 0.6 — Resident Core
+
+Astra can now run as a resident local service instead of reloading itself for every request.
+
+```text
+                    ASTRA DAEMON
+                         │
+        ┌────────────────┼─────────────────┐
+        │                │                 │
+     Context          Event Bus         Memory
+        │                │              SQLite
+        │                │                 │
+        └─────────── Planner ──────────────┘
+                         │
+                  Permission Layer
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+       Skills       Accessibility     Vision
+          │          UIA / AT-SPI     fallback
+          │
+   Apps / Files / Git /
+   System / Media / Routines
+```
+
+Start the resident core:
+
+```bash
+python -m astra_pc daemon --voice
+```
+
+Ping it:
+
+```bash
+python -m astra_pc ctl ping
+```
+
+Ask through the already-hot daemon:
+
+```bash
+python -m astra_pc ctl ask "status do PC"
+```
+
+Normal `astra ask` and `astra chat` automatically try the daemon first and fall back to local mode when it is not running.
+
+### Context and accessibility
+
+The daemon continuously keeps cheap context such as:
+
+- active window/process
+- operating system/session
+- current Astra profile
+- structural UI elements when Windows UI Automation or Linux AT-SPI is available
+
+Visual Qwen analysis remains a fallback for things accessibility APIs cannot describe.
+
+### Profiles
+
+```bash
+python -m astra_pc profile dev
+python -m astra_pc profile gaming
+python -m astra_pc profile study
+python -m astra_pc profile default
+```
+
+Voice also understands exact profile commands such as:
+
+```text
+Astra, modo dev
+Astra, modo gaming
+Astra, modo estudo
+```
+
+### Persistent routines
+
+Save a routine:
+
+```bash
+python -m astra_pc routine save dev '[{"skill":"apps","action":"open_app","args":{"name":"vscode"}},{"skill":"apps","action":"open_app","args":{"name":"terminal"}}]'
+```
+
+Run it:
+
+```bash
+python -m astra_pc routine run dev
+```
+
+The daemon stores routines and recent context in a local SQLite database.
+
+### Skills
+
+Current resident skills include:
+
+- apps and URLs
+- live CPU/RAM/process status
+- media playback and volume
+- safe file search/read inside the user's home
+- Git status/diff/branch and confirmed commits
+- persistent routines
+
+Actions pass through a central permission layer. Destructive or unknown actions are not silently executed.
+
+### Proactive events
+
+The resident core watches lightweight system thresholds without calling an LLM. CPU/RAM threshold events enter Astra's event bus and local memory, ready for future notification/routine rules.
+
+### Autostart
+
+The installer can configure the resident daemon to start at login:
+
+```bash
+python3 installer.py --autostart
+```
+
+Linux uses a user-level systemd service. Windows installs a startup command file.
+
+### Barge-in
+
+While Astra is speaking, saying the wake word again interrupts queued speech. Commands such as:
+
+```text
+Astra, para
+Astra, silêncio
+```
+
+cancel spoken output immediately where the local TTS backend supports cancellation.
+
+
 ## Default local AI
 
 Astra uses two local Qwen models through Ollama:
@@ -190,10 +318,16 @@ The agent is deliberately prevented from autonomously performing irreversible ac
 
 Astra can operate as a local wake-word assistant.
 
-Install voice support with the installer, provide a local Vosk model, then:
+Fast voice is the default:
 
 ```bash
-python -m astra_pc voice --voice-model /path/to/vosk-model
+python -m astra_pc voice --engine fast
+```
+
+The faster-whisper model remains loaded while Astra is listening. Vosk is still available as a fallback:
+
+```bash
+python -m astra_pc voice --engine vosk --voice-model /path/to/vosk-model
 ```
 
 Example:
@@ -271,7 +405,7 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 
 ## Current status
 
-### Astra 0.5
+### Astra 0.6
 
 - [x] gesture engine
 - [x] two-hand interaction
