@@ -18,6 +18,8 @@ class PermissionLayer:
         "status", "top_processes", "search_files", "read_file", "read_context", "hotkey",
         "git_status", "git_diff", "git_branch",
         "clipboard_read", "clipboard_write", "notify", "project_summary",
+        "window_maximize", "window_minimize", "window_snap_left",
+        "window_snap_right", "window_move_monitor",
     }
     CONFIRM = {
         "write_file", "rename_file", "move_file", "install_package",
