@@ -15,7 +15,7 @@ class PermissionLayer:
 
     SAFE = {
         "open_app", "open_url", "volume", "media", "window_layout",
-        "status", "search_files", "read_file", "read_context", "hotkey",
+        "status", "top_processes", "search_files", "read_file", "read_context", "hotkey",
         "git_status", "git_diff", "git_branch",
     }
     CONFIRM = {
