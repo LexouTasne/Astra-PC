@@ -15,6 +15,7 @@ from astra_pc.core.events import EventBus
 from astra_pc.core.memory import SessionMemory
 from astra_pc.core.permissions import PermissionLayer
 from astra_pc.core.planner import AstraPlanner
+from astra_pc.core.routines import RoutineManager
 from astra_pc.skills.manager import SkillManager
 
 
@@ -57,6 +58,7 @@ class AstraDaemon:
         self.accessibility = create_accessibility_provider()
         self.permissions = PermissionLayer()
         self.skills = SkillManager(self.permissions)
+        self.routines = RoutineManager(self.memory, self.skills)
         self.planner = AstraPlanner(self.brain, self.skills)
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
@@ -148,7 +150,32 @@ class AstraDaemon:
                 "ok": True,
                 "context": self.context.current.as_dict(),
                 "accessibility": self._accessibility_cache[:80],
+                "routines": self.routines.list(),
             }
+
+        if kind == "profile":
+            profile = str(request.get("profile", "")).strip() or "default"
+            self.context.profile = profile
+            self.memory.set("active_profile", profile)
+            self.bus.publish("profile.changed", profile=profile)
+            self.context.refresh()
+            return {"ok": True, "profile": profile}
+
+        if kind == "routine.save":
+            name = str(request.get("name", "")).strip()
+            steps = request.get("steps", [])
+            if not name or not isinstance(steps, list):
+                return {"ok": False, "error": "routine name and steps are required"}
+            self.routines.save(name, steps)
+            return {"ok": True, "message": f"routine saved: {name}"}
+
+        if kind == "routine.run":
+            name = str(request.get("name", "")).strip()
+            results = self.routines.run(
+                name,
+                confirmed=bool(request.get("confirmed", False)),
+            )
+            return {"ok": all(x.get("ok") for x in results), "results": results}
 
         text = str(request.get("text", "")).strip()
         if not text:
