@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import ssl
-import urllib.request
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -26,7 +26,7 @@ class MeshPeer:
 
 
 class MeshHttpClient:
-    """Minimal desktop client for pairing PC-to-PC or testing Android-compatible API."""
+    """Pinned-TLS client for desktop-to-desktop Mesh operations."""
 
     def __init__(self, peer: MeshPeer, timeout: float = 15.0):
         self.peer = peer
@@ -70,25 +70,41 @@ class MeshHttpClient:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
 
-        data = None
-        headers = {"Content-Type": "application/json"}
-        if payload is not None:
-            data = json.dumps(payload).encode("utf-8")
-        if authenticated and self.peer.token:
-            headers["Authorization"] = f"Bearer {self.peer.token}"
-
-        request = urllib.request.Request(
-            self.peer.base_url + path,
-            data=data,
-            method=method,
-            headers=headers,
+        conn = http.client.HTTPSConnection(
+            self.peer.host,
+            self.peer.port,
+            timeout=self.timeout,
+            context=context,
         )
-        with urllib.request.urlopen(request, timeout=self.timeout, context=context) as response:
-            cert = response.fp.raw._sock.getpeercert(binary_form=True)  # type: ignore[attr-defined]
+        try:
+            conn.connect()
+            sock = conn.sock
+            if sock is None:
+                raise RuntimeError("TLS socket was not created.")
+            cert = sock.getpeercert(binary_form=True)
             actual = hashlib.sha256(cert).hexdigest()
             expected = self.peer.fingerprint.lower().replace(":", "")
-            if actual.lower() != expected:
+            if not hashlib.compare_digest(actual.lower(), expected):
                 raise FingerprintMismatch(
                     f"TLS fingerprint mismatch: expected {expected}, got {actual}"
                 )
-            return json.loads(response.read().decode("utf-8"))
+
+            body = None
+            headers = {"Accept": "application/json"}
+            if payload is not None:
+                body = json.dumps(payload).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+            if authenticated and self.peer.token:
+                headers["Authorization"] = f"Bearer {self.peer.token}"
+
+            conn.request(method, path, body=body, headers=headers)
+            response = conn.getresponse()
+            raw = response.read()
+            text = raw.decode("utf-8", "replace")
+            if response.status >= 400:
+                raise RuntimeError(
+                    f"Astra Mesh HTTP {response.status}: {text[:1000]}"
+                )
+            return json.loads(text) if text else {}
+        finally:
+            conn.close()
