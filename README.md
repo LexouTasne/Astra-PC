@@ -1,48 +1,59 @@
 # Astra-PC
 
-**Astra** is a fast, local-first desktop assistant for Windows and Linux built around **gesture control first** and voice/AI second.
+**Astra** is a fast, local-first desktop assistant for Windows and Linux.
 
-The project is designed so hand movement never waits for an LLM, cloud API, OCR pipeline or remote server.
+It combines:
 
-## Astra v0.2
+- real-time hand gestures
+- offline voice
+- local multimodal AI
+- screen understanding
+- image understanding
+- video understanding
+- local desktop-agent actions
+- optional local image/video generation through ComfyUI
 
-Implemented now:
+No OpenRouter/OpenAI/API key is required.
 
-- real-time MediaPipe hand tracking
-- index-finger pointer control
-- thumb + index pinch for click
-- hold pinch to drag
-- thumb + middle pinch for right click
-- two-finger scrolling
-- three-finger horizontal swipe actions
-- two-hand zoom detection
-- two-hand rotation detection
-- configurable gesture -> hotkey mappings
-- open-palm pause/resume
-- cursor smoothing + dead-zone
-- Windows / Linux X11 input via pynput
-- Linux Wayland backend through ydotool
-- optional offline Vosk voice recognition
-- local command router with no API key
-- guided `installer.py` with hardware checks and camera fallback
-- dry-run mode for safe testing
+## Default local AI
 
-## Why it stays fast
+Astra uses **Qwen3-VL 2B Instruct** through Ollama by default:
 
 ```text
-webcam
-  -> 21 hand landmarks
-  -> deterministic gesture state machine
-  -> native OS input
+qwen3-vl:2b-instruct
 ```
 
-The real-time lane contains **no language model**.
+The quantized Ollama model is about 1.9 GB and supports text + image input.
 
-Voice and future AI run separately, so the cursor/gestures keep responding while Astra is doing higher-level work.
+Astra keeps it completely outside the latency-sensitive gesture loop.
 
-## Recommended installation
+## Architecture
 
-Clone the repository and run the guided installer:
+```text
+                         ASTRA
+                           │
+           ┌───────────────┼────────────────┐
+           │               │                │
+       GESTURES          VOICE             AI
+           │               │                │
+      MediaPipe          Vosk          Qwen3-VL 2B
+           │               │                │
+   deterministic FSM       │       ┌────────┼────────┐
+           │               │       │        │        │
+     native OS input       │     image    screen    video
+                           │                │
+                           └────────────── agent
+                                            │
+                                   constrained tools
+
+Optional heavy lane:
+
+prompt -> ComfyUI -> local image/video model
+```
+
+## Install
+
+Recommended:
 
 ```bash
 git clone https://github.com/LexouTasne/Astra-PC
@@ -50,226 +61,239 @@ cd Astra-PC
 python3 installer.py
 ```
 
-On Windows:
+The installer checks and can configure:
 
-```powershell
-py installer.py
-```
-
-The installer explains each component before installing it.
-
-It checks:
-
-- operating system and architecture
-- supported Python version
-- X11 / Wayland session
-- package manager
-- camera devices
-- whether OpenCV can actually read the camera
+- supported Python
+- camera availability
+- real OpenCV camera capture
 - microphones
-- ydotool availability on Wayland
-- offline voice dependencies
-- DroidCam fallback when no usable camera exists
+- X11 / Wayland
+- ydotool
+- Vosk
+- local TTS
+- Ollama
+- Qwen3-VL 2B
+- DroidCam fallback
+- optional ComfyUI setup
 
-Diagnostic only:
+Useful installer modes:
 
 ```bash
 python3 installer.py --diagnose-only
-```
-
-Install recommended items without individual confirmations:
-
-```bash
+python3 installer.py --no-voice
+python3 installer.py --no-ai
+python3 installer.py --media
 python3 installer.py --yes
 ```
 
-Skip voice:
+## Gesture control
+
+Safe test:
 
 ```bash
-python3 installer.py --no-voice
+python -m astra_pc gestures --dry-run --show-camera
 ```
 
-## Camera fallback
-
-If Astra cannot find a usable camera, the installer offers **DroidCam**.
-
-### Windows
-
-The installer uses the official winget package when winget is available.
-
-### Linux
-
-The installer resolves the current Linux package from Dev47Apps' official DroidCam page at install time.
-
-It can install:
-
-1. DroidCam desktop client
-2. build/kernel dependencies when needed
-3. DroidCam V4L2 video driver
-
-On Fedora Atomic/Bazzite, package layering or kernel-module installation can require a reboot.
-
-## Safe first test
-
-Do this first:
+Real control:
 
 ```bash
-python -m astra_pc --dry-run --show-camera
+python -m astra_pc gestures
 ```
 
-Astra detects your hands and gestures but does **not** control the computer.
-
-Then:
-
-```bash
-python -m astra_pc
-```
-
-## Gestures
+Implemented gestures:
 
 | Gesture | Action |
 |---|---|
-| Index finger only | Move cursor |
-| Thumb + index pinch | Left click |
-| Hold thumb + index pinch | Drag |
-| Thumb + middle pinch | Right click |
-| Index + middle | Scroll |
-| Index + middle + ring horizontal movement | Swipe |
-| Two hands move apart/together | Zoom |
-| Two hands rotate relative to each other | Rotation event |
-| Open palm | Pause/resume |
+| index finger | pointer |
+| thumb + index pinch | left click |
+| hold pinch | drag |
+| thumb + middle pinch | right click |
+| index + middle | scroll |
+| three-finger horizontal swipe | window switching |
+| two hands apart/together | zoom |
+| two-hand relative rotation | rotation event |
+| open palm | pause/resume |
 
-The thresholds and mappings live in `config/astra.json`.
+All thresholds and mappings are configurable in `config/astra.json`.
 
-Default v0.2 mappings:
+## Local AI
 
-- two-hand spread -> `Ctrl + +`
-- two-hand close -> `Ctrl + -`
-- swipe right -> `Alt + Tab`
-- swipe left -> `Alt + Shift + Tab`
-
-Rotation is detected already, but its hotkey mapping is empty by default because there is no universal desktop "rotate object" shortcut. It is ready for the future spatial workspace and can already be bound manually in the config.
-
-## Linux Wayland
-
-Astra prefers `ydotool` for input injection under Wayland.
-
-On Fedora, ydotool is available as a native package. The installer can install and enable it.
-
-On Bazzite/Fedora Atomic, this may involve `rpm-ostree` package layering and a reboot.
-
-For unusual multi-monitor layouts, the current Wayland backend can be given a combined desktop size:
+Text:
 
 ```bash
-ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc
+python -m astra_pc ask "Explique o que é Linux Wayland"
 ```
 
-## Offline voice
-
-Install through the guided installer or manually:
+Interactive chat:
 
 ```bash
-pip install -e ".[voice]"
+python -m astra_pc chat
 ```
 
-Then provide a local Vosk model:
+Image understanding:
 
 ```bash
-python -m astra_pc --voice-model /path/to/vosk-model
+python -m astra_pc see foto.png "O que tem nessa imagem?"
 ```
 
-No OpenRouter, OpenAI or other API key is required.
+Screen understanding:
 
-## Architecture
+```bash
+python -m astra_pc screen "O que está acontecendo na minha tela?"
+```
+
+Video understanding:
+
+```bash
+python -m astra_pc video video.mp4 "Resume esse vídeo" --frames 8
+```
+
+Video understanding is intentionally lightweight: Astra samples representative frames instead of loading the whole video into RAM.
+
+## Astra desktop agent
+
+Example:
+
+```bash
+python -m astra_pc agent "abra o navegador e vá para github.com"
+```
+
+By default Astra asks before every desktop action.
+
+Allowed tool surface:
+
+- click
+- right click
+- type text
+- safe hotkeys
+- scroll
+- open http/https URL
+- wait
+- finish
+
+It does **not** receive unrestricted shell access.
+
+To skip per-step confirmation for allowed actions:
+
+```bash
+python -m astra_pc agent "abra github.com" --yes
+```
+
+The agent is deliberately prevented from autonomously performing irreversible actions such as purchases, password changes, file deletion or sending messages.
+
+## Voice Astra
+
+Astra can operate as a local wake-word assistant.
+
+Install voice support with the installer, provide a local Vosk model, then:
+
+```bash
+python -m astra_pc voice --voice-model /path/to/vosk-model
+```
+
+Example:
 
 ```text
-Astra
-├── Realtime lane
-│   ├── camera
-│   ├── hand tracker
-│   ├── one/two-hand gesture engine
-│   └── native input backend
-│
-├── Voice lane (optional)
-│   ├── microphone
-│   ├── Vosk STT
-│   └── local command router
-│
-└── Astra Agent (next)
-    ├── accessibility / screen context
-    ├── local planner
-    ├── explicit tools
-    ├── safety confirmation layer
-    ├── spatial HUD
-    └── 2D/3D workspace
+"Astra, explica o que é essa janela."
+
+"Astra, o que tem na minha tela?"
+
+"Astra, abra o navegador."
 ```
 
-## Performance philosophy
+The current lightweight wake word is detected from offline Vosk transcription, avoiding another always-running neural model.
 
-Order of priority:
+## Local image/video generation
 
-1. latency
-2. reliability
-3. natural gestures
-4. visual polish
-5. AI complexity
+Qwen3-VL understands images/video but does not generate pixels.
 
-Defaults are intentionally light:
+Astra therefore uses a separate **ComfyUI** backend for local generation.
 
-- 640x360 camera processing
+Optional setup:
+
+```bash
+python3 installer.py --media
+```
+
+Then place a compatible checkpoint in ComfyUI and set:
+
+```json
+"media": {
+  "comfyui": {
+    "checkpoint": "your-model.safetensors"
+  }
+}
+```
+
+Basic local image generation:
+
+```bash
+python -m astra_pc generate "futuristic holographic computer interface"
+```
+
+Astra also accepts any ComfyUI API workflow:
+
+```bash
+python -m astra_pc generate "cinematic robot walking" --workflow workflows/my-video.json
+```
+
+This is how video generation is supported without forcing a giant video model into Astra's core.
+
+## Why generation is separate
+
+Gesture control should remain fast even on modest computers.
+
+The default lanes are lightweight:
+
+- 640x360 camera
 - 30 FPS target
-- MediaPipe model complexity 0
-- one-frame camera buffer
-- no landmark drawing unless debug preview is enabled
-- O(1) pointer smoothing
-- voice isolated in a daemon thread
-- no mandatory AI model in RAM
+- MediaPipe complexity 0
+- Qwen model loaded only when AI is requested
+- voice on a separate worker
+- no diffusion/video model loaded unless generation is explicitly requested
 
-## Roadmap
+## Linux / Bazzite / Wayland
 
-### v0.2 — Natural interaction
-- [x] right click
-- [x] swipe actions
-- [x] two-hand zoom
-- [x] two-hand rotation detector
-- [x] configurable gesture actions
-- [x] guided installer
-- [x] camera/mic diagnostics
+Astra uses `ydotool` where available under Wayland.
+
+On Bazzite/Fedora Atomic the installer understands `rpm-ostree` and warns when package layering requires a reboot.
+
+For a non-standard multi-monitor virtual desktop:
+
+```bash
+ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
+```
+
+## Current status
+
+### Astra 0.4
+
+- [x] gesture engine
+- [x] two-hand interaction
+- [x] Windows/X11 control
+- [x] Wayland backend
+- [x] installer + diagnostics
 - [x] DroidCam fallback
-- [ ] improve two-hand gesture hysteresis
-- [ ] per-app gesture profiles
+- [x] offline voice STT
+- [x] offline TTS
+- [x] Qwen3-VL 2B local brain
+- [x] image understanding
+- [x] screen understanding
+- [x] video understanding
+- [x] constrained visual desktop agent
+- [x] ComfyUI workflow runner
+- [x] generic image workflow
+- [x] generic video-workflow support
+- [ ] transparent spatial HUD
+- [ ] radial gesture menu
+- [ ] per-app gesture context
 - [ ] user-recorded gestures
-
-### v0.3 — Astra interface
-- [ ] transparent HUD
-- [ ] radial hand menu
-- [ ] floating hardware monitor
-- [ ] window grabbing/snapping
-- [ ] camera calibration UI
-- [ ] gesture calibration UI
-
-### v0.4 — Astra Voice
-- [ ] wake word "Astra"
-- [ ] local TTS
-- [ ] richer command grammar
-- [ ] voice + gesture combinations
-
-### v0.5 — Astra Agent
-- [ ] accessibility-tree understanding
-- [ ] local-only LLM adapter
-- [ ] planner + explicit tool layer
-- [ ] confirmations for destructive actions
-- [ ] memory and custom routines
-
-### Future XR
+- [ ] accessibility-tree backend
 - [ ] OpenXR bridge
-- [ ] headset hand tracking
-- [ ] true spatial workspace
-- [ ] direct 3D object manipulation
 
 ## Privacy
 
-Gesture processing is local. Astra does not require uploading webcam frames or microphone audio to a cloud service.
+Camera frames, screenshots, microphone audio and AI prompts can all stay on the local machine when using the default local stack.
 
 ## License
 
