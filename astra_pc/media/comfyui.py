@@ -37,7 +37,8 @@ class ComfyUIClient:
         workflow_path = Path(workflow_path)
         text = workflow_path.read_text(encoding="utf-8")
         for key, value in replacements.items():
-            text = text.replace("{{" + key + "}}", value)
+            escaped = json.dumps(str(value))[1:-1]
+            text = text.replace("{{" + key + "}}", escaped)
         workflow = json.loads(text)
 
         payload = json.dumps(
