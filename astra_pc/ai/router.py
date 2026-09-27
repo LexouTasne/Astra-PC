@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 
 from .ollama_client import OllamaClient
 
@@ -23,6 +24,8 @@ class ModelRouter:
         self.text = text
         self.vision = vision
         self.strong = strong
+        self._model_names: list[str] = []
+        self._models_checked_at = 0.0
 
     def choose(self, prompt: str, *, has_images: bool = False) -> OllamaClient:
         if has_images:
@@ -33,9 +36,12 @@ class ModelRouter:
 
     def _installed(self, model: str) -> bool:
         try:
-            names = self.text.models()
+            now = time.monotonic()
+            if now - self._models_checked_at > 30.0:
+                self._model_names = self.text.models()
+                self._models_checked_at = now
             root = model.split(":")[0].lower()
-            return any(root in name.lower() for name in names)
+            return any(root in name.lower() for name in self._model_names)
         except Exception:
             return False
 
