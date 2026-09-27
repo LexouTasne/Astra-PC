@@ -1335,6 +1335,45 @@ def droidcam_client_installed() -> bool:
     return droidcam_binary() is not None
 
 
+def ensure_droidcam_user_desktop_entry() -> None:
+    if platform.system() != "Linux":
+        return
+    binary = droidcam_binary()
+    if binary is None:
+        return
+
+    app_dir = Path.home() / ".local" / "share" / "applications"
+    app_dir.mkdir(parents=True, exist_ok=True)
+    desktop = app_dir / "droidcam.desktop"
+    icon = Path("/opt/droidcam-icon.png")
+    icon_line = f"Icon={icon}" if icon.exists() else "Icon=camera-web"
+
+    desktop.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=DroidCam\n"
+        "Comment=Use your phone as a webcam\n"
+        f"Exec={binary}\n"
+        f"{icon_line}\n"
+        "Terminal=false\n"
+        "Categories=AudioVideo;Video;\n",
+        encoding="utf-8",
+    )
+    try:
+        desktop.chmod(0o755)
+    except Exception:
+        pass
+
+    if command_exists("update-desktop-database"):
+        subprocess.run(
+            ["update-desktop-database", str(app_dir)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    print("DroidCam desktop entry:", desktop)
+
+
 def install_droidcam_windows() -> bool:
     if not command_exists("winget"):
         print("winget was not found.")
@@ -1456,6 +1495,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
         else:
             print("Skipping DroidCam client reinstall.")
 
+        ensure_droidcam_user_desktop_entry()
         print("\nDroidCam's Linux client is installed.")
 
         driver_ready, reboot_required = ensure_v4l2loopback(
