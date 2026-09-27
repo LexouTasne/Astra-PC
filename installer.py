@@ -292,6 +292,7 @@ def install_voice() -> bool:
     print("\n[VOICE] Optional offline voice components:")
     print("  Vosk        -> speech-to-text without an API key")
     print("  sounddevice -> microphone capture")
+    print("  pyttsx3     -> local text-to-speech")
     return run([
         sys.executable,
         "-m",
