@@ -75,7 +75,8 @@
       "enabled": false,
       "model_path": "",
       "threshold": 0.55
-    }
+    },
+    "piper_model": ""
   },
   "media": {
     "comfyui": {
@@ -197,5 +198,12 @@
   },
   "spatial": {
     "openxr": false
+  },
+  "pose": {
+    "enabled": false
+  },
+  "face_profiles": {
+    "enabled": false,
+    "local_only": true
   }
 }
