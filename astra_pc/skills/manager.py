@@ -15,6 +15,7 @@ from .git import GitSkill
 from .notifications import NotificationsSkill
 from .system import SystemSkill
 from .terminal import TerminalSkill
+from .windows import WindowsSkill
 
 
 class SkillManager:
@@ -33,6 +34,7 @@ class SkillManager:
             NotificationsSkill(),
             TerminalSkill(),
             CodingSkill(),
+            WindowsSkill(),
         ]
         self.skills = {skill.name: skill for skill in builtins}
         if plugin_dir:
