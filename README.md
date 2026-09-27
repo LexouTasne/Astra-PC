@@ -17,7 +17,12 @@ No OpenRouter/OpenAI/API key is required.
 
 ## Default local AI
 
-Astra uses **Qwen3-VL 2B Instruct** through Ollama by default:
+Astra uses two local Qwen models through Ollama:
+
+- **Qwen3 0.6B** for fast text/voice replies
+- **Qwen3-VL 2B Instruct** only for screenshots, images, video frames and visual-agent work
+
+Vision model:
 
 ```text
 qwen3-vl:2b-instruct
@@ -266,7 +271,7 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 
 ## Current status
 
-### Astra 0.4
+### Astra 0.5
 
 - [x] gesture engine
 - [x] two-hand interaction
@@ -298,3 +303,68 @@ Camera frames, screenshots, microphone audio and AI prompts can all stay on the 
 ## License
 
 MIT
+
+
+## Ultra-low-latency profile
+
+Astra 0.5 is tuned around a response-time budget instead of maximum model size.
+
+### Voice fast path
+
+```text
+microphone
+ -> WebRTC VAD (30 ms frames)
+ -> end-of-speech after ~330 ms silence
+ -> resident faster-whisper
+ -> command router OR Qwen3 0.6B
+ -> asynchronous local TTS
+```
+
+Start it with:
+
+```bash
+python -m astra_pc voice --engine fast
+```
+
+The first time faster-whisper runs, its selected Whisper model may need to download.
+Default is `base`. For lower latency use `tiny`; for better recognition use `small`:
+
+```bash
+python -m astra_pc voice --engine fast --whisper-model tiny
+python -m astra_pc voice --engine fast --whisper-model small
+```
+
+The old Vosk engine remains available:
+
+```bash
+python -m astra_pc voice --engine vosk --voice-model /path/to/vosk-model
+```
+
+### Latency strategy
+
+- gesture path never touches an LLM
+- camera queue stays at one frame
+- text requests use 0.6B instead of the vision model
+- text context is intentionally small
+- voice replies are capped to short responses
+- Ollama models use persistent keep-alive
+- text model is preloaded before listening starts
+- vision model warms in a background thread
+- TTS runs outside the reasoning path
+- VAD avoids transcribing silence
+- video analysis downsamples and samples frames
+- generation remains a separate heavy process
+
+### Benchmark
+
+Run:
+
+```bash
+python -m astra_pc benchmark
+```
+
+It preloads the fast text brain and measures multiple local response rounds.
+
+The **sub-7-second goal is a target, not a universal guarantee**. Actual speed depends on CPU/GPU,
+memory bandwidth, model placement and whether a model is already hot in RAM/VRAM. Astra reports
+latency so performance can be tuned for the actual machine.
