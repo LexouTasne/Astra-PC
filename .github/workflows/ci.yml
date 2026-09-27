@@ -26,10 +26,41 @@ jobs:
           pip install -e ".[gesture,mesh,dev]"
       - name: Validate bootstrap shell
         run: bash -n install.sh
+      - name: Validate gesture runtime
+        run: |
+          python - <<'PY'
+          import mediapipe as mp
+          assert hasattr(mp, "solutions"), "Astra gesture engine requires MediaPipe Solutions API"
+          assert hasattr(mp.solutions, "hands")
+          print("MediaPipe Solutions API OK")
+          PY
       - name: Compile
         run: python -m compileall -q astra_pc installer.py
       - name: Test
         run: pytest -q
+
+  linux-awareness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install wakeword ONNX dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[wakeword,browser]"
+          pip install --no-deps "openwakeword>=0.6.0,<1"
+      - name: Validate Linux Python 3.12 wakeword workaround
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import openwakeword
+          import onnxruntime
+          assert importlib.util.find_spec("tflite_runtime") is None
+          print("openWakeWord ONNX path OK without tflite-runtime")
+          PY
+
 
   windows:
     runs-on: windows-latest
