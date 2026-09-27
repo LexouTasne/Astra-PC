@@ -84,12 +84,17 @@ class AstraPlanner:
             }
 
         if any(x in q for x in ("status do pc", "status do computador", "status do sistema")):
-            return {
-                "type": "skill",
-                "skill": "system",
-                "action": "status",
-                "args": {},
-            }
+            return {"type": "skill", "skill": "system", "action": "status", "args": {}}
+
+        if any(x in q for x in ("processos pesados", "top processos", "o que está pesando", "o que esta pesando")):
+            return {"type": "skill", "skill": "system", "action": "top_processes", "args": {}}
+
+        if q in {"pause", "pausa", "pausar música", "pausar musica"}:
+            return {"type": "skill", "skill": "system", "action": "media", "args": {"command": "pause"}}
+        if q in {"play", "tocar música", "tocar musica", "continuar música", "continuar musica"}:
+            return {"type": "skill", "skill": "system", "action": "media", "args": {"command": "play"}}
+        if q in {"próxima música", "proxima musica", "próxima", "proxima"}:
+            return {"type": "skill", "skill": "system", "action": "media", "args": {"command": "next"}}
 
         return None
 
