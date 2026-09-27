@@ -293,6 +293,85 @@ def install_comfyui() -> bool:
     return True
 
 
+def install_accessibility_support() -> bool:
+    print("\n[ACCESSIBILITY] Structural UI understanding:")
+    if platform.system() == "Windows":
+        print("  pywinauto/UI Automation -> buttons, fields, windows and controls")
+        return run([
+            sys.executable, "-m", "pip", "install", "-e", f"{ROOT}[accessibility]"
+        ]).returncode == 0
+
+    if platform.system() == "Linux":
+        if importlib.util.find_spec("pyatspi"):
+            print("  AT-SPI Python bindings already available.")
+            return True
+        print("  Linux uses AT-SPI when pyatspi is available.")
+        print("  Astra will still work with visual fallback if AT-SPI bindings are unavailable.")
+        pm = detect_package_manager()
+        if pm == "dnf":
+            run(["sudo", "dnf", "install", "-y", "python3-pyatspi"])
+        elif pm == "apt":
+            run(["sudo", "apt", "install", "-y", "python3-pyatspi"])
+        elif pm == "pacman":
+            run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "python-pyatspi"])
+        elif pm == "zypper":
+            run(["sudo", "zypper", "--non-interactive", "install", "python3-pyatspi"])
+        return importlib.util.find_spec("pyatspi") is not None
+
+    return False
+
+
+def install_autostart(with_voice: bool = True) -> bool:
+    args = ["-m", "astra_pc", "daemon"]
+    if with_voice:
+        args.append("--voice")
+
+    if platform.system() == "Linux":
+        service_dir = Path.home() / ".config" / "systemd" / "user"
+        service_dir.mkdir(parents=True, exist_ok=True)
+        service = service_dir / "astra-pc.service"
+        command = " ".join([str(sys.executable), *args])
+        service.write_text(
+            "[Unit]\n"
+            "Description=Astra-PC resident local assistant\n"
+            "After=graphical-session.target network.target\n\n"
+            "[Service]\n"
+            "Type=simple\n"
+            f"WorkingDirectory={ROOT}\n"
+            f"ExecStart={command}\n"
+            "Restart=on-failure\n"
+            "RestartSec=2\n"
+            "Environment=PYTHONUNBUFFERED=1\n\n"
+            "[Install]\n"
+            "WantedBy=default.target\n",
+            encoding="utf-8",
+        )
+        if not command_exists("systemctl"):
+            print("systemctl was not found; service file was written but not enabled.")
+            return False
+        run(["systemctl", "--user", "daemon-reload"])
+        return run(["systemctl", "--user", "enable", "--now", "astra-pc.service"]).returncode == 0
+
+    if platform.system() == "Windows":
+        appdata = os.getenv("APPDATA")
+        if not appdata:
+            return False
+        startup = Path(appdata) / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+        startup.mkdir(parents=True, exist_ok=True)
+        script = startup / "Astra-PC.cmd"
+        extra = " --voice" if with_voice else ""
+        script.write_text(
+            "@echo off\r\n"
+            f'cd /d "{ROOT}"\r\n'
+            f'start "" /min "{sys.executable}" -m astra_pc daemon{extra}\r\n',
+            encoding="utf-8",
+        )
+        print("Startup script installed:", script)
+        return True
+
+    return False
+
+
 def install_voice() -> bool:
     print("\n[FAST VOICE] Low-latency offline voice stack:")
     print("  faster-whisper -> accurate local transcription")
@@ -503,6 +582,7 @@ def main() -> int:
     parser.add_argument("--no-voice", action="store_true", help="skip offline voice dependencies")
     parser.add_argument("--no-ai", action="store_true", help="skip Ollama/Qwen local AI")
     parser.add_argument("--media", action="store_true", help="offer optional local ComfyUI setup")
+    parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     args = parser.parse_args()
 
@@ -573,13 +653,20 @@ def main() -> int:
             enable_ydotool_service()
 
     if not args.no_voice:
-        if ask("\nInstall offline voice support?", True, args.yes):
+        if ask("\nInstall ultra-low-latency offline voice support?", True, args.yes):
             install_voice()
+
+    if ask("\nInstall structural accessibility support for more reliable UI control?", True, args.yes):
+        install_accessibility_support()
 
     if not args.no_ai:
         if ask("\nInstall Astra low-latency local AI (Qwen3 0.6B + Qwen3-VL 2B)?", True, args.yes):
             if install_ollama():
                 ensure_astra_models()
+
+    if args.autostart or ask("\nStart Astra automatically with the desktop?", False, False):
+        if install_autostart(with_voice=not args.no_voice):
+            print("Astra resident daemon autostart enabled.")
 
     if args.media:
         if comfyui_available():
@@ -607,6 +694,9 @@ def main() -> int:
     print("Ollama:", "yes" if command_exists("ollama") else "no")
     print("Ollama API:", "yes" if ollama_api_available() else "no")
     print("ComfyUI API:", "yes" if comfyui_available() else "no")
+    print("Accessibility:", "yes" if (
+        importlib.util.find_spec("pyatspi") or importlib.util.find_spec("pywinauto")
+    ) else "visual fallback")
 
     if system == "Linux" and pm == "rpm-ostree":
         print("\nNOTE: package layering on Bazzite/Fedora Atomic may require a reboot.")
