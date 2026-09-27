@@ -1155,6 +1155,39 @@ def kernel_module_available(name: str) -> bool:
     ).returncode == 0
 
 
+def configure_v4l2loopback_boot(assume_yes: bool) -> None:
+    if platform.system() != "Linux":
+        return
+
+    load_file = Path("/etc/modules-load.d/astra-v4l2loopback.conf")
+    option_file = Path("/etc/modprobe.d/astra-v4l2loopback.conf")
+    already = False
+    try:
+        already = (
+            load_file.exists()
+            and "v4l2loopback" in load_file.read_text(encoding="utf-8", errors="ignore")
+        )
+    except Exception:
+        pass
+
+    if already:
+        return
+
+    if not ask("Load the Astra/DroidCam virtual camera automatically after reboot?", True, assume_yes):
+        return
+
+    script = (
+        "printf '%s\\n' 'v4l2loopback' > /etc/modules-load.d/astra-v4l2loopback.conf && "
+        "printf '%s\\n' 'options v4l2loopback exclusive_caps=1 card_label=DroidCam' "
+        "> /etc/modprobe.d/astra-v4l2loopback.conf"
+    )
+    result = run(["sudo", "sh", "-c", script])
+    if result.returncode == 0:
+        print("[DROIDCAM VIDEO] v4l2loopback configured for future boots.")
+    else:
+        print("Could not persist v4l2loopback boot configuration; current session can still work.")
+
+
 def ensure_v4l2loopback(
     pm: str | None,
     assume_yes: bool,
@@ -1167,6 +1200,8 @@ def ensure_v4l2loopback(
     for module in ("v4l2loopback", "v4l2loopback_dc"):
         if kernel_module_loaded(module):
             print(f"[DROIDCAM VIDEO] {module} already loaded.")
+            if module == "v4l2loopback":
+                configure_v4l2loopback_boot(assume_yes)
             return True, False
 
     # Prefer the standard module: DroidCam officially supports it and Bazzite
@@ -1183,6 +1218,7 @@ def ensure_v4l2loopback(
             if result.returncode == 0 and kernel_module_loaded("v4l2loopback"):
                 time.sleep(0.5)
                 print("[DROIDCAM VIDEO] v4l2loopback loaded.")
+                configure_v4l2loopback_boot(assume_yes)
                 return True, False
             print("The installed v4l2loopback module could not be loaded.")
 
