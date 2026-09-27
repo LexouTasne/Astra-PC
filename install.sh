@@ -68,8 +68,6 @@ fi
 cd "$DEST"
 
 say "Garantindo Python 3.12 isolado..."
-"$UV" python install 3.12
-
 VENV_PY="$DEST/.venv/bin/python"
 NEED_VENV=1
 if [[ -x "$VENV_PY" ]]; then
@@ -77,7 +75,12 @@ if [[ -x "$VENV_PY" ]]; then
   [[ "$VERSION" == "3.12" ]] && NEED_VENV=0
 fi
 if [[ "$NEED_VENV" == "1" ]]; then
-  "$UV" venv --clear --python 3.12 "$DEST/.venv"
+  "$UV" venv --clear --seed --python 3.12 "$DEST/.venv"
+fi
+
+if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+  say "Reparando ambiente sem pip..."
+  "$UV" pip install --python "$VENV_PY" pip setuptools wheel
 fi
 
 say "Executando Astra installer..."
