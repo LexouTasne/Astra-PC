@@ -12,6 +12,7 @@ from astra_pc.input.factory import create_input_backend
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.vision.hands import HandTracker
 from astra_pc.voice.commands import CommandRouter
+from astra_pc.vision.camera_source import open_first_camera
 
 
 class AstraRuntime:
@@ -43,18 +44,25 @@ class AstraRuntime:
 
     def run(self) -> None:
         cam_cfg = self.config.section("camera")
+        opened = open_first_camera(
+            preferred=int(cam_cfg.get("index", 0)),
+            width=int(cam_cfg.get("width", 640)),
+            height=int(cam_cfg.get("height", 360)),
+            fps=int(cam_cfg.get("target_fps", 30)),
+            limit=int(cam_cfg.get("probe_limit", 16)),
+        )
+        if opened is None:
+            raise RuntimeError(
+                "camera_unavailable: no camera produced usable frames"
+            )
+
+        cap = opened.cap
+        print(f"[camera] using index {opened.index}: {opened.source}")
+
+        # Load MediaPipe only after a working camera exists. This avoids GPU/TFLite
+        # initialization noise and latency when there is no usable video source.
         tracker = HandTracker(self.config.section("tracking"))
         gestures = GestureEngine(self.config.section("gestures"))
-
-        cap = cv2.VideoCapture(int(cam_cfg["index"]))
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(cam_cfg["width"]))
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(cam_cfg["height"]))
-        cap.set(cv2.CAP_PROP_FPS, int(cam_cfg["target_fps"]))
-        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-
-        if not cap.isOpened():
-            tracker.close()
-            raise RuntimeError("Astra could not open the configured camera.")
 
         monitors = get_monitors()
         if monitors:
@@ -68,7 +76,7 @@ class AstraRuntime:
             screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
         self._start_voice_if_requested(gestures)
 
-        print("Astra v0.7 gesture engine online.")
+        print("Astra v0.8 gesture engine online.")
         print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
@@ -113,7 +121,7 @@ class AstraRuntime:
                     color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
                     cv2.putText(
                         frame,
-                        f"ASTRA 0.7 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
+                        f"ASTRA 0.8 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
                         (18, 32),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
