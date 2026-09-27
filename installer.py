@@ -1340,6 +1340,7 @@ def main() -> int:
     parser.add_argument("--awareness-extras", action="store_true", help="install optional wake-word and browser DOM packages")
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
+    parser.add_argument("--camera-only", action="store_true", help="repair/test only camera and DroidCam setup")
     parser.add_argument("--start", action="store_true", help="start Astra after installation")
     parser.add_argument("--full", action="store_true", help="install all Astra features, autostart and start now")
     parser.add_argument("--allow-layering", action="store_true", help="allow rpm-ostree package layering on immutable Linux")
@@ -1402,6 +1403,31 @@ def main() -> int:
 
     if args.diagnose_only:
         return 0
+
+    if args.camera_only:
+        print("\n[CAMERA-ONLY MODE]")
+        cameras = probe_cameras_opencv()
+        if cameras:
+            print("Working camera source(s):")
+            for idx, w, h in cameras:
+                print(f"  camera {idx}: {w}x{h}")
+            return 0
+
+        maybe_install_droidcam(pm, args.yes, args.allow_layering)
+        cameras = probe_cameras_opencv()
+        if cameras:
+            print("\nCamera repair successful:")
+            for idx, w, h in cameras:
+                print(f"  camera {idx}: {w}x{h}")
+            return 0
+
+        print("\nNo OpenCV camera source is usable yet.")
+        if system == "Linux" and pm == "rpm-ostree" and not args.allow_layering:
+            print("Bazzite may need the DroidCam V4L2 driver.")
+            print("If you want Astra to layer the required host packages, rerun:")
+            print("  python installer.py --camera-only --yes --allow-layering")
+            print("A reboot may be required after rpm-ostree changes.")
+        return 4
 
     if system not in {"Windows", "Linux", "Darwin"}:
         print("\nAstra currently targets Windows, Linux and Apple Silicon macOS.")
