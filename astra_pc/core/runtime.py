@@ -50,7 +50,7 @@ class AstraRuntime:
             raise RuntimeError("Astra could not open the configured camera.")
 
         screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
-        self._start_voice_if_requested()
+        self._start_voice_if_requested(gestures)
 
         print("Astra v0.1 online.")
         print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
@@ -136,7 +136,7 @@ class AstraRuntime:
 
         return int(self._smooth_xy[0]), int(self._smooth_xy[1])
 
-    def _start_voice_if_requested(self) -> None:
+    def _start_voice_if_requested(self, gestures: GestureEngine) -> None:
         if self.voice_model is None:
             return
 
@@ -144,7 +144,14 @@ class AstraRuntime:
 
         def on_text(text: str) -> None:
             result = self.router.execute(text)
-            print(f"[voice] {text} -> {result.message}")
+            if result.message == "pause_gestures":
+                gestures.set_paused(True)
+                print("[voice] gesture control paused")
+            elif result.message == "resume_gestures":
+                gestures.set_paused(False)
+                print("[voice] gesture control resumed")
+            else:
+                print(f"[voice] {text} -> {result.message}")
 
         self.voice = VoskVoiceEngine(self.voice_model, on_text)
         self.voice.start()
