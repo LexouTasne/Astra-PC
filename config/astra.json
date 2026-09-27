@@ -1,13 +1,42 @@
 {
-  "camera": {"index": 0, "width": 640, "height": 360, "target_fps": 30, "mirror": true},
-  "tracking": {"max_hands": 2, "min_detection_confidence": 0.55, "min_tracking_confidence": 0.5, "model_complexity": 0},
-  "pointer": {"enabled": true, "active_margin": 0.10, "smoothing": 0.38, "deadzone_px": 2.0},
+  "camera": {
+    "index": 0,
+    "width": 640,
+    "height": 360,
+    "target_fps": 30,
+    "mirror": true
+  },
+  "tracking": {
+    "max_hands": 2,
+    "min_detection_confidence": 0.55,
+    "min_tracking_confidence": 0.5,
+    "model_complexity": 0
+  },
+  "pointer": {
+    "enabled": true,
+    "active_margin": 0.10,
+    "smoothing": 0.38,
+    "deadzone_px": 2.0
+  },
   "gestures": {
     "pinch_threshold": 0.045,
     "click_release_threshold": 0.065,
+    "right_pinch_threshold": 0.05,
     "drag_hold_ms": 220,
     "pause_cooldown_ms": 900,
     "scroll_gain": 8.0,
-    "scroll_deadzone": 0.007
+    "scroll_deadzone": 0.007,
+    "swipe_velocity": 1.25,
+    "swipe_cooldown_ms": 700,
+    "two_hand_zoom_threshold": 0.035,
+    "two_hand_rotate_threshold_deg": 10.0
+  },
+  "actions": {
+    "zoom_in": ["ctrl", "+"],
+    "zoom_out": ["ctrl", "-"],
+    "swipe_right": ["alt", "tab"],
+    "swipe_left": ["alt", "shift", "tab"],
+    "rotate_right": [],
+    "rotate_left": []
   }
 }
