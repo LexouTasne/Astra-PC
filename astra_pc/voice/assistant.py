@@ -32,7 +32,22 @@ class FastSpeaker:
         except queue.Full:
             pass
 
+    def cancel(self) -> None:
+        while True:
+            try:
+                self._q.get_nowait()
+            except queue.Empty:
+                break
+        if shutil.which("spd-say"):
+            subprocess.run(
+                ["spd-say", "-C"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
     def stop(self) -> None:
+        self.cancel()
         self._stop.set()
         try:
             self._q.put_nowait("")
@@ -154,8 +169,17 @@ class AstraVoiceAssistant:
         if pos < 0:
             return
         request = text[pos + len(self.wake_word):].strip(" ,:;-")
+
+        # Barge-in: hearing the wake word immediately cancels queued/current speech.
+        if self.speaker:
+            self.speaker.cancel()
+
         if not request:
             self._speak("Sim?")
+            return
+
+        if request.lower() in {"para", "pare", "cala", "cancelar", "stop", "silencio", "silêncio"}:
+            print("[barge-in] speech cancelled")
             return
         try:
             self._requests.put_nowait((request, time.perf_counter()))
