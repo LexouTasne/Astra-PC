@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .ollama_client import OllamaClient
+from .router import ModelRouter
 
 
 SYSTEM_PROMPT = """You are Astra, a local desktop assistant.
@@ -12,9 +13,16 @@ executed unless the caller actually provided a tool that executed it. Answer in 
 
 
 class AstraBrain:
-    def __init__(self, text_client: OllamaClient, vision_client: OllamaClient):
+    def __init__(
+        self,
+        text_client: OllamaClient,
+        vision_client: OllamaClient,
+        strong_client: OllamaClient | None = None,
+    ):
         self.text_client = text_client
         self.vision_client = vision_client
+        self.strong_client = strong_client
+        self.router = ModelRouter(text_client, vision_client, strong_client)
 
     def preload(self) -> None:
         self.text_client.preload()
@@ -23,11 +31,13 @@ class AstraBrain:
         self.vision_client.preload()
 
     def ask(self, text: str) -> str:
-        return self.text_client.chat(
+        client = self.router.choose(text)
+        strong = self.strong_client is not None and client is self.strong_client
+        return client.chat(
             text,
             system=SYSTEM_PROMPT,
-            num_ctx=3072,
-            num_predict=96,
+            num_ctx=6144 if strong else 3072,
+            num_predict=220 if strong else 96,
             temperature=0.15,
         )
 
