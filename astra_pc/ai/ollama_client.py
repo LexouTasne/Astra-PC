@@ -13,22 +13,23 @@ class OllamaError(RuntimeError):
 
 
 class OllamaClient:
-    """Small stdlib-only Ollama client used by Astra's local multimodal brain."""
+    """Small stdlib-only Ollama client tuned for low latency."""
 
     def __init__(
         self,
-        model: str = "qwen3-vl:2b-instruct",
+        model: str,
         host: str = "http://127.0.0.1:11434",
         timeout: int = 180,
+        keep_alive: str = "-1",
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout = timeout
+        self.keep_alive = keep_alive
 
     def available(self) -> bool:
         try:
-            req = urllib.request.Request(self.host + "/api/tags")
-            with urllib.request.urlopen(req, timeout=2) as response:
+            with urllib.request.urlopen(self.host + "/api/tags", timeout=2) as response:
                 return response.status == 200
         except Exception:
             return False
@@ -40,6 +41,16 @@ class OllamaClient:
         except Exception:
             return []
 
+    def preload(self) -> None:
+        """Load the model into memory and keep it hot."""
+        payload = {
+            "model": self.model,
+            "prompt": "",
+            "stream": False,
+            "keep_alive": self.keep_alive,
+        }
+        self._request("/api/generate", payload, timeout=self.timeout)
+
     def chat(
         self,
         prompt: str,
@@ -47,7 +58,8 @@ class OllamaClient:
         images: Iterable[str | Path] = (),
         system: str | None = None,
         temperature: float = 0.2,
-        num_ctx: int = 8192,
+        num_ctx: int = 4096,
+        num_predict: int = 120,
     ) -> str:
         messages: list[dict] = []
         if system:
@@ -63,9 +75,13 @@ class OllamaClient:
             "model": self.model,
             "messages": messages,
             "stream": False,
+            "keep_alive": self.keep_alive,
             "options": {
                 "temperature": temperature,
                 "num_ctx": num_ctx,
+                "num_predict": num_predict,
+                "top_k": 20,
+                "top_p": 0.9,
             },
         }
         data = self._request("/api/chat", payload)
@@ -76,8 +92,7 @@ class OllamaClient:
 
     def pull(self, model: str | None = None) -> None:
         target = model or self.model
-        payload = {"model": target, "stream": False}
-        self._request("/api/pull", payload, timeout=3600)
+        self._request("/api/pull", {"model": target, "stream": False}, timeout=3600)
 
     def _request(
         self,
