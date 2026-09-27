@@ -33,6 +33,7 @@ class AstraRuntime:
         self.deadzone = float(pointer["deadzone_px"])
         self.margin = float(pointer["active_margin"])
         self._smooth_xy: tuple[float, float] | None = None
+        self.actions = config.data.get("actions", {})
 
     def run(self) -> None:
         cam_cfg = self.config.section("camera")
@@ -52,7 +53,7 @@ class AstraRuntime:
         screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
         self._start_voice_if_requested(gestures)
 
-        print("Astra v0.1 online.")
+        print("Astra v0.2 online.")
         print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
@@ -67,32 +68,52 @@ class AstraRuntime:
                     frame = cv2.flip(frame, 1)
 
                 hands = tracker.process(frame)
-                label = "no-hand"
-                if hands:
-                    out = gestures.update(hands[0])
-                    label = out.label
+                out = gestures.update(hands)
+                label = out.label
 
-                    if out.pointer is not None:
-                        x, y = self._map_pointer(out.pointer, screen_w, screen_h)
-                        if self.backend:
-                            self.backend.move(x, y)
+                if out.pointer is not None:
+                    x, y = self._map_pointer(out.pointer, screen_w, screen_h)
+                    if self.backend:
+                        self.backend.move(x, y)
 
-                    if out.left_down is not None and self.backend:
-                        self.backend.left_button(out.left_down)
+                if out.left_down is not None and self.backend:
+                    self.backend.left_button(out.left_down)
 
-                    if out.scroll and self.backend:
-                        self.backend.scroll(out.scroll)
+                if out.right_click and self.backend:
+                    self.backend.right_click()
+
+                if out.scroll and self.backend:
+                    self.backend.scroll(out.scroll)
+
+                if out.zoom_steps:
+                    self._dispatch_action("zoom_in" if out.zoom_steps > 0 else "zoom_out")
+
+                if out.rotate_steps:
+                    self._dispatch_action("rotate_right" if out.rotate_steps > 0 else "rotate_left")
+
+                if out.swipe:
+                    self._dispatch_action(f"swipe_{out.swipe}")
 
                 if self.show_camera:
                     color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
                     cv2.putText(
                         frame,
-                        f"ASTRA | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
+                        f"ASTRA 0.2 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
                         (18, 32),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
                         color,
                         2,
+                        cv2.LINE_AA,
+                    )
+                    cv2.putText(
+                        frame,
+                        f"hands: {len(hands)}",
+                        (18, 60),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.55,
+                        color,
+                        1,
                         cv2.LINE_AA,
                     )
                     cv2.imshow("Astra-PC", frame)
@@ -113,6 +134,17 @@ class AstraRuntime:
             cap.release()
             cv2.destroyAllWindows()
             print("Astra offline.")
+
+    def _dispatch_action(self, name: str) -> None:
+        keys = self.actions.get(name, [])
+        if self.dry_run:
+            if keys:
+                print(f"[gesture] {name}: {'+'.join(keys)}")
+            else:
+                print(f"[gesture] {name}")
+            return
+        if self.backend and keys:
+            self.backend.hotkey(list(keys))
 
     def _map_pointer(self, normalized: tuple[float, float], w: int, h: int) -> tuple[int, int]:
         x, y = normalized
