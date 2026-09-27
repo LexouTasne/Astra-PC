@@ -21,3 +21,6 @@ class InputBackend(ABC):
 
     @abstractmethod
     def hotkey(self, keys: list[str]) -> None: ...
+
+    @abstractmethod
+    def type_text(self, text: str) -> None: ...
