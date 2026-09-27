@@ -121,6 +121,11 @@ class AstraVoiceAssistant:
         print(f"Voice Astra online. Say '{self.wake_word}' followed by a request.")
         print("Fast path: VAD -> resident ASR -> 0.6B text model -> async TTS")
         self.brain.preload()
+        threading.Thread(
+            target=self._warm_vision,
+            name="astra-vision-warmup",
+            daemon=True,
+        ).start()
         self._voice.start()
         try:
             while not self._stop.is_set():
@@ -135,6 +140,13 @@ class AstraVoiceAssistant:
             self._voice.stop()
             if self.speaker:
                 self.speaker.stop()
+
+    def _warm_vision(self) -> None:
+        try:
+            self.brain.preload_vision()
+            print("[warmup] vision model ready")
+        except Exception as exc:
+            print(f"[warmup] vision model skipped: {exc}")
 
     def _on_text(self, text: str) -> None:
         normalized = text.lower().strip()
