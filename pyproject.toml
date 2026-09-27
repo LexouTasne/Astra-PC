@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.2.0"
-description = "Fast local-first gesture and voice desktop controller"
+version = "0.3.0"
+description = "Fast local-first gesture, vision and voice desktop assistant"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
@@ -14,7 +14,8 @@ dependencies = [
   "numpy>=1.26,<3",
   "opencv-python>=4.9",
   "mediapipe>=0.10.14",
-  "pynput>=1.7.7"
+  "pynput>=1.7.7",
+  "Pillow>=10"
 ]
 
 [project.optional-dependencies]
