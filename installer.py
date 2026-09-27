@@ -664,7 +664,10 @@ def main() -> int:
             if install_ollama():
                 ensure_astra_models()
 
-    if args.autostart or ask("\nStart Astra automatically with the desktop?", False, False):
+    want_autostart = args.autostart
+    if not args.yes and not args.autostart:
+        want_autostart = ask("\nStart Astra automatically with the desktop?", False, False)
+    if want_autostart:
         if install_autostart(with_voice=not args.no_voice):
             print("Astra resident daemon autostart enabled.")
 
