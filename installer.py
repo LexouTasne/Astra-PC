@@ -158,6 +158,70 @@ def install_uv() -> str | None:
     return find_uv()
 
 
+def uv_install_into(
+    python_exe: str | Path,
+    *packages: str,
+) -> bool:
+    """Install packages into an interpreter without requiring pip inside it."""
+    uv = find_uv() or install_uv()
+    if uv:
+        return run([
+            uv,
+            "pip",
+            "install",
+            "--python",
+            str(python_exe),
+            *packages,
+        ]).returncode == 0
+
+    # Last-resort fallback for environments where uv cannot be installed.
+    probe = subprocess.run(
+        [str(python_exe), "-m", "pip", "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if probe.returncode != 0:
+        seed = subprocess.run(
+            [str(python_exe), "-m", "ensurepip", "--upgrade"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if seed.returncode != 0:
+            print("Neither uv nor pip/ensurepip is available for:", python_exe)
+            return False
+
+    return run([
+        str(python_exe),
+        "-m",
+        "pip",
+        "install",
+        *packages,
+    ]).returncode == 0
+
+
+def ensure_seed_packages(python_exe: str | Path) -> bool:
+    """Repair old uv-created virtualenvs that were created without pip."""
+    probe = subprocess.run(
+        [str(python_exe), "-m", "pip", "--version"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if probe.returncode == 0:
+        return True
+
+    print("[PYTHON RUNTIME] Existing .venv has no pip; repairing it...")
+    return uv_install_into(
+        python_exe,
+        "pip",
+        "setuptools",
+        "wheel",
+    )
+
+
 def ensure_runtime(assume_yes: bool = False) -> None:
     if runtime_supported():
         return
@@ -190,9 +254,8 @@ def ensure_runtime(assume_yes: bool = False) -> None:
         print("Install uv manually, then rerun installer.py.")
         raise SystemExit(2)
 
-    print(f"\n[PYTHON RUNTIME] Ensuring Python {RUNTIME_PYTHON}...")
-    if run([uv, "python", "install", RUNTIME_PYTHON]).returncode != 0:
-        raise SystemExit("uv could not install the Astra Python runtime.")
+    print(f"\n[PYTHON RUNTIME] Ensuring isolated Python {RUNTIME_PYTHON}...")
+    print("uv will reuse an existing compatible interpreter or download one if needed.")
 
     needs_create = True
     if managed.exists():
@@ -210,12 +273,18 @@ def ensure_runtime(assume_yes: bool = False) -> None:
             uv,
             "venv",
             "--clear",
+            "--seed",
             "--python",
             RUNTIME_PYTHON,
             str(ROOT / ".venv"),
         ])
         if result.returncode != 0 or not managed.exists():
             raise SystemExit("Could not create Astra's managed .venv.")
+
+    if not ensure_seed_packages(managed):
+        raise SystemExit(
+            "Astra created/found Python 3.12, but could not prepare package installation."
+        )
 
     env = os.environ.copy()
     env[BOOTSTRAP_ENV] = "1"
@@ -369,14 +438,7 @@ def install_python_core() -> bool:
     if not gestures_ok:
         print("  gesture engine: unavailable on this platform; installing the rest of Astra.")
 
-    return run([
-        sys.executable,
-        "-m",
-        "pip",
-        "install",
-        "-e",
-        target,
-    ]).returncode == 0
+    return uv_install_into(sys.executable, "-e", target)
 
 
 def ollama_api_available() -> bool:
@@ -536,16 +598,30 @@ def install_comfyui() -> bool:
             return False
 
     venv = target / ".venv"
-    if not venv.exists():
-        if run([sys.executable, "-m", "venv", str(venv)]).returncode != 0:
+    comfy_python = venv / (
+        "Scripts/python.exe" if platform.system() == "Windows" else "bin/python"
+    )
+    uv = find_uv() or install_uv()
+    if not comfy_python.exists():
+        if uv:
+            if run([
+                uv,
+                "venv",
+                "--seed",
+                "--python",
+                str(sys.executable),
+                str(venv),
+            ]).returncode != 0:
+                return False
+        elif run([sys.executable, "-m", "venv", str(venv)]).returncode != 0:
             return False
 
-    pip = venv / ("Scripts/pip.exe" if platform.system() == "Windows" else "bin/pip")
-    if not pip.exists():
-        return False
-
     print("Installing ComfyUI Python dependencies. This optional step can be large.")
-    if run([str(pip), "install", "-r", str(target / "requirements.txt")]).returncode != 0:
+    if not uv_install_into(
+        comfy_python,
+        "-r",
+        str(target / "requirements.txt"),
+    ):
         return False
 
     print("ComfyUI installed at:", target)
@@ -559,9 +635,11 @@ def install_accessibility_support() -> bool:
     print("\n[ACCESSIBILITY] Structural UI understanding:")
     if platform.system() == "Windows":
         print("  pywinauto/UI Automation -> buttons, fields, windows and controls")
-        return run([
-            sys.executable, "-m", "pip", "install", "-e", f"{ROOT}[accessibility]"
-        ]).returncode == 0
+        return uv_install_into(
+            sys.executable,
+            "-e",
+            f"{ROOT}[accessibility]",
+        )
 
     if platform.system() == "Linux":
         if importlib.util.find_spec("pyatspi"):
@@ -839,24 +917,18 @@ def install_voice() -> bool:
     print("  sounddevice    -> microphone capture")
     print("  pyttsx3/system TTS -> local spoken replies")
     print("  Vosk remains available as a lightweight fallback")
-    fast = run([
+    fast = uv_install_into(
         sys.executable,
-        "-m",
-        "pip",
-        "install",
         "-e",
         f"{ROOT}[voice-fast]",
-    ]).returncode == 0
+    )
     if not fast:
         return False
-    run([
+    uv_install_into(
         sys.executable,
-        "-m",
-        "pip",
-        "install",
         "-e",
         f"{ROOT}[voice]",
-    ])
+    )
     return True
 
 def install_ydotool(pm: str | None, allow_layering: bool = False) -> bool:
@@ -1241,7 +1313,11 @@ def main() -> int:
 
     if args.awareness_extras:
         print("\n[AWARENESS EXTRAS] Installing dedicated wake-word + optional browser DOM support.")
-        run([sys.executable, "-m", "pip", "install", "-e", f"{ROOT}[wakeword,browser]"])
+        uv_install_into(
+            sys.executable,
+            "-e",
+            f"{ROOT}[wakeword,browser]",
+        )
 
     if args.media:
         if comfyui_available():
