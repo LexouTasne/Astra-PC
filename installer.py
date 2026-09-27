@@ -45,9 +45,9 @@ def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
     return answer in {"y", "yes", "s", "sim"}
 
 
-def run(cmd: list[str]) -> subprocess.CompletedProcess:
+def run(cmd: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess:
     print("  $", " ".join(cmd))
-    return subprocess.run(cmd, check=False)
+    return subprocess.run(cmd, check=False, cwd=str(cwd) if cwd else None)
 
 
 def command_exists(name: str) -> bool:
@@ -249,18 +249,6 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
         print("Official instructions: https://www.dev47apps.com/droidcam/linux/")
         return False
 
-    if not command_exists("unzip"):
-        if pm == "dnf":
-            run(["sudo", "dnf", "install", "-y", "unzip"])
-        elif pm == "apt":
-            run(["sudo", "apt", "install", "-y", "unzip"])
-        elif pm == "pacman":
-            run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "unzip"])
-        elif pm == "rpm-ostree":
-            print("unzip is missing on this Atomic system.")
-            print("Install it with rpm-ostree or extract the archive manually after reboot.")
-            run(["sudo", "rpm-ostree", "install", "unzip"])
-
     with tempfile.TemporaryDirectory(prefix="astra-droidcam-") as td:
         archive = Path(td) / "droidcam.zip"
         target = Path(td) / "droidcam"
@@ -280,7 +268,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
             return False
 
         client_installer.chmod(client_installer.stat().st_mode | 0o111)
-        if run(["sudo", str(client_installer)]).returncode != 0:
+        if run(["sudo", str(client_installer)], cwd=target).returncode != 0:
             print("DroidCam client installation failed.")
             return False
 
@@ -295,8 +283,15 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
             return True
 
         install_linux_build_tools(pm)
+
+        kernel_build = Path("/usr/src/kernels") / platform.release()
+        if pm == "rpm-ostree" and not (command_exists("gcc") and command_exists("make") and kernel_build.exists()):
+            print("\nBazzite/Fedora Atomic needs the newly layered build packages active first.")
+            print("Reboot, then run installer.py again; it will continue the DroidCam driver setup.")
+            return True
+
         video_installer.chmod(video_installer.stat().st_mode | 0o111)
-        result = run(["sudo", str(video_installer)])
+        result = run(["sudo", str(video_installer)], cwd=target)
 
         if result.returncode != 0:
             print("\nThe video driver could not be installed automatically.")
