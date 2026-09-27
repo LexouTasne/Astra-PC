@@ -110,7 +110,7 @@ class AstraDaemon:
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
-        self.brain.preload()
+        threading.Thread(target=self._warm_text, daemon=True).start()
         threading.Thread(target=self._warm_vision, daemon=True).start()
         threading.Thread(target=self._context_loop, daemon=True).start()
         self._start_mesh()
@@ -234,6 +234,14 @@ class AstraDaemon:
     def _voice_request(self, text: str) -> str:
         result = self.handle({"type": "ask", "text": text})
         return str(result.get("message") or result.get("error") or "")
+
+    def _warm_text(self) -> None:
+        try:
+            self.brain.preload()
+            self.bus.publish("model.ready", model="text")
+        except Exception as exc:
+            self.bus.publish("model.error", model="text", error=str(exc))
+            print(f"[model:text] warmup failed: {exc}")
 
     def _warm_vision(self) -> None:
         try:
