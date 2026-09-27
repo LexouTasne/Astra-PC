@@ -194,6 +194,9 @@ class AstraDaemon:
                 name=mesh_cfg.get("name") or "Astra",
                 request_handler=self.handle,
                 event_handler=self._mesh_event,
+                sensor_rate_limit_hz=float(
+                    mesh_cfg.get("sensor_rate_limit_hz", 30)
+                ),
             )
             self.mesh_server.start()
         except Exception as exc:
