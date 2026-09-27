@@ -35,9 +35,9 @@ class Check:
 
 def banner() -> None:
     print("=" * 68)
-    print(" ASTRA-PC 0.7 AWARENESS INSTALLER / DIAGNOSTIC")
+    print(" ASTRA-PC 0.8 MESH INSTALLER / DIAGNOSTIC")
     print("=" * 68)
-    print("Resident context + fast voice + local multimodal AI + semantic memory.\n")
+    print("Distributed Astra: desktop + Android + secure local Mesh + local AI.\n")
 
 
 def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
@@ -86,7 +86,7 @@ def download_file(url: str, target: Path, timeout: int = 30) -> bool:
     try:
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "Astra-PC/0.7 (+https://github.com/LexouTasne/Astra-PC)"},
+            headers={"User-Agent": "Astra-PC/0.8 (+https://github.com/LexouTasne/Astra-PC)"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as response:
             target.write_bytes(response.read())
@@ -363,7 +363,8 @@ def install_python_core() -> bool:
     print("  MediaPipe -> gesture/pose tracking when a compatible wheel exists")
     print("  platform  ->", platform_detail)
 
-    target = f"{ROOT}[gesture]" if gestures_ok else str(ROOT)
+    target = f"{ROOT}[gesture,mesh]" if gestures_ok else f"{ROOT}[mesh]"
+    print("  Astra Mesh -> TLS/WebSocket/mDNS connection between PCs and Android")
     if not gestures_ok:
         print("  gesture engine: unavailable on this platform; installing the rest of Astra.")
 
@@ -729,6 +730,68 @@ def start_astra(with_voice: bool = True) -> bool:
     return False
 
 
+def mesh_port_available(port: int = 8767) -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def configure_mesh_firewall(port: int, assume_yes: bool = False) -> None:
+    if platform.system() == "Linux":
+        if command_exists("firewall-cmd"):
+            state = subprocess.run(
+                ["firewall-cmd", "--state"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if state.returncode == 0:
+                if ask(
+                    f"Allow Astra Mesh TCP {port} through firewalld?",
+                    True,
+                    assume_yes,
+                ):
+                    run(["sudo", "firewall-cmd", "--permanent", f"--add-port={port}/tcp"])
+                    run(["sudo", "firewall-cmd", "--reload"])
+                return
+        if command_exists("ufw"):
+            status = subprocess.run(
+                ["ufw", "status"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if "Status: active" in status.stdout:
+                if ask(
+                    f"Allow Astra Mesh TCP {port} through UFW?",
+                    True,
+                    assume_yes,
+                ):
+                    run(["sudo", "ufw", "allow", f"{port}/tcp"])
+                return
+
+    if platform.system() == "Windows":
+        ps = shutil.which("powershell") or shutil.which("pwsh")
+        if ps and ask(
+            f"Create Windows Firewall rule for Astra Mesh TCP {port}?",
+            True,
+            assume_yes,
+        ):
+            command = (
+                "$name='Astra Mesh'; "
+                "Get-NetFirewallRule -DisplayName $name -ErrorAction SilentlyContinue | "
+                "Remove-NetFirewallRule -ErrorAction SilentlyContinue; "
+                f"New-NetFirewallRule -DisplayName $name -Direction Inbound "
+                f"-Action Allow -Protocol TCP -LocalPort {port} | Out-Null"
+            )
+            run([ps, "-NoProfile", "-Command", command])
+
+
 def install_voice() -> bool:
     print("\n[FAST VOICE] Low-latency offline voice stack:")
     print("  faster-whisper -> accurate local transcription")
@@ -1000,6 +1063,7 @@ def main() -> int:
     parser.add_argument("--yes", action="store_true", help="accept recommended installations")
     parser.add_argument("--no-voice", action="store_true", help="skip offline voice dependencies")
     parser.add_argument("--no-ai", action="store_true", help="skip Ollama/Qwen local AI")
+    parser.add_argument("--no-mesh", action="store_true", help="disable Astra Mesh LAN setup")
     parser.add_argument("--media", action="store_true", help="offer optional local ComfyUI setup")
     parser.add_argument("--strong-ai", action="store_true", help="also download optional Qwen3 4B reasoning model")
     parser.add_argument("--awareness-extras", action="store_true", help="install optional wake-word and browser DOM packages")
@@ -1100,6 +1164,14 @@ def main() -> int:
         else:
             enable_ydotool_service()
 
+    if not args.no_mesh:
+        print("\n[MESH] Secure PC/Android network")
+        print("  HTTPS + WebSocket + one-time pairing + per-device permissions")
+        if mesh_port_available(8767):
+            configure_mesh_firewall(8767, args.yes)
+        else:
+            print("  Port 8767 is already in use. If Astra is already running, this is expected.")
+
     if not args.no_voice:
         if ask("\nInstall ultra-low-latency offline voice support?", True, args.yes):
             install_voice()
@@ -1152,6 +1224,8 @@ def main() -> int:
     print("Ollama:", "yes" if command_exists("ollama") else "no")
     print("Ollama API:", "yes" if ollama_api_available() else "no")
     print("ComfyUI API:", "yes" if comfyui_available() else "no")
+    print("Astra Mesh:", "yes" if importlib.util.find_spec("aiohttp") and importlib.util.find_spec("cryptography") else "no")
+    print("Mesh port 8767:", "available" if mesh_port_available(8767) else "in use / Astra running")
     print("Semantic embeddings:", "configured via qwen3-embedding:0.6b")
     print("Dedicated wake word:", "yes" if importlib.util.find_spec("openwakeword") else "optional")
     print("Browser DOM:", "yes" if importlib.util.find_spec("playwright") else "optional")
