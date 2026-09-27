@@ -38,5 +38,20 @@
     "swipe_left": ["alt", "shift", "tab"],
     "rotate_right": [],
     "rotate_left": []
+  },
+  "ai": {
+    "provider": "ollama",
+    "host": "http://127.0.0.1:11434",
+    "model": "qwen3-vl:2b-instruct",
+    "timeout": 180,
+    "context": 8192
+  },
+  "media": {
+    "comfyui": {
+      "host": "http://127.0.0.1:8188",
+      "timeout": 900,
+      "image_workflow": "workflows/image_basic.json",
+      "checkpoint": ""
+    }
   }
 }
