@@ -60,6 +60,42 @@ def command_exists(name: str) -> bool:
     return shutil.which(name) is not None
 
 
+def download_file(url: str, target: Path, timeout: int = 30) -> bool:
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if command_exists("curl"):
+        p = subprocess.run(
+            ["curl", "-fL", "--retry", "3", "--connect-timeout", "10", "-o", str(target), url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if p.returncode == 0 and target.exists():
+            return True
+
+    if command_exists("wget"):
+        p = subprocess.run(
+            ["wget", "-q", "--timeout", str(timeout), "-O", str(target), url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if p.returncode == 0 and target.exists():
+            return True
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Astra-PC/0.7 (+https://github.com/LexouTasne/Astra-PC)"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            target.write_bytes(response.read())
+        return target.exists()
+    except Exception as exc:
+        print(f"Download failed: {url}: {exc}")
+        return False
+
+
 def runtime_supported() -> bool:
     return SUPPORTED_PYTHON_MIN <= sys.version_info[:2] < SUPPORTED_PYTHON_MAX
 
@@ -108,7 +144,8 @@ def install_uv() -> str | None:
         else:
             with tempfile.TemporaryDirectory(prefix="astra-uv-") as td:
                 script = Path(td) / "uv-install.sh"
-                urllib.request.urlretrieve("https://astral.sh/uv/install.sh", script)
+                if not download_file("https://astral.sh/uv/install.sh", script):
+                    return None
                 script.chmod(script.stat().st_mode | 0o111)
                 result = run(["sh", str(script)])
         if result.returncode != 0:
@@ -383,7 +420,8 @@ def install_ollama() -> bool:
         with tempfile.TemporaryDirectory(prefix="astra-ollama-") as td:
             script = Path(td) / "install.sh"
             try:
-                urllib.request.urlretrieve("https://ollama.com/install.sh", script)
+                if not download_file("https://ollama.com/install.sh", script):
+                    return False
             except Exception as exc:
                 print("Could not download Ollama installer:", exc)
                 return False
@@ -877,7 +915,9 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
 
         print("Downloading official package:")
         print(" ", url)
-        urllib.request.urlretrieve(url, archive)
+        if not download_file(url, archive):
+            print("DroidCam download failed.")
+            return False
 
         with zipfile.ZipFile(archive) as zf:
             zf.extractall(target)
