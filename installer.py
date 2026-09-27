@@ -301,13 +301,43 @@ def probe_microphones() -> list[str]:
         return []
 
 
+def gesture_platform_supported() -> tuple[bool, str]:
+    system = platform.system()
+    machine = platform.machine().lower()
+
+    if system == "Windows" and machine in {"amd64", "x86_64", "arm64", "aarch64"}:
+        return True, f"{system}/{machine}"
+    if system == "Linux":
+        libc = (platform.libc_ver()[0] or "").lower()
+        if machine in {"x86_64", "amd64", "aarch64", "arm64"} and libc in {"glibc", "gnu libc", ""}:
+            return True, f"{system}/{machine}"
+        return False, f"{system}/{machine} libc={libc or 'unknown'}"
+    if system == "Darwin" and machine in {"arm64", "aarch64"}:
+        return True, "macOS Apple Silicon"
+    return False, f"{system}/{machine}"
+
+
 def install_python_core() -> bool:
-    print("\n[CORE] Components required by the gesture engine:")
-    print("  OpenCV    -> capture frames from the camera")
-    print("  MediaPipe -> track 21 hand landmarks")
-    print("  pynput    -> native mouse/keyboard actions on Windows/X11")
+    gestures_ok, platform_detail = gesture_platform_supported()
+    print("\n[CORE] Astra Python environment:")
+    print("  OpenCV    -> screen/video/camera processing")
+    print("  pynput    -> mouse/keyboard on supported desktop sessions")
     print("  NumPy     -> low-overhead numeric processing")
-    return run([sys.executable, "-m", "pip", "install", "-e", str(ROOT)]).returncode == 0
+    print("  MediaPipe -> gesture/pose tracking when a compatible wheel exists")
+    print("  platform  ->", platform_detail)
+
+    target = f"{ROOT}[gesture]" if gestures_ok else str(ROOT)
+    if not gestures_ok:
+        print("  gesture engine: unavailable on this platform; installing the rest of Astra.")
+
+    return run([
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "-e",
+        target,
+    ]).returncode == 0
 
 
 def ollama_api_available() -> bool:
@@ -950,6 +980,12 @@ def main() -> int:
     checks = [
         Check("Operating system", system in {"Windows", "Linux", "Darwin"}, f"{system} {platform.release()}"),
         Check("Architecture", True, platform.machine(), False),
+        Check(
+            "Gesture platform",
+            gesture_platform_supported()[0],
+            gesture_platform_supported()[1],
+            False,
+        ),
         Check(
             "Python runtime",
             runtime_supported(),
