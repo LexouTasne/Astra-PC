@@ -90,6 +90,7 @@ class AstraDaemon:
                 engine=voice_cfg.get("engine", "fast"),
                 whisper_model=voice_cfg.get("whisper_model", "base"),
                 language=voice_cfg.get("language", "pt"),
+                request_handler=self._voice_request,
             )
             threading.Thread(
                 target=self.voice_assistant.run,
@@ -124,6 +125,10 @@ class AstraDaemon:
                 self.voice_assistant.stop()
             except Exception:
                 pass
+
+    def _voice_request(self, text: str) -> str:
+        result = self.handle({"type": "ask", "text": text})
+        return str(result.get("message") or result.get("error") or "")
 
     def _warm_vision(self) -> None:
         try:
@@ -232,6 +237,31 @@ class AstraDaemon:
         text = str(request.get("text", "")).strip()
         if not text:
             return {"ok": False, "error": "empty request"}
+
+        lowered = text.lower().strip()
+        profile_aliases = {
+            "modo dev": "dev",
+            "modo programação": "dev",
+            "modo programacao": "dev",
+            "modo gaming": "gaming",
+            "modo jogo": "gaming",
+            "modo estudo": "study",
+            "modo normal": "default",
+        }
+        if lowered in profile_aliases:
+            profile = profile_aliases[lowered]
+            self.context.profile = profile
+            self.memory.set("active_profile", profile)
+            self.context.refresh()
+            self.bus.publish("profile.changed", profile=profile)
+            return {"ok": True, "message": f"Modo {profile} ativado.", "profile": profile}
+
+        if lowered.startswith("rodar rotina ") or lowered.startswith("executar rotina "):
+            name = text.split(" ", 2)[-1].strip()
+            results = self.routines.run(name, confirmed=bool(request.get("confirmed", False)))
+            ok = all(x.get("ok") for x in results)
+            message = results[-1].get("message", "") if results else "Rotina vazia."
+            return {"ok": ok, "message": message, "results": results}
 
         plan = self.planner.plan(
             text,
