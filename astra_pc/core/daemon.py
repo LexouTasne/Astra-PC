@@ -15,6 +15,7 @@ from astra_pc.core.events import EventBus
 from astra_pc.core.memory import SessionMemory
 from astra_pc.core.permissions import PermissionLayer
 from astra_pc.core.planner import AstraPlanner
+from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
 from astra_pc.skills.manager import SkillManager
 
@@ -60,6 +61,14 @@ class AstraDaemon:
         self.skills = SkillManager(self.permissions)
         self.routines = RoutineManager(self.memory, self.skills)
         self.planner = AstraPlanner(self.brain, self.skills)
+        proactive_cfg = config.data.get("proactive", {})
+        self.proactive = ProactiveMonitor(
+            self.bus,
+            cpu_threshold=float(proactive_cfg.get("cpu_threshold", 92)),
+            ram_threshold=float(proactive_cfg.get("ram_threshold", 92)),
+            interval=float(proactive_cfg.get("interval", 5)),
+        )
+        self.bus.subscribe("*", self._remember_event)
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
@@ -135,6 +144,13 @@ class AstraDaemon:
                 previous = current
 
             tick += 1
+            proactive_every = max(1, int(self.proactive.interval / max(self.context_interval, 0.1)))
+            if tick % proactive_every == 0:
+                try:
+                    self.proactive.tick()
+                except Exception:
+                    pass
+
             if tick % 3 == 0 and self.accessibility.available():
                 try:
                     self._accessibility_cache = [
@@ -144,6 +160,18 @@ class AstraDaemon:
                     self._accessibility_cache = []
 
             time.sleep(self.context_interval)
+
+    def _remember_event(self, event) -> None:
+        if event.name.startswith("context."):
+            return
+        self.memory.add(
+            "event",
+            {
+                "name": event.name,
+                "payload": event.payload,
+                "created_at": event.created_at,
+            },
+        )
 
     def _handle_connection(self, conn: socket.socket) -> None:
         with conn:
