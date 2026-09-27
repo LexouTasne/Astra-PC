@@ -590,7 +590,7 @@ def install_voice() -> bool:
     ])
     return True
 
-def install_ydotool(pm: str | None) -> bool:
+def install_ydotool(pm: str | None, allow_layering: bool = False) -> bool:
     if command_exists("ydotool"):
         print("ydotool already installed.")
         return True
@@ -600,7 +600,11 @@ def install_ydotool(pm: str | None) -> bool:
         return run(["sudo", "dnf", "install", "-y", "ydotool"]).returncode == 0
     if pm == "rpm-ostree":
         print("Fedora Atomic/Bazzite detected.")
-        print("Layering ydotool may require a reboot before it becomes available.")
+        if not allow_layering:
+            print("Astra will not modify the immutable base automatically.")
+            print("ydotool can be layered manually, or rerun with --allow-layering.")
+            return False
+        print("Layering ydotool; a reboot may be required.")
         return run(["sudo", "rpm-ostree", "install", "ydotool"]).returncode == 0
     if pm == "apt":
         return run(["sudo", "apt", "install", "-y", "ydotool"]).returncode == 0
@@ -613,17 +617,65 @@ def install_ydotool(pm: str | None) -> bool:
     return False
 
 
-def enable_ydotool_service() -> None:
-    if platform.system() != "Linux" or not command_exists("systemctl"):
-        return
+def ydotool_daemon_status() -> tuple[bool, str]:
     if not command_exists("ydotool"):
-        return
+        return False, "ydotool binary missing"
 
-    print("\n[WAYLAND] Enabling ydotoold...")
-    p = run(["sudo", "systemctl", "enable", "--now", "ydotool"])
-    if p.returncode != 0:
-        print("Could not enable ydotool automatically.")
-        print("Try manually: sudo systemctl enable --now ydotool")
+    sockets = [
+        Path("/tmp/.ydotool_socket"),
+        Path(os.getenv("XDG_RUNTIME_DIR", "")) / ".ydotool_socket"
+        if os.getenv("XDG_RUNTIME_DIR") else None,
+    ]
+    sockets = [p for p in sockets if p is not None]
+    if any(p.exists() for p in sockets):
+        return True, "socket ready"
+
+    if command_exists("pgrep"):
+        p = subprocess.run(
+            ["pgrep", "-x", "ydotoold"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+        if p.returncode == 0:
+            return True, "ydotoold process running"
+
+    return False, "daemon/socket not detected"
+
+
+def enable_ydotool_service() -> bool:
+    if platform.system() != "Linux" or not command_exists("systemctl"):
+        return False
+    if not command_exists("ydotool"):
+        return False
+
+    ready, detail = ydotool_daemon_status()
+    if ready:
+        print(f"[WAYLAND] ydotool: {detail}")
+        return True
+
+    print("\n[WAYLAND] Starting ydotool daemon...")
+    for service in ("ydotool.service", "ydotoold.service"):
+        exists = subprocess.run(
+            ["systemctl", "list-unit-files", service, "--no-legend"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+        if service not in exists.stdout:
+            continue
+        p = run(["sudo", "systemctl", "enable", "--now", service])
+        if p.returncode == 0:
+            time.sleep(0.5)
+            ready, detail = ydotool_daemon_status()
+            if ready:
+                print(f"[WAYLAND] ydotool ready: {detail}")
+                return True
+
+    print("ydotool is installed, but its daemon/socket is not usable yet.")
+    print("Astra will keep running; native Wayland input may be unavailable until ydotoold is configured.")
+    return False
 
 
 def install_droidcam_windows() -> bool:
@@ -812,7 +864,11 @@ def main() -> int:
         checks.append(Check(
             "Wayland input backend",
             command_exists("ydotool"),
-            "ydotool found" if command_exists("ydotool") else "ydotool missing",
+            (
+                "ydotool found; " + ydotool_daemon_status()[1]
+                if command_exists("ydotool")
+                else "ydotool missing"
+            ),
             False,
         ))
 
@@ -843,7 +899,7 @@ def main() -> int:
     if system == "Linux" and session.lower() == "wayland":
         if not command_exists("ydotool"):
             if ask("\nInstall ydotool for Wayland gesture control?", True, args.yes):
-                if install_ydotool(pm):
+                if install_ydotool(pm, args.allow_layering):
                     enable_ydotool_service()
         else:
             enable_ydotool_service()
