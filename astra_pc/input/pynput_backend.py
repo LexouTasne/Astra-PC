@@ -48,6 +48,9 @@ class PynputBackend(InputBackend):
         for key in reversed(mapped):
             self.keyboard.release(key)
 
+    def type_text(self, text: str) -> None:
+        self.keyboard.type(text)
+
     @staticmethod
     def _key(name: str):
         aliases = {
@@ -60,5 +63,11 @@ class PynputBackend(InputBackend):
             "enter": Key.enter,
             "esc": Key.esc,
             "space": Key.space,
+            "backspace": Key.backspace,
+            "delete": Key.delete,
+            "up": Key.up,
+            "down": Key.down,
+            "left": Key.left,
+            "right": Key.right,
         }
         return aliases.get(name.lower(), name)
