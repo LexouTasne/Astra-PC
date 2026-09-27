@@ -5,13 +5,13 @@ The Android companion lives in `android/`.
 ## Compatibility
 
 - Android 8.0+ (API 26)
-- target/compile API 37
+- target/compile API 36
 - JDK 17 for local builds
 - Android Gradle Plugin 9.4
 - Gradle 9.6
 - Jetpack Compose / Material 3
 
-On Android 17, Astra requests the runtime local-network permission before discovering or connecting to LAN nodes.
+Astra targets stable Android 16/API 36. The manifest and runtime flow are already prepared for Android 17's ACCESS_LOCAL_NETWORK permission when the platform enforces it.
 
 ## Install an APK from GitHub Actions
 
@@ -42,7 +42,7 @@ GitHub Actions debug APKs are intended for testing. They are not a Play Store re
 Requirements:
 
 - JDK 17
-- Android SDK API 37
+- Android SDK API 36
 - Android build tools 36.0.0
 - Gradle 9.6
 
