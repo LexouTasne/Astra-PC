@@ -840,23 +840,27 @@ def _latest_droidcam_linux_url() -> str:
     return page[start:end + 4]
 
 
-def install_linux_build_tools(pm: str | None) -> None:
+def install_linux_build_tools(pm: str | None, allow_layering: bool = False) -> bool:
     print("\n[DROIDCAM VIDEO] A virtual V4L2 camera requires kernel/build tools.")
     if pm == "dnf":
-        run(["sudo", "dnf", "install", "-y", "gcc", "make", "kernel-devel", "kernel-headers"])
-    elif pm == "apt":
-        run(["sudo", "apt", "install", "-y", "gcc", "make", f"linux-headers-{platform.release()}"])
-    elif pm == "pacman":
-        run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "base-devel", "linux-headers"])
-    elif pm == "zypper":
-        run(["sudo", "zypper", "--non-interactive", "install", "gcc", "make", "kernel-devel"])
-    elif pm == "rpm-ostree":
+        return run(["sudo", "dnf", "install", "-y", "gcc", "make", "kernel-devel", "kernel-headers"]).returncode == 0
+    if pm == "apt":
+        return run(["sudo", "apt", "install", "-y", "gcc", "make", f"linux-headers-{platform.release()}"]).returncode == 0
+    if pm == "pacman":
+        return run(["sudo", "pacman", "-S", "--needed", "--noconfirm", "base-devel", "linux-headers"]).returncode == 0
+    if pm == "zypper":
+        return run(["sudo", "zypper", "--non-interactive", "install", "gcc", "make", "kernel-devel"]).returncode == 0
+    if pm == "rpm-ostree":
         print("Bazzite/Fedora Atomic uses an immutable base system.")
-        print("Kernel-module build dependencies can require package layering + reboot.")
-        run(["sudo", "rpm-ostree", "install", "gcc", "make", "kernel-devel", "kernel-headers"])
+        if not allow_layering:
+            print("Skipping kernel/build package layering. Re-run with --allow-layering only if you want it.")
+            return False
+        print("Kernel-module build dependencies require package layering + reboot.")
+        return run(["sudo", "rpm-ostree", "install", "gcc", "make", "kernel-devel", "kernel-headers"]).returncode == 0
+    return False
 
 
-def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
+def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: bool = False) -> bool:
     print("\n[DROIDCAM] Phone-as-webcam fallback for Linux.")
     print("The client is resolved from Dev47Apps' official Linux page at install time.")
 
@@ -900,9 +904,13 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
         if not ask("Install DroidCam's video driver too?", True, assume_yes):
             return True
 
-        install_linux_build_tools(pm)
+        build_ready = install_linux_build_tools(pm, allow_layering)
 
         kernel_build = Path("/usr/src/kernels") / platform.release()
+        if pm == "rpm-ostree" and not build_ready and not allow_layering:
+            print("DroidCam client is installed, but Astra left the immutable OS unchanged.")
+            print("Connect another webcam, or rerun with --allow-layering if you want the V4L2 driver.")
+            return True
         if pm == "rpm-ostree" and not (command_exists("gcc") and command_exists("make") and kernel_build.exists()):
             print("\nBazzite/Fedora Atomic needs the newly layered build packages active first.")
             print("Reboot, then run installer.py again; it will continue the DroidCam driver setup.")
@@ -921,7 +929,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool) -> bool:
         return True
 
 
-def maybe_install_droidcam(pm: str | None, assume_yes: bool) -> None:
+def maybe_install_droidcam(pm: str | None, assume_yes: bool, allow_layering: bool = False) -> None:
     print("\n[CAMERA FALLBACK]")
     print("No working camera was detected.")
     print("Astra's gesture engine requires a webcam-like video source.")
@@ -933,7 +941,7 @@ def maybe_install_droidcam(pm: str | None, assume_yes: bool) -> None:
     if platform.system() == "Windows":
         install_droidcam_windows()
     elif platform.system() == "Linux":
-        install_droidcam_linux(pm, assume_yes)
+        install_droidcam_linux(pm, assume_yes, allow_layering)
     else:
         print("Automatic DroidCam installation is currently implemented for Windows/Linux.")
 
@@ -1042,7 +1050,7 @@ def main() -> int:
         for idx, w, h in cameras:
             print(f"  camera {idx}: {w}x{h}")
     else:
-        maybe_install_droidcam(pm, args.yes)
+        maybe_install_droidcam(pm, args.yes, args.allow_layering)
 
     if system == "Linux" and session.lower() == "wayland":
         if not command_exists("ydotool"):
