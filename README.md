@@ -566,3 +566,20 @@ It preloads the fast text brain and measures multiple local response rounds.
 The **sub-7-second goal is a target, not a universal guarantee**. Actual speed depends on CPU/GPU,
 memory bandwidth, model placement and whether a model is already hot in RAM/VRAM. Astra reports
 latency so performance can be tuned for the actual machine.
+
+
+## Optional high-end perception
+
+These features are implemented as opt-in modules so the normal daemon stays light:
+
+- `BodyPoseTracker`: local MediaPipe body pose landmarks.
+- `LocalFaceProfiles`: explicit local-only OpenCV LBPH enrollment/recognition.
+- `GazeEstimator`: lightweight iris-based gaze direction estimate.
+- `DepthEstimator`: user-provided ONNX monocular depth.
+- `StereoDepth`: classical two-camera disparity.
+- `MultiCamera`: multiple local camera streams.
+- `SpatialWorkspace`: common translate/rotate/scale object state for HUD/OpenXR.
+- `OpenXRBridge`: optional XR runtime detection/extension point.
+- `PiperSpeaker`: optional local neural Piper voice when a model is configured.
+
+None of these are required by the low-latency gesture/voice core.
