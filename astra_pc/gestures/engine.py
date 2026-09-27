@@ -4,7 +4,7 @@ import math
 import time
 from dataclasses import dataclass
 
-from astra_pc.vision.hands import Hand, Point
+from astra_pc.vision.types import Hand, Point
 
 
 @dataclass(slots=True)
