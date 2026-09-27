@@ -50,7 +50,6 @@ class OnnxModel(private val context: Context, private val config: ModelConfig) {
 
     fun close() {
         session.close()
-        env.close()
     }
 
     // Temperature scaling for logits
