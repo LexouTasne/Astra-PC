@@ -132,6 +132,15 @@ class AstraVoiceAssistant:
                 raise RuntimeError("Vosk fallback requires --voice-model.")
             self._voice = VoskVoiceEngine(model_path, self._on_text)
 
+    def stop(self) -> None:
+        self._stop.set()
+        try:
+            self._voice.stop()
+        except Exception:
+            pass
+        if self.speaker:
+            self.speaker.stop()
+
     def run(self) -> None:
         print(f"Voice Astra online. Say '{self.wake_word}' followed by a request.")
         print("Fast path: VAD -> resident ASR -> 0.6B text model -> async TTS")
