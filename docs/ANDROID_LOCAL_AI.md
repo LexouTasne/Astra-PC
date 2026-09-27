@@ -28,6 +28,26 @@ The local engine supports:
 - no API key
 - no telemetry from Astra
 
+## Recommended Qwen3 files
+
+The tested/reference layout follows Microsoft's Android Qwen example and the ONNX Community Qwen3 repository.
+
+Recommended model:
+
+```text
+onnx-community/Qwen3-0.6B-ONNX
+```
+
+Download these matching files:
+
+```text
+https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/resolve/main/onnx/model_q4f16.onnx
+https://huggingface.co/onnx-community/Qwen3-0.6B-ONNX/resolve/main/tokenizer.json
+```
+
+The Q4F16 model is roughly 570 MB and the tokenizer is roughly 9 MB.
+Rename the model to `model.onnx` only if your file picker/download tool changes its name; Astra stores the selected file internally under that name automatically.
+
 ## Import
 
 The model is deliberately not embedded in the APK.
@@ -70,3 +90,16 @@ offline Mesh + no local model -> clear offline error
 ```
 
 This routing is intentional: the desktop can use the larger vision/reasoning stack, while Android keeps a fast 0.6B fallback.
+
+
+## Current build evidence
+
+The Astra Android APK is compiled in GitHub Actions on every push. The CI matrix also validates Linux, Windows, macOS, and the Python 3.14 host bootstrap path.
+
+The APK artifact is named:
+
+```text
+astra-android-debug
+```
+
+A debug APK proves build/install packaging; real-device model speed and thermal behavior still depend on the phone.
