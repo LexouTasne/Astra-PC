@@ -18,8 +18,9 @@ from astra_pc.voice.vosk_engine import VoskVoiceEngine
 class FastSpeaker:
     """Non-blocking TTS queue with fast system backends and pyttsx3 fallback."""
 
-    def __init__(self):
+    def __init__(self, piper_model: str | Path | None = None):
         self._q: queue.Queue[str] = queue.Queue(maxsize=8)
+        self.piper_model = Path(piper_model).expanduser() if piper_model else None
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="astra-tts", daemon=True)
         self._thread.start()
@@ -65,6 +66,14 @@ class FastSpeaker:
                 continue
             if not text:
                 continue
+
+            if self.piper_model and self.piper_model.exists() and shutil.which("piper"):
+                try:
+                    from astra_pc.voice.piper_tts import PiperSpeaker
+                    PiperSpeaker(self.piper_model).say(text)
+                    continue
+                except Exception:
+                    pass
 
             if shutil.which("spd-say"):
                 subprocess.run(
@@ -115,6 +124,7 @@ class AstraVoiceAssistant:
         conversation_window: float = 9.0,
         wakeword_model: str | Path | None = None,
         wakeword_threshold: float = 0.55,
+        piper_model: str | Path | None = None,
     ):
         self.brain = brain
         self.model_path = model_path
@@ -123,7 +133,7 @@ class AstraVoiceAssistant:
         self.request_handler = request_handler
         self.conversation_window = max(0.0, float(conversation_window))
         self._conversation_until = 0.0
-        self.speaker = FastSpeaker() if speak else None
+        self.speaker = FastSpeaker(piper_model=piper_model) if speak else None
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
         self._stop = threading.Event()
         self._dedicated_wake_until = 0.0
