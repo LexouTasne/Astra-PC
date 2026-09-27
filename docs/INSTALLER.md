@@ -195,3 +195,22 @@ The installer does not intentionally:
 - grant Android devices destructive PC permissions
 
 Mesh pairing remains explicit even after installation.
+
+
+## Guided camera setup
+
+Use:
+
+```bash
+astra setup camera
+```
+
+This is interactive by default. Astra asks before installing DroidCam, loading a kernel camera module, changing an immutable Bazzite host, launching DroidCam, or waiting for phone video.
+
+The camera path is validated by actual decoded OpenCV frames, not merely the presence of `/dev/video0`.
+
+On Linux Astra prefers an already installed standard `v4l2loopback` module because DroidCam supports it directly. If unavailable, Astra can fall back to DroidCam's own `v4l2loopback_dc` installer.
+
+On Bazzite/Fedora Atomic, Astra first tries an existing/prebuilt loopback module. Host layering is never silently performed; interactive mode asks first, while non-interactive `--yes` still requires `--allow-layering` for immutable-host changes.
+
+After DroidCam is launched, Astra can wait for the phone and repeatedly probe until real frames arrive.
