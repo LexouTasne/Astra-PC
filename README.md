@@ -15,6 +15,70 @@ It combines:
 
 No OpenRouter/OpenAI/API key is required.
 
+## Astra 0.7 — Awareness
+
+Astra now behaves more like a resident operating-system assistant than a chatbot.
+
+New in 0.7:
+
+- semantic local memory with `qwen3-embedding:0.6b`
+- response cache for repeated stable questions
+- context-aware reference resolution for "isso/aquilo/essa janela"
+- accessibility + screenshot fusion
+- optional browser DOM through Chromium CDP
+- optional strong Qwen3 4B routing for complex text
+- adaptive performance governor
+- true multi-monitor geometry
+- context-specific gesture mappings
+- native active-window snap/move/maximize/minimize skill
+- continuous voice conversation window
+- optional dedicated openWakeWord model for "Astra"
+- action verification in the visual desktop agent
+- clipboard, notifications, coding and controlled terminal skills
+- plug-in Skill SDK
+- explicit "learn this" mouse/keyboard recorder + replay
+- optional gaze estimation
+- optional monocular/stereo depth
+- optional multi-camera support
+- optional OpenXR bridge
+- local mobile sensor companion bridge
+
+Start the full resident mode:
+
+```bash
+python -m astra_pc daemon --voice
+```
+
+Inspect what Astra currently knows:
+
+```bash
+python -m astra_pc awareness
+```
+
+Semantic memory search:
+
+```bash
+python -m astra_pc memory "aquele erro do Practice no git"
+```
+
+Teach an explicit desktop routine by demonstration:
+
+```bash
+python -m astra_pc learn atualizar-practice
+# perform the task, then press ESC
+
+python -m astra_pc replay atualizar-practice
+```
+
+Run the phone/sensor bridge:
+
+```bash
+python -m astra_pc mobile
+```
+
+See `docs/AWARENESS.md` and `docs/SKILLS.md`.
+
+
 ## Astra 0.6 — Resident Core
 
 Astra can now run as a resident local service instead of reloading itself for every request.
@@ -405,7 +469,7 @@ ASTRA_SCREEN_SIZE=3200x1080 python -m astra_pc gestures
 
 ## Current status
 
-### Astra 0.6
+### Astra 0.7
 
 - [x] gesture engine
 - [x] two-hand interaction
