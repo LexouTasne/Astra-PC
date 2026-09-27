@@ -10,7 +10,6 @@ from astra_pc.gestures.context_mapper import GestureContextMapper
 from astra_pc.gestures.engine import GestureEngine
 from astra_pc.input.factory import create_input_backend
 from astra_pc.perception.monitors import get_monitors
-from astra_pc.vision.hands import HandTracker
 from astra_pc.voice.commands import CommandRouter
 from astra_pc.vision.camera_source import open_first_camera
 
@@ -61,6 +60,7 @@ class AstraRuntime:
 
         # Load MediaPipe only after a working camera exists. This avoids GPU/TFLite
         # initialization noise and latency when there is no usable video source.
+        from astra_pc.vision.hands import HandTracker
         tracker = HandTracker(self.config.section("tracking"))
         gestures = GestureEngine(self.config.section("gestures"))
 
