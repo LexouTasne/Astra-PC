@@ -112,12 +112,15 @@ class AstraVoiceAssistant:
         whisper_model: str = "base",
         language: str = "pt",
         request_handler: Callable[[str], str] | None = None,
+        conversation_window: float = 9.0,
     ):
         self.brain = brain
         self.model_path = model_path
         self.wake_word = wake_word.lower()
         self.router = CommandRouter()
         self.request_handler = request_handler
+        self.conversation_window = max(0.0, float(conversation_window))
+        self._conversation_until = 0.0
         self.speaker = FastSpeaker() if speak else None
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
         self._stop = threading.Event()
@@ -178,21 +181,29 @@ class AstraVoiceAssistant:
     def _on_text(self, text: str) -> None:
         normalized = text.lower().strip()
         pos = normalized.find(self.wake_word)
-        if pos < 0:
-            return
-        request = text[pos + len(self.wake_word):].strip(" ,:;-")
+        now = time.monotonic()
 
-        # Barge-in: hearing the wake word immediately cancels queued/current speech.
-        if self.speaker:
-            self.speaker.cancel()
+        if pos >= 0:
+            request = text[pos + len(self.wake_word):].strip(" ,:;-")
+            self._conversation_until = now + self.conversation_window
+            if self.speaker:
+                self.speaker.cancel()
+        elif now <= self._conversation_until:
+            request = text.strip(" ,:;-")
+        else:
+            return
 
         if not request:
             self._speak("Sim?")
             return
 
         if request.lower() in {"para", "pare", "cala", "cancelar", "stop", "silencio", "silêncio"}:
+            if self.speaker:
+                self.speaker.cancel()
+            self._conversation_until = 0.0
             print("[barge-in] speech cancelled")
             return
+
         try:
             self._requests.put_nowait((request, time.perf_counter()))
         except queue.Full:
@@ -225,6 +236,7 @@ class AstraVoiceAssistant:
         total_ms = (finished - heard_at) * 1000.0
         print(f"Astra> {answer}")
         print(f"[latency] path={path} model={model_ms:.0f}ms after_asr={total_ms:.0f}ms")
+        self._conversation_until = time.monotonic() + self.conversation_window
         self._speak(answer)
 
     @staticmethod
