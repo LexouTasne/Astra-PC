@@ -23,6 +23,7 @@ class FastWhisperVoiceEngine:
         silence_ms: int = 360,
         pre_roll_ms: int = 240,
         max_utterance_s: float = 10.0,
+        raw_frame_callback: Callable[[bytes], None] | None = None,
     ):
         try:
             import sounddevice as sd
@@ -42,6 +43,7 @@ class FastWhisperVoiceEngine:
             cpu_threads=max(2, min(8, __import__("os").cpu_count() or 4)),
         )
         self.on_text = on_text
+        self.raw_frame_callback = raw_frame_callback
         self.language = language
         self.sample_rate = sample_rate
         self.frame_ms = frame_ms
@@ -95,6 +97,12 @@ class FastWhisperVoiceEngine:
 
                 if len(frame) != self.frame_samples * 2:
                     continue
+
+                if self.raw_frame_callback is not None:
+                    try:
+                        self.raw_frame_callback(frame)
+                    except Exception:
+                        pass
 
                 is_speech = self.vad.is_speech(frame, self.sample_rate)
 
