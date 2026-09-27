@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.6.0"
-description = "Resident context-aware local multimodal desktop assistant"
+version = "0.7.0"
+description = "Awareness-first resident local multimodal desktop assistant"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
@@ -16,7 +16,9 @@ dependencies = [
   "mediapipe>=0.10.14",
   "pynput>=1.7.7",
   "Pillow>=10",
-  "psutil>=6.0"
+  "psutil>=6.0",
+  "screeninfo>=0.8.1",
+  "pyperclip>=1.9.0"
 ]
 
 [project.optional-dependencies]
@@ -28,6 +30,8 @@ voice-fast = [
   "pyttsx3>=2.90"
 ]
 accessibility = ["pywinauto>=0.6.9; platform_system == 'Windows'"]
+wakeword = ["openwakeword>=0.6.0"]
+browser = ["playwright>=1.55"]
 dev = ["pytest>=8"]
 
 [project.scripts]
