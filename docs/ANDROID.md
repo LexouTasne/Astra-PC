@@ -128,3 +128,28 @@ The app rejects a server certificate whose SHA-256 fingerprint does not match th
 If you reinstall/recreate the PC Mesh identity, pair the phone again.
 
 Use **REMOVER PAREAMENTO** on Android and `astra mesh revoke` on PC when removing a device.
+
+
+## Standalone local AI
+
+The phone does not have to be only a remote control.
+
+Astra Android supports an optional local **Qwen3 0.6B** fallback through ONNX Runtime:
+
+```text
+Mesh connected -> desktop/strong node
+Mesh offline + model installed -> Qwen3 on the phone
+Mesh offline + no model -> companion UI remains available but AI requests explain that no brain is reachable
+```
+
+In the app:
+
+1. Tap **MODEL.ONNX** and select the Qwen3 ONNX model.
+2. Tap **TOKENIZER** and select the matching `tokenizer.json`.
+3. Wait for **Modelo local pronto**.
+4. Disconnect from Mesh or leave the PC offline.
+5. Chat normally; the button changes to **RODAR NO CELULAR**.
+
+Recommended matching files and model details are in `docs/ANDROID_LOCAL_AI.md`.
+
+The model files are copied into Android app-private storage. They are not bundled into Git and are not uploaded to the PC automatically.
