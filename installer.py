@@ -30,9 +30,9 @@ class Check:
 
 def banner() -> None:
     print("=" * 68)
-    print(" ASTRA-PC 0.5 LOW-LATENCY INSTALLER / DIAGNOSTIC")
+    print(" ASTRA-PC 0.7 AWARENESS INSTALLER / DIAGNOSTIC")
     print("=" * 68)
-    print("Gesture engine + fast voice + dual local AI + camera fallback.\n")
+    print("Resident context + fast voice + local multimodal AI + semantic memory.\n")
 
 
 def ask(question: str, default: bool = True, assume_yes: bool = False) -> bool:
@@ -222,6 +222,7 @@ def ensure_astra_models() -> bool:
     models = [
         ("qwen3:0.6b", "fast text/voice brain", "~523 MB"),
         ("qwen3-vl:2b-instruct", "vision/screen/video brain", "~1.9 GB"),
+        ("qwen3-embedding:0.6b", "semantic memory embeddings", "~639 MB"),
     ]
 
     listed = subprocess.run(
@@ -582,6 +583,8 @@ def main() -> int:
     parser.add_argument("--no-voice", action="store_true", help="skip offline voice dependencies")
     parser.add_argument("--no-ai", action="store_true", help="skip Ollama/Qwen local AI")
     parser.add_argument("--media", action="store_true", help="offer optional local ComfyUI setup")
+    parser.add_argument("--strong-ai", action="store_true", help="also download optional Qwen3 4B reasoning model")
+    parser.add_argument("--awareness-extras", action="store_true", help="install optional wake-word and browser DOM packages")
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     args = parser.parse_args()
@@ -663,6 +666,9 @@ def main() -> int:
         if ask("\nInstall Astra low-latency local AI (Qwen3 0.6B + Qwen3-VL 2B)?", True, args.yes):
             if install_ollama():
                 ensure_astra_models()
+                if args.strong_ai:
+                    print("\n[STRONG AI] Optional Qwen3 4B reasoning model")
+                    run(["ollama", "pull", "qwen3:4b"])
 
     want_autostart = args.autostart
     if not args.yes and not args.autostart:
@@ -670,6 +676,10 @@ def main() -> int:
     if want_autostart:
         if install_autostart(with_voice=not args.no_voice):
             print("Astra resident daemon autostart enabled.")
+
+    if args.awareness_extras:
+        print("\n[AWARENESS EXTRAS] Installing dedicated wake-word + optional browser DOM support.")
+        run([sys.executable, "-m", "pip", "install", "-e", f"{ROOT}[wakeword,browser]"])
 
     if args.media:
         if comfyui_available():
@@ -697,6 +707,9 @@ def main() -> int:
     print("Ollama:", "yes" if command_exists("ollama") else "no")
     print("Ollama API:", "yes" if ollama_api_available() else "no")
     print("ComfyUI API:", "yes" if comfyui_available() else "no")
+    print("Semantic embeddings:", "configured via qwen3-embedding:0.6b")
+    print("Dedicated wake word:", "yes" if importlib.util.find_spec("openwakeword") else "optional")
+    print("Browser DOM:", "yes" if importlib.util.find_spec("playwright") else "optional")
     print("Accessibility:", "yes" if (
         importlib.util.find_spec("pyatspi") or importlib.util.find_spec("pywinauto")
     ) else "visual fallback")
