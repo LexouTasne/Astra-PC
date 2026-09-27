@@ -75,7 +75,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNetworkPermissions() {
-        val permissions = mutableListOf<String>()
+        val permissions = mutableListOf(
+            Manifest.permission.CAMERA,
+            Manifest.permission.RECORD_AUDIO
+        )
         if (Build.VERSION.SDK_INT >= 37) {
             permissions += "android.permission.ACCESS_LOCAL_NETWORK"
         } else if (Build.VERSION.SDK_INT >= 33) {
