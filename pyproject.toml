@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.5.0"
-description = "Ultra-low-latency local gesture, vision and voice desktop assistant"
+version = "0.6.0"
+description = "Resident context-aware local multimodal desktop assistant"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
@@ -15,7 +15,8 @@ dependencies = [
   "opencv-python>=4.9",
   "mediapipe>=0.10.14",
   "pynput>=1.7.7",
-  "Pillow>=10"
+  "Pillow>=10",
+  "psutil>=6.0"
 ]
 
 [project.optional-dependencies]
@@ -26,6 +27,7 @@ voice-fast = [
   "sounddevice>=0.4.7",
   "pyttsx3>=2.90"
 ]
+accessibility = ["pywinauto>=0.6.9; platform_system == 'Windows'"]
 dev = ["pytest>=8"]
 
 [project.scripts]
