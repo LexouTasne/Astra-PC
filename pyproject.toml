@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astra-pc"
-version = "0.3.0"
-description = "Fast local-first gesture, vision and voice desktop assistant"
+version = "0.5.0"
+description = "Ultra-low-latency local gesture, vision and voice desktop assistant"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 license = {text = "MIT"}
@@ -20,6 +20,12 @@ dependencies = [
 
 [project.optional-dependencies]
 voice = ["vosk>=0.3.45", "sounddevice>=0.4.7", "pyttsx3>=2.90"]
+voice-fast = [
+  "faster-whisper>=1.1.0",
+  "webrtcvad-wheels>=2.0.14",
+  "sounddevice>=0.4.7",
+  "pyttsx3>=2.90"
+]
 dev = ["pytest>=8"]
 
 [project.scripts]
