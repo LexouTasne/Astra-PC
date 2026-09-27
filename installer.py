@@ -1136,6 +1136,147 @@ def enable_ydotool_service() -> bool:
     return False
 
 
+def kernel_module_loaded(name: str) -> bool:
+    try:
+        modules = Path("/proc/modules").read_text(encoding="utf-8", errors="ignore")
+        return any(line.split()[0] == name for line in modules.splitlines() if line.strip())
+    except Exception:
+        return False
+
+
+def kernel_module_available(name: str) -> bool:
+    if not command_exists("modinfo"):
+        return False
+    return subprocess.run(
+        ["modinfo", name],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0
+
+
+def ensure_v4l2loopback(
+    pm: str | None,
+    assume_yes: bool,
+    allow_layering: bool = False,
+) -> tuple[bool, bool]:
+    """Return (driver_ready_now, reboot_required)."""
+    if platform.system() != "Linux":
+        return False, False
+
+    for module in ("v4l2loopback", "v4l2loopback_dc"):
+        if kernel_module_loaded(module):
+            print(f"[DROIDCAM VIDEO] {module} already loaded.")
+            return True, False
+
+    # Prefer the standard module: DroidCam officially supports it and Bazzite
+    # commonly ships a prebuilt v4l2loopback kmod.
+    if kernel_module_available("v4l2loopback"):
+        if ask("Load the existing v4l2loopback camera driver now?", True, assume_yes):
+            result = run([
+                "sudo",
+                "modprobe",
+                "v4l2loopback",
+                "exclusive_caps=1",
+                "card_label=DroidCam",
+            ])
+            if result.returncode == 0 and kernel_module_loaded("v4l2loopback"):
+                time.sleep(0.5)
+                print("[DROIDCAM VIDEO] v4l2loopback loaded.")
+                return True, False
+            print("The installed v4l2loopback module could not be loaded.")
+
+    if kernel_module_available("v4l2loopback_dc"):
+        if ask("Load DroidCam's v4l2loopback_dc driver now?", True, assume_yes):
+            result = run(["sudo", "modprobe", "v4l2loopback_dc"])
+            if result.returncode == 0 and kernel_module_loaded("v4l2loopback_dc"):
+                time.sleep(0.5)
+                return True, False
+
+    if pm == "rpm-ostree":
+        print("\nBazzite/Fedora Atomic: no usable V4L2 loopback module is active.")
+        print("Astra can layer RPM Fusion's v4l2loopback packages, but that changes")
+        print("the immutable host and normally requires a reboot.")
+
+        permitted = allow_layering
+        if not permitted and not assume_yes:
+            permitted = ask(
+                "Layer v4l2loopback + akmod-v4l2loopback on the host?",
+                False,
+                False,
+            )
+
+        if not permitted:
+            print("Host layering skipped.")
+            print("You can retry later with: astra setup camera --allow-layering")
+            return False, False
+
+        result = run([
+            "sudo",
+            "rpm-ostree",
+            "install",
+            "v4l2loopback",
+            "akmod-v4l2loopback",
+        ])
+        if result.returncode == 0:
+            print("V4L2 packages layered. Reboot is required before the driver is usable.")
+            return False, True
+        print("rpm-ostree could not layer the V4L2 packages.")
+        return False, False
+
+    return False, False
+
+
+def launch_droidcam_and_wait(
+    assume_yes: bool,
+    timeout: int = 75,
+) -> list[tuple[int, int, int]]:
+    binary = droidcam_binary()
+    if binary is None:
+        return []
+
+    if os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"):
+        if ask("Open DroidCam now so you can connect the phone?", True, assume_yes):
+            try:
+                subprocess.Popen(
+                    [str(binary)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                print("DroidCam launched:", binary)
+            except Exception as exc:
+                print("Could not launch DroidCam automatically:", exc)
+
+    print("\nOn your phone:")
+    print("  1. Open the DroidCam app.")
+    print("  2. Connect it to this PC using Wi-Fi/USB.")
+    print("  3. Make sure video is visible in DroidCam.")
+    print("Astra will look for the video device after that.")
+
+    if not ask("Wait for DroidCam video and test it now?", True, assume_yes):
+        return []
+
+    deadline = time.monotonic() + max(10, timeout)
+    last_note = 0.0
+    while time.monotonic() < deadline:
+        cameras = probe_cameras_opencv(limit=24)
+        if cameras:
+            print("\n[DROIDCAM] Working camera detected:")
+            for idx, w, h in cameras:
+                print(f"  camera {idx}: {w}x{h}")
+            return cameras
+        now = time.monotonic()
+        if now - last_note >= 10:
+            remaining = max(0, int(deadline - now))
+            print(f"Waiting for camera frames... ({remaining}s remaining)")
+            last_note = now
+        time.sleep(1.0)
+
+    print("No camera frames arrived before the timeout.")
+    return []
+
+
 def droidcam_binary() -> Path | None:
     names = ("droidcam", "droidcam-cli")
     for name in names:
@@ -1268,14 +1409,27 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
         else:
             print("Skipping DroidCam client reinstall.")
 
-        if not video_installer.exists():
-            print("DroidCam client installed, but install-video was not present.")
+        print("\nDroidCam's Linux client is installed.")
+
+        driver_ready, reboot_required = ensure_v4l2loopback(
+            pm,
+            assume_yes,
+            allow_layering,
+        )
+        if reboot_required:
+            print("\nReboot the PC, then run: astra setup camera")
             return True
 
-        print("\nDroidCam's Linux client is installed.")
-        print("For Astra to see the phone as /dev/video*, DroidCam normally needs")
-        print("a V4L2 loopback camera driver.")
-        if not ask("Install DroidCam's video driver too?", True, assume_yes):
+        if driver_ready:
+            launch_droidcam_and_wait(assume_yes)
+            return True
+
+        if not video_installer.exists():
+            print("No usable V4L2 driver was found and install-video was not present.")
+            return True
+
+        print("Astra can build DroidCam's own v4l2loopback-dc driver as fallback.")
+        if not ask("Build/install DroidCam's own video driver?", True, assume_yes):
             return True
 
         build_ready = install_linux_build_tools(pm, allow_layering)
@@ -1300,6 +1454,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
                 print("On Bazzite/Fedora Atomic, reboot after package layering and run installer.py again.")
             return True
 
+        launch_droidcam_and_wait(assume_yes)
         return True
 
 
@@ -1313,7 +1468,8 @@ def maybe_install_droidcam(pm: str | None, assume_yes: bool, allow_layering: boo
         return
 
     if platform.system() == "Windows":
-        install_droidcam_windows()
+        if install_droidcam_windows():
+            launch_droidcam_and_wait(assume_yes)
     elif platform.system() == "Linux":
         install_droidcam_linux(pm, assume_yes, allow_layering)
     else:
