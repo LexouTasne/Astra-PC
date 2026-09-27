@@ -347,6 +347,17 @@ def _run_mesh(args, config) -> None:
         print(json.dumps(discover(args.timeout_ms), ensure_ascii=False, indent=2))
         return
 
+    if args.mesh_command == "send":
+        payload = {
+            "type": "mesh.device_command",
+            "device_id": args.device_id,
+            "action": args.action,
+            "payload": {"text": args.text},
+        }
+        result = daemon_request(payload, host=host, port=port)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
     if args.mesh_command == "pair":
         peer = MeshPeer(
             host=args.host,
@@ -507,6 +518,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     mesh_discover = mesh_sub.add_parser("discover", help="discover Astra Mesh nodes on the LAN")
     mesh_discover.add_argument("--timeout-ms", type=int, default=1800)
+
+    mesh_send = mesh_sub.add_parser("send", help="send a safe command to a paired device")
+    mesh_send.add_argument("device_id")
+    mesh_send.add_argument("action", choices=["notify", "clipboard.set"])
+    mesh_send.add_argument("text")
 
     mesh_pair = mesh_sub.add_parser("pair", help="pair this desktop to another Astra Mesh node")
     mesh_pair.add_argument("host")
