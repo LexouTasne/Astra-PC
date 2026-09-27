@@ -323,7 +323,7 @@ def install_ollama() -> bool:
         return True
 
     system = platform.system()
-    print("\n[LOCAL AI] Ollama runs Astra's Qwen3-VL model locally.")
+    print("\n[LOCAL AI] Ollama runs Astra's local Qwen models.")
     print("No API key or cloud account is required.")
 
     if system == "Windows":
@@ -333,10 +333,21 @@ def install_ollama() -> bool:
                 "--accept-source-agreements", "--accept-package-agreements"
             ]).returncode == 0
         print("winget was not found.")
-        print("Official installer: https://ollama.com/download/windows")
+        print("Install Ollama manually from the official website and rerun Astra.")
+        return False
+
+    if system == "Darwin":
+        if command_exists("brew"):
+            return run(["brew", "install", "ollama"]).returncode == 0
+        print("Homebrew was not found. Install Homebrew/Ollama, then rerun Astra.")
         return False
 
     if system == "Linux":
+        # Bazzite/Atomic: prefer user-space Homebrew instead of modifying /usr.
+        if is_immutable_linux() and command_exists("brew"):
+            print("Immutable Linux detected; using Homebrew for Ollama.")
+            return run(["brew", "install", "ollama"]).returncode == 0
+
         print("Downloading the current official Ollama installer script.")
         with tempfile.TemporaryDirectory(prefix="astra-ollama-") as td:
             script = Path(td) / "install.sh"
@@ -348,7 +359,7 @@ def install_ollama() -> bool:
             script.chmod(script.stat().st_mode | 0o111)
             return run(["sh", str(script)]).returncode == 0
 
-    print("Automatic Ollama installation is currently implemented for Windows/Linux.")
+    print("Automatic Ollama installation is unavailable on this platform.")
     return False
 
 
@@ -358,10 +369,19 @@ def start_ollama() -> bool:
     if not command_exists("ollama"):
         return False
 
-    if platform.system() == "Linux" and command_exists("systemctl"):
+    if platform.system() == "Linux" and command_exists("systemctl") and not is_immutable_linux():
         run(["sudo", "systemctl", "enable", "--now", "ollama"])
         if ollama_api_available():
             return True
+
+    if command_exists("brew"):
+        # Works on macOS and Bazzite/Homebrew Linux; failure is harmless because
+        # we still fall back to a detached "ollama serve" below.
+        run(["brew", "services", "start", "ollama"])
+        for _ in range(8):
+            if ollama_api_available():
+                return True
+            time.sleep(0.25)
 
     print("Starting local Ollama server...")
     try:
