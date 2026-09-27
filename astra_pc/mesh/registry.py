@@ -13,6 +13,7 @@ DEFAULT_ANDROID_SCOPES = [
     "context.read",
     "sensor.write",
     "clipboard.push",
+    "clipboard.receive",
     "camera.snapshot",
     "notifications.receive",
 ]
@@ -86,6 +87,19 @@ class DeviceRegistry:
 
     def has_scope(self, device: dict, scope: str) -> bool:
         return scope in set(device.get("scopes", []))
+
+    def update_metadata(self, device_id: str, **metadata) -> bool:
+        allowed = {"capabilities", "app_version", "os_version", "model"}
+        with self._lock:
+            entry = self._data["devices"].get(device_id)
+            if not entry or entry.get("revoked"):
+                return False
+            for key, value in metadata.items():
+                if key in allowed:
+                    entry[key] = value
+            entry["last_seen"] = time.time()
+            self._save()
+            return True
 
     def list_public(self) -> list[dict]:
         with self._lock:
