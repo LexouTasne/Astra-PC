@@ -120,6 +120,67 @@ def _run_voice(args, config) -> None:
     assistant.run()
 
 
+def _run_daemon(args, config) -> None:
+    from .core.daemon import AstraDaemon
+    AstraDaemon(config).run()
+
+
+def _run_ctl(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    payload = {"type": args.type}
+    if args.text is not None:
+        payload["text"] = args.text
+    if args.confirmed:
+        payload["confirmed"] = True
+
+    result = daemon_request(payload, host=host, port=port, timeout=args.timeout)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _run_profile(args, config) -> None:
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    result = daemon_request(
+        {"type": "profile", "profile": args.name},
+        host=daemon_cfg.get("host", "127.0.0.1"),
+        port=int(daemon_cfg.get("port", 8765)),
+    )
+    print(result.get("profile") or result)
+
+
+def _run_routine(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    if args.routine_command == "run":
+        payload = {
+            "type": "routine.run",
+            "name": args.name,
+            "confirmed": args.yes,
+        }
+    else:
+        steps = json.loads(args.steps)
+        payload = {
+            "type": "routine.save",
+            "name": args.name,
+            "steps": steps,
+        }
+
+    result = daemon_request(payload, host=host, port=port)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
 
@@ -229,6 +290,29 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
     benchmark.add_argument("--rounds", type=int, default=3)
 
+    sub.add_parser("daemon", help="run the resident Astra core")
+
+    ctl = sub.add_parser("ctl", help="talk to the resident Astra daemon")
+    ctl.add_argument("type", choices=["ping", "ask", "context", "stop"])
+    ctl.add_argument("text", nargs="?")
+    ctl.add_argument("--confirmed", action="store_true")
+    ctl.add_argument("--timeout", type=float, default=30.0)
+
+    profile = sub.add_parser("profile", help="switch Astra context profile")
+    profile.add_argument("name")
+
+    routine = sub.add_parser("routine", help="save or run a persistent routine")
+    routine_sub = routine.add_subparsers(dest="routine_command", required=True)
+    routine_run = routine_sub.add_parser("run")
+    routine_run.add_argument("name")
+    routine_run.add_argument("--yes", action="store_true")
+    routine_save = routine_sub.add_parser("save")
+    routine_save.add_argument("name")
+    routine_save.add_argument(
+        "steps",
+        help='JSON list, e.g. [{"skill":"apps","action":"open_app","args":{"name":"vscode"}}]',
+    )
+
     agent = sub.add_parser("agent", help="screen-aware local desktop agent")
     agent.add_argument("goal")
     agent.add_argument("--max-steps", type=int, default=8)
@@ -271,6 +355,10 @@ def main() -> None:
         "chat": _run_chat,
         "voice": _run_voice,
         "benchmark": _run_benchmark,
+        "daemon": _run_daemon,
+        "ctl": _run_ctl,
+        "profile": _run_profile,
+        "routine": _run_routine,
         "agent": _run_agent,
         "generate": _run_generate,
     }
