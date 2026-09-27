@@ -200,8 +200,43 @@ def detect_session() -> str:
     return os.getenv("XDG_SESSION_TYPE", "unknown")
 
 
+def linux_os_release() -> dict[str, str]:
+    path = Path("/etc/os-release")
+    if not path.exists():
+        return {}
+    data: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" not in line or line.lstrip().startswith("#"):
+                continue
+            key, value = line.split("=", 1)
+            data[key] = value.strip().strip('"')
+    except Exception:
+        return {}
+    return data
+
+
+def is_immutable_linux() -> bool:
+    if platform.system() != "Linux":
+        return False
+    info = linux_os_release()
+    image = " ".join([
+        info.get("ID", ""),
+        info.get("VARIANT_ID", ""),
+        info.get("PRETTY_NAME", ""),
+        info.get("IMAGE_ID", ""),
+    ]).lower()
+    return command_exists("rpm-ostree") or any(
+        name in image for name in ("bazzite", "silverblue", "kinoite", "ublue", "atomic")
+    )
+
+
 def detect_package_manager() -> str | None:
-    for name in ("rpm-ostree", "dnf", "apt", "pacman", "zypper", "winget"):
+    if platform.system() == "Windows":
+        return "winget" if command_exists("winget") else None
+    if platform.system() == "Darwin":
+        return "brew" if command_exists("brew") else None
+    for name in ("rpm-ostree", "dnf", "apt", "pacman", "zypper", "brew"):
         if command_exists(name):
             return name
     return None
