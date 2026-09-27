@@ -12,12 +12,23 @@ def _brain(config):
     from .ai.ollama_client import OllamaClient
 
     ai = config.data.get("ai", {})
-    client = OllamaClient(
-        model=ai.get("model", "qwen3-vl:2b-instruct"),
-        host=ai.get("host", "http://127.0.0.1:11434"),
-        timeout=int(ai.get("timeout", 180)),
+    host = ai.get("host", "http://127.0.0.1:11434")
+    timeout = int(ai.get("timeout", 180))
+    keep_alive = ai.get("keep_alive", "-1")
+
+    text_client = OllamaClient(
+        model=ai.get("text_model", "qwen3:0.6b"),
+        host=host,
+        timeout=timeout,
+        keep_alive=keep_alive,
     )
-    return AstraBrain(client), client
+    vision_client = OllamaClient(
+        model=ai.get("vision_model", "qwen3-vl:2b-instruct"),
+        host=host,
+        timeout=timeout,
+        keep_alive=keep_alive,
+    )
+    return AstraBrain(text_client, vision_client), text_client
 
 
 def _run_gestures(args, config) -> None:
@@ -102,6 +113,9 @@ def _run_voice(args, config) -> None:
         args.voice_model,
         wake_word=args.wake_word,
         speak=not args.no_speak,
+        engine=args.engine,
+        whisper_model=args.whisper_model,
+        language=args.language,
     )
     assistant.run()
 
@@ -193,8 +207,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("chat", help="interactive local Astra chat")
 
     voice = sub.add_parser("voice", help="wake-word local voice assistant")
-    voice.add_argument("--voice-model", type=Path, required=True)
+    voice.add_argument("--voice-model", type=Path, default=None, help="Vosk model path for fallback engine")
     voice.add_argument("--wake-word", default="astra")
+    voice.add_argument("--engine", choices=["fast", "vosk"], default="fast")
+    voice.add_argument("--whisper-model", default="base", help="faster-whisper model: tiny/base/small")
+    voice.add_argument("--language", default="pt")
     voice.add_argument("--no-speak", action="store_true")
 
     agent = sub.add_parser("agent", help="screen-aware local desktop agent")
