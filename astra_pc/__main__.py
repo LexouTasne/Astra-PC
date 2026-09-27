@@ -89,6 +89,23 @@ def _run_chat(args, config) -> None:
         print("Astra>", brain.ask(text))
 
 
+def _run_voice(args, config) -> None:
+    from .voice.assistant import AstraVoiceAssistant
+
+    brain, client = _brain(config)
+    if not client.available():
+        raise SystemExit(
+            "Ollama is not reachable. Run installer.py or start 'ollama serve'."
+        )
+    assistant = AstraVoiceAssistant(
+        brain,
+        args.voice_model,
+        wake_word=args.wake_word,
+        speak=not args.no_speak,
+    )
+    assistant.run()
+
+
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
 
@@ -175,6 +192,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("chat", help="interactive local Astra chat")
 
+    voice = sub.add_parser("voice", help="wake-word local voice assistant")
+    voice.add_argument("--voice-model", type=Path, required=True)
+    voice.add_argument("--wake-word", default="astra")
+    voice.add_argument("--no-speak", action="store_true")
+
     agent = sub.add_parser("agent", help="screen-aware local desktop agent")
     agent.add_argument("goal")
     agent.add_argument("--max-steps", type=int, default=8)
@@ -215,6 +237,7 @@ def main() -> None:
         "screen": _run_screen,
         "video": _run_video,
         "chat": _run_chat,
+        "voice": _run_voice,
         "agent": _run_agent,
         "generate": _run_generate,
     }
