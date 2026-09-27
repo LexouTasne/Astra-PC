@@ -353,6 +353,26 @@ class AstraDaemon:
             device_id = str(request.get("device_id", ""))
             return {"ok": self.mesh_server.registry.revoke(device_id)}
 
+        if kind == "mesh.device_command":
+            if not self.mesh_server:
+                return {"ok": False, "error": "mesh_not_running"}
+            from astra_pc.mesh.protocol import envelope
+            device_id = str(request.get("device_id", ""))
+            action = str(request.get("action", ""))
+            payload = request.get("payload") or {}
+            scope = {
+                "notify": "notifications.receive",
+                "clipboard.set": "clipboard.receive",
+            }.get(action)
+            if scope is None:
+                return {"ok": False, "error": "unsupported_device_command"}
+            sent = self.mesh_server.send_to_device(
+                device_id,
+                envelope("device.command", action=action, payload=payload),
+                required_scope=scope,
+            )
+            return {"ok": sent, "message": "sent" if sent else "device_offline_or_scope_denied"}
+
         if kind == "mesh.clipboard":
             text = str(request.get("text", ""))[:100000]
             result = self.skills.execute(
