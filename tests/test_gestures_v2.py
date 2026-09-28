@@ -107,3 +107,62 @@ def test_gesture_control_state_persists(tmp_path):
     reloaded = GestureControlState(tmp_path / "gestures.json")
     assert reloaded.enabled() is False
     assert reloaded.feature("scroll", True) is False
+
+
+def scaled_pinch_hand(scale: float, pinch_ratio: float) -> Hand:
+    cx, cy = 0.5, 0.65
+    pts = [Point(cx, cy, 0.0) for _ in range(21)]
+    pts[0] = Point(cx, cy + 0.20 * scale, 0.0)
+    pts[5] = Point(cx - 0.10 * scale, cy, 0.0)
+    pts[9] = Point(cx, cy - 0.20 * scale, 0.0)
+    pts[17] = Point(cx + 0.10 * scale, cy, 0.0)
+
+    pts[6] = Point(cx - 0.06 * scale, cy - 0.18 * scale, 0.0)
+    pts[8] = Point(cx - 0.06 * scale, cy - 0.36 * scale, 0.0)
+    pts[10] = Point(cx + 0.02 * scale, cy - 0.05 * scale, 0.0)
+    pts[12] = Point(cx + 0.02 * scale, cy + 0.05 * scale, 0.0)
+    pts[14] = Point(cx + 0.08 * scale, cy - 0.03 * scale, 0.0)
+    pts[16] = Point(cx + 0.08 * scale, cy + 0.08 * scale, 0.0)
+    pts[18] = Point(cx + 0.13 * scale, cy - 0.01 * scale, 0.0)
+    pts[20] = Point(cx + 0.13 * scale, cy + 0.10 * scale, 0.0)
+
+    index = pts[8]
+    pinch_distance = 0.05 * scale * pinch_ratio
+    pts[4] = Point(index.x + pinch_distance, index.y, 0.0)
+    return Hand(tuple(pts), "Right")
+
+
+def test_pinch_threshold_scales_with_hand_size():
+    cfg = dict(CFG)
+    cfg["reference_hand_scale"] = 0.20
+
+    near = GestureEngine(cfg)
+    far = GestureEngine(cfg)
+
+    near_down = near.update([scaled_pinch_hand(1.4, 0.45)])
+    far_down = far.update([scaled_pinch_hand(0.7, 0.45)])
+
+    assert near_down.label == "pinch"
+    assert far_down.label == "pinch"
+
+
+def test_pose_change_requires_two_frames_but_initial_pose_is_immediate():
+    cfg = dict(CFG)
+    cfg["pose_confirm_frames"] = 2
+    engine = GestureEngine(cfg)
+
+    pointer = scroll_hand(0.0)
+    # Build a clear pointer hand from the same skeleton.
+    pts = list(pointer.points)
+    pts[10] = Point(pts[10].x, 0.28, 0.0)
+    pts[12] = Point(pts[12].x, 0.60, 0.0)
+    pointer_hand = Hand(tuple(pts), "Right")
+
+    first = engine.update([pointer_hand])
+    assert first.label == "pointer"
+
+    one_frame = engine.update([scroll_hand(0.0)])
+    assert one_frame.label != "scroll-ready"
+
+    two_frames = engine.update([scroll_hand(0.0)])
+    assert two_frames.label == "scroll-ready"
