@@ -130,10 +130,14 @@ class AstraRuntime:
         print("Gestos v2: estabilização, scroll bidirecional e controle por Astra")
         print("Polegar+indicador = clique | indicador+medio = scroll para cima/baixo")
         print("Polegar+medio = clique direito | palma aberta (segure) = pausar/retomar")
-        if self.pointer_enabled:
-            print("Air-mouse experimental ATIVO")
-        if gesture_cfg.get("drag_enabled"):
-            print("Drag experimental ATIVO")
+        if self._pointer_control_enabled:
+            print("Air-mouse ATIVO")
+        else:
+            print("Air-mouse OFF")
+        if gestures.feature_enabled("drag"):
+            print("Drag ATIVO")
+        else:
+            print("Drag OFF")
         print("Ctrl+C sai")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
