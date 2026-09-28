@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import difflib
 import queue
 import threading
 from pathlib import Path
@@ -57,11 +58,7 @@ class FastWhisperVoiceEngine:
         self.on_text = on_text
         self.raw_frame_callback = raw_frame_callback
         self.language = language
-        self.initial_prompt = initial_prompt or (
-            "Conversa natural em português do Brasil com a assistente Astra. "
-            "Transcreva exatamente o que a pessoa disser, incluindo nomes de "
-            "programas, caminhos, números e comandos, sem completar frases."
-        )
+        self.initial_prompt = initial_prompt or "Português do Brasil. Assistente Astra."
         # Keep this list short. Too many hotwords can bias ordinary speech.
         self.hotwords = hotwords or (
             "Astra Discord Brave Spotify VS Code terminal navegador "
@@ -333,6 +330,7 @@ class FastWhisperVoiceEngine:
         if audio.size < self.sample_rate // 4:
             return
 
+        raw_rms = float(np.sqrt(np.mean(np.square(audio)) + 1e-12))
         audio = self._condition_audio(audio)
         text, confidence = self._decode(audio, beam_size=1)
 
@@ -347,9 +345,14 @@ class FastWhisperVoiceEngine:
                 confidence = retry_confidence
 
         text = " ".join(text.strip().split())
-        if text:
-            print(f"[asr] {text} (score={confidence:.2f})")
-            self.on_text(text)
+        if not text:
+            return
+        if self._is_hallucination(text, confidence, raw_rms):
+            print(f"[asr] rejected hallucination: {text} (score={confidence:.2f})")
+            return
+
+        print(f"[asr] {text} (score={confidence:.2f})")
+        self.on_text(text)
 
     def _decode(self, audio: np.ndarray, beam_size: int) -> tuple[str, float]:
         segments, _ = self.model.transcribe(
@@ -381,6 +384,39 @@ class FastWhisperVoiceEngine:
             for seg, weight in zip(items, weights)
         ) / sum(weights)
         return text, confidence
+
+    def _is_hallucination(self, text: str, confidence: float, rms: float) -> bool:
+        q = " ".join(text.lower().strip().split())
+        if not q:
+            return True
+
+        known_noise = (
+            "se inscreva no canal",
+            "obrigado por assistir",
+            "legendas pela comunidade",
+            "o que a pessoa disser",
+            "deixe-me saber o que a pessoa disser",
+        )
+        if any(phrase in q for phrase in known_noise):
+            return True
+
+        prompt = " ".join(self.initial_prompt.lower().split())
+        if len(q) >= 12 and difflib.SequenceMatcher(None, q, prompt).ratio() >= 0.72:
+            return True
+
+        words = q.split()
+        if len(words) >= 10:
+            unique_ratio = len(set(words)) / max(1, len(words))
+            if unique_ratio <= 0.38:
+                return True
+
+        # Very weak multi-word decodes are overwhelmingly room noise on the
+        # always-on resident microphone. Short wake words remain allowed.
+        if len(words) >= 4 and confidence < -0.98:
+            return True
+        if len(words) >= 2 and rms < 0.0025 and confidence < -0.75:
+            return True
+        return False
 
     @staticmethod
     def _needs_retry(text: str, confidence: float) -> bool:
