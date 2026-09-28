@@ -20,6 +20,7 @@ You receive a goal, a screenshot, structural UI elements and verification histor
 Choose exactly ONE next action. Return JSON only.
 
 Allowed actions:
+{"action":"move","x":123,"y":456,"reason":"...","expected":"..."}
 {"action":"click","x":123,"y":456,"reason":"...","expected":"what should visibly change"}
 {"action":"right_click","x":123,"y":456,"reason":"...","expected":"..."}
 {"action":"type","text":"...","reason":"...","expected":"..."}
@@ -101,7 +102,7 @@ class VisualDesktopAgent:
                     return "Stopped by user."
 
             result = self.tools.execute(action)
-            time.sleep(0.18)
+            time.sleep(0.07)
             verify_path = capture_screen()
             try:
                 after = self._signature(verify_path)
