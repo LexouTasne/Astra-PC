@@ -44,9 +44,9 @@
     "pose_confirm_frames": 2,
     "right_release_threshold": 0.074,
     "reference_hand_scale": 0.2,
-    "transform_hold_ms": 140,
+    "transform_hold_ms": 200,
     "pinch_zoom_ratio": 0.1,
-    "pinch_rotate_threshold_deg": 12
+    "pinch_rotate_threshold_deg": 45
   },
   "actions": {
     "zoom_in": [
