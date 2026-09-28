@@ -14,7 +14,13 @@ class InputBackend(ABC):
     def left_button(self, down: bool) -> None: ...
 
     @abstractmethod
+    def left_click(self) -> None: ...
+
+    @abstractmethod
     def right_click(self) -> None: ...
+
+    def failsafe_release(self) -> None:
+        self.left_button(False)
 
     @abstractmethod
     def scroll(self, amount: int) -> None: ...
