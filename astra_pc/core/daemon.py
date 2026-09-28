@@ -458,6 +458,26 @@ class AstraDaemon:
         return "\n\n".join(parts)
 
     def _semantic_context(self, text: str) -> list[dict[str, Any]]:
+        q = " ".join(text.lower().split())
+        memory_cues = (
+            "lembra",
+            "lembrar",
+            "antes",
+            "anterior",
+            "última",
+            "ultima",
+            "de novo",
+            "como eu gosto",
+            "preferência",
+            "preferencia",
+            "meu projeto",
+            "nosso projeto",
+            "a gente falou",
+            "já falamos",
+            "ja falamos",
+        )
+        if len(q) < 48 and not any(cue in q for cue in memory_cues):
+            return []
         try:
             return self.semantic.search(text, limit=4)
         except Exception:
