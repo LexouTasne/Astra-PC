@@ -304,7 +304,7 @@ class AstraDaemon:
                     min_utterance_ms=int(
                         voice_state.get(
                             "min_utterance_ms",
-                            voice_cfg.get("min_utterance_ms", 240),
+                            voice_cfg.get("min_utterance_ms", 180),
                         )
                     ),
                     max_utterance_s=float(
