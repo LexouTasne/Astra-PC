@@ -3,14 +3,22 @@
   "productName": "Astra",
   "private": true,
   "version": "0.9.0",
-  "description": "Native desktop UI for Astra-PC, visually derived from the MIT-licensed Hermes Desktop shell.",
   "type": "module",
-  "main": "main.mjs",
+  "main": "electron/main.mjs",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron ."
+    "build": "vite build",
+    "start": "npm run build && electron .",
+    "dev": "vite --host 127.0.0.1 --port 5176",
+    "check": "vite build"
   },
   "dependencies": {
-    "electron": "40.10.2"
+    "lucide-react": "^0.468.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^34.0.0",
+    "vite": "^6.0.5"
   }
 }
