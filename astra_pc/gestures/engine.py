@@ -106,7 +106,7 @@ class GestureEngine:
         self._candidate_finger_frames = 0
         self._pose_confirm_frames = max(
             1,
-            int(cfg.get("pose_confirm_frames", 2)),
+            int(cfg.get("pose_confirm_frames", 1)),
         )
 
         self._scroll_filtered_y: float | None = None
