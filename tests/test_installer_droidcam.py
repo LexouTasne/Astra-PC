@@ -1,4 +1,12 @@
-import installer
+import importlib.util
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location("astra_installer", ROOT / "installer.py")
+assert SPEC is not None and SPEC.loader is not None
+installer = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(installer)
 
 
 def test_parse_droidcam_endpoint_default_port():
