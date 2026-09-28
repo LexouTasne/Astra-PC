@@ -2942,7 +2942,12 @@ def main() -> int:
     else:
         print("\nGesture control: waiting for a working camera source.")
         print("Voice, AI, screen understanding and Astra Mesh can run without a camera.")
-    print("\nLocal Astra chat:")
+    print("\nAstra Desktop GUI:")
+    print("  astra")
+    print("  first launch prepares Electron locally if needed")
+    print("\nLegacy terminal panel:")
+    print("  astra tui")
+    print("\nQuick local chat:")
     print(f'  {sys.executable} -m astra_pc ask "O que voce consegue fazer?"')
     print("\nUnderstand the screen:")
     print(f'  {sys.executable} -m astra_pc screen "O que esta acontecendo aqui?"')
