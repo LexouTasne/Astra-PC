@@ -1322,7 +1322,7 @@ def configure_voice_capture(
         max_utterance_s=18.0,
         vad_mode=2,
         adaptive_retry=True,
-        audio_profile_version=2,
+        audio_profile_version=3,
     )
     label = chosen.get("name") or "system default"
     print("Astra microphone:", label)
@@ -1397,11 +1397,11 @@ def install_natural_voice(
         engine="piper",
         voice_id=voice_id,
         model_path=str(model_path),
-        length_scale=0.96,
+        length_scale=0.90,
         noise_scale=0.62,
         noise_w_scale=0.76,
         volume=1.0,
-        audio_profile_version=2,
+        audio_profile_version=3,
     )
     print("Natural voice configured:", voice_id)
     print("Voice state:", state_path)
