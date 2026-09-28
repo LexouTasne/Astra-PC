@@ -37,7 +37,7 @@ class AstraDaemon:
         ai = config.data.get("ai", {})
         host = ai.get("host", "http://127.0.0.1:11434")
         timeout = int(ai.get("timeout", 180))
-        keep = ai.get("keep_alive", "-1")
+        keep = ai.get("keep_alive", -1)
 
         self.text_client = OllamaClient(ai.get("text_model", "qwen3:0.6b"), host, timeout, keep)
         self.vision_client = OllamaClient(ai.get("vision_model", "qwen3-vl:2b-instruct"), host, timeout, keep)
