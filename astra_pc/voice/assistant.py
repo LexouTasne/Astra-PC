@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -19,7 +20,7 @@ class FastSpeaker:
     """Non-blocking TTS queue with fast system backends and pyttsx3 fallback."""
 
     def __init__(self, piper_model: str | Path | None = None):
-        self._q: queue.Queue[str] = queue.Queue(maxsize=8)
+        self._q: queue.Queue[str] = queue.Queue(maxsize=16)
         self.piper_model = Path(piper_model).expanduser() if piper_model else None
         self._stop = threading.Event()
         self._speaking = threading.Event()
@@ -40,14 +41,33 @@ class FastSpeaker:
             return True
         return (time.monotonic() - self._last_finished) * 1000.0 < grace_ms
 
+    @staticmethod
+    def _clean_for_speech(text: str) -> str:
+        value = str(text or "").strip()
+        if not value:
+            return ""
+        # Do not make Piper literally read Markdown syntax, huge code blocks or URLs.
+        value = re.sub(r"```[\s\S]*?```", " trecho de código ", value)
+        value = re.sub(r"`([^\n`]+)`", r"\1", value)
+        value = re.sub(r"https?://\S+", " link ", value)
+        value = re.sub(r"(?m)^\s*[-*+]\s+", "", value)
+        value = re.sub(r"[*_#>~]", "", value)
+        value = re.sub(r"\s+", " ", value).strip()
+        return value
+
     def say(self, text: str) -> None:
-        text = text.strip()
+        text = self._clean_for_speech(text)
         if not text:
             return
         try:
             self._q.put_nowait(text)
         except queue.Full:
-            pass
+            # Voice should prefer the newest answer over stale queued speech.
+            try:
+                self._q.get_nowait()
+                self._q.put_nowait(text)
+            except (queue.Empty, queue.Full):
+                pass
 
     def cancel(self) -> None:
         while True:
@@ -150,8 +170,12 @@ class AstraVoiceAssistant:
         wakeword_threshold: float = 0.55,
         piper_model: str | Path | None = None,
         input_device: int | str | None = None,
-        silence_ms: int = 260,
-        pre_roll_ms: int = 200,
+        silence_ms: int = 480,
+        pre_roll_ms: int = 300,
+        start_speech_ms: int = 60,
+        min_utterance_ms: int = 240,
+        max_utterance_s: float = 18.0,
+        vad_mode: int = 2,
         adaptive_retry: bool = True,
     ):
         self.brain = brain
@@ -184,6 +208,10 @@ class AstraVoiceAssistant:
                 language=language,
                 silence_ms=silence_ms,
                 pre_roll_ms=pre_roll_ms,
+                start_speech_ms=start_speech_ms,
+                min_utterance_ms=min_utterance_ms,
+                max_utterance_s=max_utterance_s,
+                vad_mode=vad_mode,
                 raw_frame_callback=(
                     self._wake_detector.process_pcm if self._wake_detector else None
                 ),
@@ -206,7 +234,7 @@ class AstraVoiceAssistant:
 
     def run(self) -> None:
         print(f"Voice Astra online. Say '{self.wake_word}' followed by a request.")
-        print("Fast path: VAD -> resident ASR -> 0.6B text model -> async TTS")
+        print("Audio path: continuous VAD capture -> parallel Whisper -> async Piper TTS")
         if self.request_handler is None:
             try:
                 self.brain.preload()
@@ -248,9 +276,16 @@ class AstraVoiceAssistant:
             self.speaker.cancel()
         print("[wakeword] Astra detected")
 
+    def _wake_match(self, text: str):
+        aliases = [re.escape(self.wake_word)]
+        # Whisper sometimes drops the /r/ in "Astra" on noisy Brazilian mics.
+        if self.wake_word == "astra":
+            aliases.append("asta")
+        return re.search(r"\b(?:" + "|".join(aliases) + r")\b", text, re.I)
+
     def _on_text(self, text: str) -> None:
         normalized = text.lower().strip()
-        pos = normalized.find(self.wake_word)
+        wake = self._wake_match(text)
         now = time.monotonic()
 
         # Without hardware AEC, desktop speakers can be re-captured by the mic.
@@ -258,14 +293,14 @@ class AstraVoiceAssistant:
         # explicitly addresses Astra with a stop/cancel phrase.
         if self.speaker and self.speaker.is_busy():
             stop_words = ("para", "pare", "cala", "cancelar", "stop", "silêncio", "silencio")
-            if pos >= 0 and any(word in normalized for word in stop_words):
+            if wake is not None and any(word in normalized for word in stop_words):
                 self.speaker.cancel()
                 self._conversation_until = 0.0
                 print("[barge-in] speech cancelled")
             return
 
-        if pos >= 0:
-            request = text[pos + len(self.wake_word):].strip(" ,:;-")
+        if wake is not None:
+            request = text[wake.end():].strip(" ,:;-")
             self._conversation_until = now + self.conversation_window
             if self.speaker:
                 self.speaker.cancel()
