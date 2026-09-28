@@ -83,7 +83,7 @@
     },
     "piper_model": "",
     "start_speech_ms": 60,
-    "min_utterance_ms": 240,
+    "min_utterance_ms": 180,
     "max_utterance_s": 18,
     "vad_mode": 2
   },
