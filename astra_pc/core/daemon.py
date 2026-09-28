@@ -29,6 +29,7 @@ from astra_pc.perception.monitors import get_monitors
 from astra_pc.perception.reference import ReferenceResolver
 from astra_pc.screen.capture import capture_screen
 from astra_pc.skills.manager import SkillManager
+from astra_pc.voice.commands import CommandRouter
 
 
 class AstraDaemon:
@@ -766,6 +767,16 @@ class AstraDaemon:
                 return {"ok": False, "error": f"Não consegui analisar a imagem: {exc}"}
 
         lowered = text.lower().strip()
+
+        time_answer = CommandRouter._time(text)
+        if time_answer is not None:
+            self._record_chat(text, time_answer)
+            return {
+                "ok": True,
+                "message": time_answer,
+                "plan": {"type": "answer", "path": "system-local-time"},
+            }
+
         profile_aliases = {
             "modo dev": "dev",
             "modo programação": "dev",
