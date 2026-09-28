@@ -16,6 +16,27 @@ function pythonArgs(args) {
   return ['-m', 'astra_pc', ...args]
 }
 
+function friendlyError(value) {
+  const raw = String(value?.message || value || '').trim()
+  if (!raw) return 'Astra encontrou um erro.'
+  if (/Ollama is not reachable|Connection refused|AI está offline/i.test(raw)) {
+    return 'Astra AI está offline. Tentando iniciar o modelo local automaticamente.'
+  }
+  const lines = raw
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .filter(line => !line.startsWith('Traceback'))
+    .filter(line => !/^File "/.test(line))
+    .filter(line => !line.startsWith('During handling'))
+    .filter(line => !line.startsWith('The above exception'))
+  const last = lines.at(-1) || raw
+  return last
+    .replace(/^astra_pc\.[\w.]+\.[A-Za-z]+Error:\s*/, '')
+    .replace(/^[A-Za-z.]+Error:\s*/, '')
+    .slice(0, 320)
+}
+
 function spawnAstra(args, { id = crypto.randomUUID(), interactive = false } = {}) {
   const child = spawn(python, pythonArgs(args), {
     cwd: astraRoot,
@@ -108,7 +129,7 @@ function createWindow() {
     height: 880,
     minWidth: 980,
     minHeight: 680,
-    backgroundColor: '#08090c',
+    backgroundColor: '#0a0a0a',
     title: 'Astra',
     frame: false,
     titleBarStyle: 'hidden',
@@ -134,7 +155,7 @@ ipcMain.handle('astra:status', async () => {
   } catch (error) {
     return {
       ok: false,
-      error: error.message,
+      error: friendlyError(error),
       daemon: { online: false, starting: false },
       camera: { available: false, label: 'Indisponível' },
       voice: { configured: false, microphone: '—', asr: '—', tts: '—' },
@@ -152,7 +173,7 @@ ipcMain.handle('astra:ask', async (_event, prompt) => {
     const answer = await collectAstra(['ask', text], 45000)
     return { ok: true, answer }
   } catch (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: friendlyError(error) }
   }
 })
 
@@ -179,7 +200,7 @@ ipcMain.handle('astra:stop', async (_event, id) => {
     }, 1200)
     return { ok: true }
   } catch (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: friendlyError(error) }
   }
 })
 
@@ -188,7 +209,7 @@ ipcMain.handle('astra:update', async () => {
     const output = await collectAstra(['desktop-update'], 60000)
     return { ok: true, output }
   } catch (error) {
-    return { ok: false, error: error.message }
+    return { ok: false, error: friendlyError(error) }
   }
 })
 
