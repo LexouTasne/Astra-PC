@@ -13,7 +13,7 @@
     "model_complexity": 0
   },
   "pointer": {
-    "enabled": true,
+    "enabled": false,
     "active_margin": 0.1,
     "smoothing": 0.38,
     "deadzone_px": 2
@@ -22,7 +22,8 @@
     "pinch_threshold": 0.045,
     "click_release_threshold": 0.065,
     "right_pinch_threshold": 0.05,
-    "drag_hold_ms": 220,
+    "drag_enabled": false,
+    "drag_hold_ms": 350,
     "pause_cooldown_ms": 900,
     "scroll_gain": 8,
     "scroll_deadzone": 0.007,
