@@ -106,12 +106,16 @@ class AstraPlanner:
         for pattern in (r'"([^"]+)"', r"'([^']+)'"):
             for match in re.finditer(pattern, text):
                 value = match.group(1).strip()
+                if value.startswith(("http://", "https://")):
+                    continue
                 if "/" in value or "\\" in value or value.startswith("~"):
                     return value.rstrip(".,;:!?")
 
         # Otherwise accept shell-like path tokens such as home/lex/Downloads.
         for raw in reversed(text.split()):
             value = raw.strip().strip("()[]{}<>").rstrip(".,;:!?")
+            if value.startswith(("http://", "https://")):
+                continue
             if "/" in value or "\\" in value or value.startswith("~"):
                 return value
         return None
