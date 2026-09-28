@@ -50,7 +50,8 @@ class YdotoolBackend(InputBackend):
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._last_error = ""
-        self._validate_socket()
+        self._env = os.environ.copy()
+        self._socket = self._discover_socket()
         self._worker = threading.Thread(
             target=self._run_worker,
             name="astra-ydotool",
@@ -58,25 +59,51 @@ class YdotoolBackend(InputBackend):
         )
         self._worker.start()
 
-    def _validate_socket(self) -> None:
-        try:
-            probe = subprocess.run(
-                [self.binary, "debug"],
-                capture_output=True,
-                text=True,
-                timeout=1.5,
-                check=False,
-            )
-        except Exception as exc:
-            raise RuntimeError(f"ydotool health check failed: {exc}") from exc
-        if probe.returncode != 0:
-            detail = (probe.stderr or probe.stdout or "ydotoold unavailable").strip()
-            raise RuntimeError(detail)
+    def _discover_socket(self) -> str:
+        candidates: list[str] = []
+        explicit = os.getenv("YDOTOOL_SOCKET")
+        runtime = os.getenv("XDG_RUNTIME_DIR")
+        if explicit:
+            candidates.append(explicit)
+        if runtime:
+            candidates.append(str(os.path.join(runtime, ".ydotool_socket")))
+        candidates.append("/tmp/.ydotool_socket")
+
+        last_detail = "ydotoold unavailable"
+        seen = set()
+        for socket_path in candidates:
+            if socket_path in seen:
+                continue
+            seen.add(socket_path)
+            env = os.environ.copy()
+            env["YDOTOOL_SOCKET"] = socket_path
+            try:
+                probe = subprocess.run(
+                    [self.binary, "debug"],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.5,
+                    check=False,
+                    env=env,
+                )
+            except Exception as exc:
+                last_detail = str(exc)
+                continue
+            if probe.returncode == 0:
+                self._env = env
+                os.environ["YDOTOOL_SOCKET"] = socket_path
+                print(f"[input] ydotool socket: {socket_path}")
+                return socket_path
+            last_detail = (
+                probe.stderr or probe.stdout or "ydotoold unavailable"
+            ).strip()
+
+        raise RuntimeError(last_detail)
 
     def health(self) -> tuple[bool, str]:
         if self._last_error:
             return False, self._last_error
-        return True, f"ydotool ready ({self.binary})"
+        return True, f"ydotool ready ({self.binary}, socket={self._socket})"
 
     def close(self) -> None:
         try:
@@ -98,6 +125,7 @@ class YdotoolBackend(InputBackend):
                 stderr=subprocess.PIPE,
                 text=True,
                 timeout=1.5,
+                env=self._env,
             )
             if p.returncode != 0:
                 self._last_error = (p.stderr or "ydotool command failed").strip()
