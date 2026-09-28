@@ -42,18 +42,34 @@ def _run_gestures(args, config) -> None:
     from .core.runtime import AstraRuntime
 
     try:
+        tutorial = None
+        if getattr(args, "tutorial", False):
+            tutorial = True
+        elif getattr(args, "no_tutorial", False):
+            tutorial = False
         AstraRuntime(
             config=config,
             show_camera=args.show_camera,
             dry_run=args.dry_run,
             voice_model=args.voice_model,
+            tutorial=tutorial,
         ).run()
     except RuntimeError as exc:
-        if str(exc).startswith("camera_unavailable:"):
+        detail = str(exc)
+        if detail.startswith("camera_unavailable:"):
             print("Astra não encontrou nenhuma câmera produzindo frames.")
             print("Rode: astra setup camera")
             print("Se estiver usando DroidCam, conecte o celular e depois tente novamente.")
             raise SystemExit(2)
+        if detail.startswith("gesture_input_unavailable:") or "Wayland input is not ready" in detail:
+            print("Backend de mouse/teclado dos gestos não está pronto.")
+            print(detail)
+            print("Rode: astra setup gestures")
+            raise SystemExit(3)
+        if detail == "gesture_tutorial_failed":
+            print("O tutorial não foi concluído; o controle real não foi ativado.")
+            print("Tente novamente com: astra gestures --tutorial")
+            raise SystemExit(4)
         raise
 
 
@@ -65,6 +81,8 @@ def _run_setup(args, config) -> None:
     cmd = [sys.executable, str(installer)]
     if args.setup_command == "camera":
         cmd.append("--camera-only")
+    elif args.setup_command == "gestures":
+        cmd.append("--gestures-only")
     elif args.setup_command == "voice":
         cmd.append("--voice-only")
         if getattr(args, "tts_voice", None):
@@ -217,7 +235,9 @@ def _run_home(args, config) -> None:
         print("Comandos úteis:")
         print("  astra chat")
         print("  astra voice --engine fast")
-        print("  astra gestures")
+        print("  astra gestures              # first run opens tutorial")
+        print("  astra setup gestures        # repair gesture stack")
+        print("  astra gestures --tutorial   # replay tutorial")
         print("  astra mesh pair-code")
         print("  astra setup camera")
         return
@@ -770,6 +790,8 @@ def build_parser() -> argparse.ArgumentParser:
     gestures.add_argument("--show-camera", action="store_true")
     gestures.add_argument("--dry-run", action="store_true")
     gestures.add_argument("--voice-model", type=Path)
+    gestures.add_argument("--tutorial", action="store_true", help="force interactive gesture tutorial")
+    gestures.add_argument("--no-tutorial", action="store_true", help="skip first-run tutorial")
 
     ask = sub.add_parser("ask", help="ask Astra's local Qwen brain")
     ask.add_argument("prompt")
@@ -850,6 +872,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = sub.add_parser("setup", help="guided Astra setup/repair")
     setup_sub = setup.add_subparsers(dest="setup_command", required=True)
+    setup_gestures = setup_sub.add_parser(
+        "gestures",
+        help="repair camera/input backend and prepare interactive gesture tutorial",
+    )
+    setup_gestures.add_argument("--yes", action="store_true")
+    setup_gestures.add_argument("--allow-layering", action="store_true")
+
     setup_camera = setup_sub.add_parser("camera", help="detect/install/configure camera or DroidCam")
     setup_camera.add_argument("--yes", action="store_true")
     setup_camera.add_argument("--allow-layering", action="store_true")
