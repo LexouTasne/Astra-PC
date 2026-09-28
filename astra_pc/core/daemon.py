@@ -209,20 +209,32 @@ class AstraDaemon:
                 return True
             try:
                 from astra_pc.voice.assistant import AstraVoiceAssistant
-                from astra_pc.voice.piper_tts import resolve_piper_model
+                from astra_pc.voice.piper_tts import load_voice_state, resolve_piper_model
 
                 voice_cfg = self.config.data.get("voice", {})
+                voice_state = load_voice_state()
                 piper_model = resolve_piper_model(
                     voice_cfg.get("piper_model") or None
                 )
+                whisper_model = (
+                    voice_state.get("whisper_model")
+                    or voice_cfg.get("whisper_model", "small")
+                )
+                language = (
+                    voice_state.get("language")
+                    or voice_cfg.get("language", "pt")
+                )
+                input_device = voice_state.get("input_device_name") or None
+                if not input_device and voice_state.get("input_device_index") is not None:
+                    input_device = int(voice_state["input_device_index"])
                 assistant = AstraVoiceAssistant(
                     self.brain,
                     None,
                     wake_word=voice_cfg.get("wake_word", "astra"),
                     speak=not no_speak,
                     engine=voice_cfg.get("engine", "fast"),
-                    whisper_model=voice_cfg.get("whisper_model", "base"),
-                    language=voice_cfg.get("language", "pt"),
+                    whisper_model=whisper_model,
+                    language=language,
                     request_handler=self._voice_request,
                     conversation_window=float(
                         voice_cfg.get("conversation_window", 9.0)
@@ -238,6 +250,22 @@ class AstraDaemon:
                         )
                     ),
                     piper_model=piper_model,
+                    input_device=input_device,
+                    silence_ms=int(
+                        voice_state.get(
+                            "silence_ms",
+                            voice_cfg.get("silence_ms", 260),
+                        )
+                    ),
+                    pre_roll_ms=int(
+                        voice_state.get(
+                            "pre_roll_ms",
+                            voice_cfg.get("pre_roll_ms", 200),
+                        )
+                    ),
+                    adaptive_retry=bool(
+                        voice_state.get("adaptive_retry", True)
+                    ),
                 )
                 self.voice_assistant = assistant
                 threading.Thread(
