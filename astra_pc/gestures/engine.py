@@ -101,6 +101,10 @@ class GestureEngine:
 
         self._right_latched = False
 
+        self._transforming = False
+        self._transform_distance: float | None = None
+        self._transform_angle: float | None = None
+
         self._stable_finger_state: tuple[bool, bool, bool, bool] | None = None
         self._candidate_finger_state: tuple[bool, bool, bool, bool] | None = None
         self._candidate_finger_frames = 0
@@ -138,6 +142,7 @@ class GestureEngine:
         if name == "swipe" and not value:
             self._swipe_history.clear()
         if name in {"zoom", "rotate"} and not value:
+            self._reset_transform()
             self._reset_two_hand()
 
     def set_paused(self, value: bool) -> None:
@@ -285,12 +290,24 @@ class GestureEngine:
         out = GestureOutput()
 
         pointer_pose = index_up and not middle_up and not ring_up and not pinky_up
+
+        if self._transforming:
+            if pointer_pose and (self.feature_enabled("zoom") or self.feature_enabled("rotate")):
+                return self._update_pinch_transform(hand)
+            self._reset_transform()
+
         if pointer_pose and self.feature_enabled("pointer"):
             out.pointer = (index.x, index.y)
             out.label = "pointer"
 
+        transform_enabled = (
+            pointer_pose
+            and (self.feature_enabled("zoom") or self.feature_enabled("rotate"))
+        )
         pinch_tracking_enabled = (
-            self.feature_enabled("click") or self.feature_enabled("drag")
+            self.feature_enabled("click")
+            or self.feature_enabled("drag")
+            or transform_enabled
         )
         if pinch_tracking_enabled and pinch_on and not self._pinching:
             self._pinching = True
@@ -299,7 +316,21 @@ class GestureEngine:
 
         if self._pinching:
             hold_ms = (now - self._pinch_started) * 1000.0
-            drag_enabled = self.feature_enabled("drag")
+            transform_hold = float(self.cfg.get("transform_hold_ms", 140))
+
+            if pinch_off and transform_enabled and hold_ms >= transform_hold:
+                self._pinching = False
+                self._dragging = False
+                self._transforming = True
+                self._transform_distance = _dist(thumb, index)
+                self._transform_angle = math.degrees(
+                    math.atan2(index.y - thumb.y, index.x - thumb.x)
+                )
+                out.pointer = None
+                out.label = "transform-ready"
+                return out
+
+            drag_enabled = self.feature_enabled("drag") and not transform_enabled
             if drag_enabled and hold_ms >= float(self.cfg.get("drag_hold_ms", 350)):
                 if not self._dragging:
                     out.left_down = True
@@ -311,7 +342,10 @@ class GestureEngine:
                 if self._dragging:
                     out.left_down = False
                     out.label = "drop"
-                elif self.feature_enabled("click"):
+                elif self.feature_enabled("click") and hold_ms < transform_hold:
+                    out.left_click = True
+                    out.label = "click"
+                elif self.feature_enabled("click") and not transform_enabled:
                     out.left_click = True
                     out.label = "click"
                 else:
@@ -344,6 +378,54 @@ class GestureEngine:
             self._apply_swipe(hand, out, now)
         else:
             self._swipe_history.clear()
+
+        return out
+
+    def _update_pinch_transform(self, hand: Hand) -> GestureOutput:
+        thumb, index = hand[4], hand[8]
+        distance = _dist(thumb, index)
+        angle = math.degrees(math.atan2(index.y - thumb.y, index.x - thumb.x))
+
+        if self._transform_distance is None:
+            self._transform_distance = distance
+        if self._transform_angle is None:
+            self._transform_angle = angle
+
+        base_distance = max(1e-4, self._transform_distance)
+        distance_ratio = distance / base_distance
+        angle_delta = angle - self._transform_angle
+        while angle_delta > 180:
+            angle_delta -= 360
+        while angle_delta < -180:
+            angle_delta += 360
+
+        zoom_ratio = max(0.03, float(self.cfg.get("pinch_zoom_ratio", 0.12)))
+        rotate_threshold = max(
+            4.0,
+            float(self.cfg.get("pinch_rotate_threshold_deg", 14.0)),
+        )
+        zoom_score = (
+            abs(distance_ratio - 1.0) / zoom_ratio
+            if self.feature_enabled("zoom")
+            else 0.0
+        )
+        rotate_score = (
+            abs(angle_delta) / rotate_threshold
+            if self.feature_enabled("rotate")
+            else 0.0
+        )
+
+        out = GestureOutput(label="transform")
+        if zoom_score >= 1.0 and zoom_score >= rotate_score:
+            out.zoom_steps = 1 if distance_ratio > 1.0 else -1
+            out.label = "zoom-in" if out.zoom_steps > 0 else "zoom-out"
+            self._transform_distance = distance
+            self._transform_angle = angle
+        elif rotate_score >= 1.0:
+            out.rotate_steps = 1 if angle_delta > 0 else -1
+            out.label = "rotate-right" if out.rotate_steps > 0 else "rotate-left"
+            self._transform_distance = distance
+            self._transform_angle = angle
 
         return out
 
@@ -477,6 +559,11 @@ class GestureEngine:
 
         return out
 
+    def _reset_transform(self) -> None:
+        self._transforming = False
+        self._transform_distance = None
+        self._transform_angle = None
+
     def _reset_scroll(self) -> None:
         self._scroll_filtered_y = None
         self._scroll_last_y = None
@@ -490,6 +577,7 @@ class GestureEngine:
     def _reset_transient(self, *, keep_palm: bool = False) -> None:
         self._pinching = False
         self._dragging = False
+        self._reset_transform()
         self._reset_scroll()
         self._swipe_history.clear()
         self._reset_two_hand()
