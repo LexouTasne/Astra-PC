@@ -40,7 +40,9 @@
     "scroll_smoothing": 0.62,
     "scroll_max_step": 5,
     "swipe_distance": 0.085,
-    "swipe_window_ms": 240
+    "swipe_window_ms": 240,
+    "pose_confirm_frames": 2,
+    "right_release_threshold": 0.074
   },
   "actions": {
     "zoom_in": [
@@ -81,8 +83,8 @@
     "whisper_model": "small",
     "language": "pt",
     "wake_word": "astra",
-    "silence_ms": 480,
-    "pre_roll_ms": 300,
+    "silence_ms": 340,
+    "pre_roll_ms": 240,
     "adaptive_retry": true,
     "target_response_ms": 2500,
     "conversation_window": 12,
@@ -92,8 +94,8 @@
       "threshold": 0.55
     },
     "piper_model": "",
-    "start_speech_ms": 60,
-    "min_utterance_ms": 180,
+    "start_speech_ms": 45,
+    "min_utterance_ms": 150,
     "max_utterance_s": 18,
     "vad_mode": 2
   },
