@@ -37,7 +37,9 @@ class AstraRuntime:
         self.voice = None
 
         pointer = config.section("pointer")
-        self.pointer_enabled = bool(pointer.get("enabled", False) or self.air_mouse)
+        self.pointer_enabled = bool(
+            pointer.get("enabled", False) or self.air_mouse or self.drag
+        )
         self.smoothing = float(pointer["smoothing"])
         self.deadzone = float(pointer["deadzone_px"])
         self.margin = float(pointer["active_margin"])
