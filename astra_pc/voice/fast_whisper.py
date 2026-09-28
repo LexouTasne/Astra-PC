@@ -24,6 +24,8 @@ class FastWhisperVoiceEngine:
         pre_roll_ms: int = 240,
         max_utterance_s: float = 10.0,
         raw_frame_callback: Callable[[bytes], None] | None = None,
+        initial_prompt: str | None = None,
+        hotwords: str | None = None,
     ):
         try:
             import sounddevice as sd
@@ -45,6 +47,14 @@ class FastWhisperVoiceEngine:
         self.on_text = on_text
         self.raw_frame_callback = raw_frame_callback
         self.language = language
+        self.initial_prompt = initial_prompt or (
+            "Astra, assistente local em português do Brasil. "
+            "Transcreva números, contas e nomes de aplicativos com precisão."
+        )
+        self.hotwords = hotwords or (
+            "Astra DroidCam navegador terminal volume clipboard "
+            "um dois três quatro cinco seis sete oito nove dez"
+        )
         self.sample_rate = sample_rate
         self.frame_ms = frame_ms
         self.silence_frames = max(1, silence_ms // frame_ms)
@@ -143,6 +153,8 @@ class FastWhisperVoiceEngine:
             condition_on_previous_text=False,
             without_timestamps=True,
             word_timestamps=False,
+            initial_prompt=self.initial_prompt,
+            hotwords=self.hotwords,
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
         if text:
