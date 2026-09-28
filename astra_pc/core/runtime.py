@@ -21,11 +21,13 @@ class AstraRuntime:
         show_camera: bool = False,
         dry_run: bool = False,
         voice_model: Path | None = None,
+        tutorial: bool | None = None,
     ):
         self.config = config
         self.show_camera = show_camera
         self.dry_run = dry_run
         self.voice_model = voice_model
+        self.tutorial = tutorial
         self.backend = None if dry_run else create_input_backend()
         self.router = CommandRouter()
         self.voice = None
@@ -74,10 +76,43 @@ class AstraRuntime:
             screen_w, screen_h = (right - left, bottom - top)
         else:
             screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
+        if self.backend is not None and hasattr(self.backend, "health"):
+            ok_backend, detail = self.backend.health()
+            print(f"[input] {detail}")
+            if not ok_backend:
+                raise RuntimeError(f"gesture_input_unavailable: {detail}")
+
+        from astra_pc.gestures.tutorial import (
+            run_gesture_tutorial,
+            tutorial_completed,
+        )
+        should_tutorial = (
+            self.tutorial is True
+            or (self.tutorial is None and not tutorial_completed())
+        )
+        if should_tutorial:
+            completed = run_gesture_tutorial(
+                cap,
+                tracker,
+                gestures,
+                mirror=bool(cam_cfg.get("mirror", True)),
+                backend=self.backend,
+                map_pointer=self._map_pointer,
+                screen_w=screen_w,
+                screen_h=screen_h,
+            )
+            if not completed:
+                raise RuntimeError("gesture_tutorial_failed")
+            # Tutorial consumes camera frames and may leave transient gesture state.
+            gestures.set_paused(False)
+            self._smooth_xy = None
+
         self._start_voice_if_requested(gestures)
 
         print("Astra v0.8 gesture engine online.")
-        print("Open palm toggles pause. Press Q/ESC in preview or Ctrl+C to exit.")
+        print("Indicador = ponteiro | polegar+indicador = clique/arrastar")
+        print("Indicador+medio = scroll | polegar+medio = clique direito")
+        print("Palma aberta = pausar/retomar | Ctrl+C sai")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
         try:
@@ -129,6 +164,17 @@ class AstraRuntime:
                         2,
                         cv2.LINE_AA,
                     )
+                    for hand in hands:
+                        for idx in (0, 4, 8, 12, 16, 20):
+                            p = hand[idx]
+                            cv2.circle(
+                                frame,
+                                (int(p.x * frame.shape[1]), int(p.y * frame.shape[0])),
+                                5,
+                                color,
+                                -1,
+                                cv2.LINE_AA,
+                            )
                     cv2.putText(
                         frame,
                         f"hands: {len(hands)}",
@@ -153,6 +199,9 @@ class AstraRuntime:
                 self.voice.stop()
             if self.backend:
                 self.backend.left_button(False)
+                close = getattr(self.backend, "close", None)
+                if callable(close):
+                    close()
             tracker.close()
             cap.release()
             cv2.destroyAllWindows()
