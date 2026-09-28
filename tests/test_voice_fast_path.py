@@ -23,3 +23,14 @@ def test_colloquial_math_is_instant():
     result = CommandRouter().execute("quanto que é um mais um?")
     assert result.handled
     assert result.message == "É 2."
+
+
+def test_embedded_close_discord_is_action():
+    assert AstraPlanner.needs_planning("eu pedi para você fechar o Discord")
+    plan = AstraPlanner._fast_plan("eu pedi para você fechar o Discord")
+    assert plan == {
+        "type": "skill",
+        "skill": "apps",
+        "action": "close_app",
+        "args": {"name": "discord"},
+    }
