@@ -50,12 +50,18 @@ class CommandRouter:
         if not (
             q.startswith("quanto é")
             or q.startswith("quanto e")
+            or q.startswith("quanto que é")
+            or q.startswith("quanto que e")
             or q.startswith("calcule")
             or q.startswith("calcula")
         ):
             return None
 
-        expr = re.sub(r"^(?:quanto\s+[ée]|calcule|calcula)\s*", "", q).strip()
+        expr = re.sub(
+            r"^(?:quanto(?:\s+que)?\s+[ée]|calcule|calcula)\s*",
+            "",
+            q,
+        ).strip()
         words = {
             "zero": "0", "um": "1", "uma": "1", "dois": "2", "duas": "2",
             "três": "3", "tres": "3", "quatro": "4", "cinco": "5",
