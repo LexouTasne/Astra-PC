@@ -59,14 +59,70 @@ class FastWhisperVoiceEngine:
         )
         self.input_device = input_device
         self.adaptive_retry = adaptive_retry
-        self.sample_rate = sample_rate
+        self.sample_rate = int(sample_rate)
+        self.capture_rate = self._resolve_capture_rate(self.sample_rate)
         self.frame_ms = frame_ms
         self.silence_frames = max(1, silence_ms // frame_ms)
         self.pre_roll_frames = max(1, pre_roll_ms // frame_ms)
         self.max_frames = max(1, int(max_utterance_s * 1000 / frame_ms))
-        self.frame_samples = int(sample_rate * frame_ms / 1000)
+        self.frame_samples = int(self.sample_rate * frame_ms / 1000)
+        self.capture_frame_samples = int(
+            round(self.capture_rate * frame_ms / 1000)
+        )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+
+    def _resolve_capture_rate(self, target_rate: int) -> int:
+        """Use 16 kHz when the device accepts it, otherwise capture natively.
+
+        Some USB/virtual microphones (including common 48 kHz-only devices)
+        reject a 16 kHz PortAudio stream. Astra captures at the device's native
+        rate and resamples each VAD frame to 16 kHz instead of crashing.
+        """
+        try:
+            self.sd.check_input_settings(
+                device=self.input_device,
+                channels=1,
+                dtype="int16",
+                samplerate=target_rate,
+            )
+            return target_rate
+        except Exception:
+            pass
+
+        try:
+            info = self.sd.query_devices(self.input_device, "input")
+            native = int(round(float(info.get("default_samplerate", 48000))))
+            self.sd.check_input_settings(
+                device=self.input_device,
+                channels=1,
+                dtype="int16",
+                samplerate=native,
+            )
+            print(
+                f"[asr] microphone does not accept {target_rate} Hz; "
+                f"capturing at {native} Hz and resampling"
+            )
+            return native
+        except Exception as exc:
+            raise RuntimeError(
+                f"Microphone '{self.input_device or 'default'}' cannot be opened: {exc}"
+            ) from exc
+
+    def _to_target_rate(self, pcm: bytes) -> bytes:
+        if self.capture_rate == self.sample_rate:
+            return pcm
+        src = np.frombuffer(pcm, dtype=np.int16)
+        if src.size == 0:
+            return b""
+        target_len = max(
+            1,
+            int(round(src.size * self.sample_rate / self.capture_rate)),
+        )
+        old_x = np.linspace(0.0, 1.0, num=src.size, endpoint=False)
+        new_x = np.linspace(0.0, 1.0, num=target_len, endpoint=False)
+        converted = np.interp(new_x, old_x, src.astype(np.float32))
+        return np.clip(converted, -32768, 32767).astype(np.int16).tobytes()
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="astra-fast-asr", daemon=True)
@@ -88,18 +144,18 @@ class FastWhisperVoiceEngine:
             if status:
                 return
             try:
-                audio_q.put_nowait(bytes(indata))
+                audio_q.put_nowait(self._to_target_rate(bytes(indata)))
             except queue.Full:
                 try:
                     audio_q.get_nowait()
-                    audio_q.put_nowait(bytes(indata))
+                    audio_q.put_nowait(self._to_target_rate(bytes(indata)))
                 except queue.Empty:
                     pass
 
         with self.sd.RawInputStream(
             device=self.input_device,
-            samplerate=self.sample_rate,
-            blocksize=self.frame_samples,
+            samplerate=self.capture_rate,
+            blocksize=self.capture_frame_samples,
             dtype="int16",
             channels=1,
             callback=callback,
