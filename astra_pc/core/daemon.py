@@ -118,6 +118,8 @@ class AstraDaemon:
         if voice:
             from astra_pc.voice.assistant import AstraVoiceAssistant
             voice_cfg = self.config.data.get("voice", {})
+            from astra_pc.voice.piper_tts import resolve_piper_model
+            piper_model = resolve_piper_model(voice_cfg.get("piper_model") or None)
             self.voice_assistant = AstraVoiceAssistant(
                 self.brain,
                 None,
@@ -136,7 +138,7 @@ class AstraDaemon:
                 wakeword_threshold=float(
                     voice_cfg.get("dedicated_wakeword", {}).get("threshold", 0.55)
                 ),
-                piper_model=voice_cfg.get("piper_model") or None,
+                piper_model=piper_model,
             )
             threading.Thread(
                 target=self.voice_assistant.run,
