@@ -42,7 +42,8 @@
     "swipe_distance": 0.085,
     "swipe_window_ms": 240,
     "pose_confirm_frames": 2,
-    "right_release_threshold": 0.074
+    "right_release_threshold": 0.074,
+    "reference_hand_scale": 0.2
   },
   "actions": {
     "zoom_in": [
