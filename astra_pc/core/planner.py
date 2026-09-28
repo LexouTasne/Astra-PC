@@ -24,6 +24,13 @@ class AstraPlanner:
         re.I,
     )
 
+    FILE_WORDS = (
+        "arquivo", "arquivos", "pasta", "diretório", "diretorio",
+        "downloads", "documentos", "documents", "desktop",
+        "o que tem dentro", "oque tem dentro", "o que contém", "o que contem",
+        "listar", "liste", "mostre os arquivos", "conteúdo da pasta", "conteudo da pasta",
+    )
+
     def __init__(self, brain: AstraBrain, skills: SkillManager):
         self.brain = brain
         self.skills = skills
@@ -32,6 +39,10 @@ class AstraPlanner:
     def needs_planning(cls, text: str) -> bool:
         q = " ".join(text.lower().strip().split())
         if cls.ACTIONISH.search(q):
+            return True
+        if cls.extract_path(text):
+            return True
+        if any(word in q for word in cls.FILE_WORDS):
             return True
         return any(
             phrase in q
@@ -90,8 +101,53 @@ class AstraPlanner:
         return self._json(raw)
 
     @staticmethod
+    def extract_path(text: str) -> str | None:
+        # Prefer quoted paths so spaces survive intact.
+        for pattern in (r'"([^"]+)"', r"'([^']+)'"):
+            for match in re.finditer(pattern, text):
+                value = match.group(1).strip()
+                if "/" in value or "\\" in value or value.startswith("~"):
+                    return value.rstrip(".,;:!?")
+
+        # Otherwise accept shell-like path tokens such as home/lex/Downloads.
+        for raw in reversed(text.split()):
+            value = raw.strip().strip("()[]{}<>").rstrip(".,;:!?")
+            if "/" in value or "\\" in value or value.startswith("~"):
+                return value
+        return None
+
+    @staticmethod
     def _fast_plan(text: str, context: DesktopContext | None = None) -> dict[str, Any] | None:
         q = " ".join(text.lower().strip().split())
+        path = AstraPlanner.extract_path(text)
+
+        if path:
+            wants_read = any(
+                phrase in q
+                for phrase in (
+                    "leia o arquivo",
+                    "ler arquivo",
+                    "conteúdo do arquivo",
+                    "conteudo do arquivo",
+                    "abra o arquivo e leia",
+                )
+            )
+            if wants_read:
+                return {
+                    "type": "skill",
+                    "skill": "files",
+                    "action": "read_file",
+                    "args": {"path": path},
+                }
+
+            # A path by itself, or a question about what is inside it, is a
+            # directory-list request. FilesSkill will reject non-directories cleanly.
+            return {
+                "type": "skill",
+                "skill": "files",
+                "action": "list_dir",
+                "args": {"path": path},
+            }
 
         url = re.search(r"https?://\S+", text)
         if url and re.search(r"\b(abre|abra|abrir|open)\b", q):
