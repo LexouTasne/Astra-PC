@@ -328,6 +328,126 @@ class AstraPlanner:
                 "args": {"name": m.group(1)},
             }
 
+        m = re.search(
+            r"\b(?:mova|move|mover)\s+(?:o\s+)?mouse\s+(?:para|pra)\s+"
+            r"(\d{1,5})\s*[,x ]\s*(\d{1,5})\b",
+            q,
+        )
+        if m:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "mouse_move",
+                "args": {"x": int(m.group(1)), "y": int(m.group(2))},
+            }
+
+        if q in {"clique", "clica", "clicar", "clique aqui", "clica aqui"}:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "mouse_click",
+                "args": {},
+            }
+
+        if q in {
+            "clique direito", "clica direito", "botao direito", "botão direito"
+        }:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "mouse_right_click",
+                "args": {},
+            }
+
+        m = re.match(r"^(?:digite|digita|escreva|escreve)\s+(.+)$", text.strip(), re.I)
+        if m:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "type_text",
+                "args": {"text": m.group(1)},
+            }
+
+        if q in {"scroll pra cima", "scroll para cima", "rola pra cima", "role para cima"}:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "mouse_scroll",
+                "args": {"amount": 5},
+            }
+        if q in {"scroll pra baixo", "scroll para baixo", "rola pra baixo", "role para baixo"}:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "mouse_scroll",
+                "args": {"amount": -5},
+            }
+
+        hotkeys = {
+            "ctrl c": ["ctrl", "c"],
+            "ctrl+c": ["ctrl", "c"],
+            "ctrl v": ["ctrl", "v"],
+            "ctrl+v": ["ctrl", "v"],
+            "ctrl a": ["ctrl", "a"],
+            "ctrl+a": ["ctrl", "a"],
+            "ctrl z": ["ctrl", "z"],
+            "ctrl+z": ["ctrl", "z"],
+            "ctrl s": ["ctrl", "s"],
+            "ctrl+s": ["ctrl", "s"],
+            "alt tab": ["alt", "tab"],
+            "alt+tab": ["alt", "tab"],
+        }
+        if q in hotkeys:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "hotkey",
+                "args": {"keys": hotkeys[q]},
+            }
+
+        if any(x in q for x in ("aumenta o zoom", "aumenta zoom", "zoom in", "aproxima a tela")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "zoom_in",
+                "args": {},
+            }
+        if any(x in q for x in ("diminui o zoom", "diminui zoom", "zoom out", "afasta a tela")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "zoom_out",
+                "args": {},
+            }
+        if any(x in q for x in ("reseta o zoom", "resetar zoom", "zoom normal", "tira o zoom")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "zoom_reset",
+                "args": {},
+            }
+        if any(x in q for x in ("gira a tela para esquerda", "rotaciona a tela para esquerda")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "rotate_left",
+                "args": {},
+            }
+        if any(x in q for x in ("gira a tela para direita", "rotaciona a tela para direita")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "rotate_right",
+                "args": {},
+            }
+        if any(x in q for x in ("reseta a rotacao", "reseta a rotação", "rotacao normal", "rotação normal")):
+            return {
+                "type": "skill",
+                "skill": "viewport",
+                "action": "rotation_reset",
+                "args": {},
+            }
+
         m = re.search(r"\b(?:volume)\s+(\d{1,3})\b", q)
         if m:
             return {
