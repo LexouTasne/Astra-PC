@@ -161,6 +161,16 @@ def _run_desktop(args, config) -> None:
 
     npm = shutil.which("npm")
     if not npm:
+        for candidate in (
+            Path("/home/linuxbrew/.linuxbrew/bin/npm"),
+            Path("/usr/local/bin/npm"),
+            Path("/usr/bin/npm"),
+            Path.home() / ".local" / "bin" / "npm",
+        ):
+            if candidate.exists():
+                npm = str(candidate)
+                break
+    if not npm:
         raise SystemExit(
             "Astra Desktop precisa de Node.js/npm. Instale Node.js e rode 'astra' novamente."
         )
