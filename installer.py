@@ -1450,18 +1450,48 @@ def install_ydotool(pm: str | None, allow_layering: bool = False) -> bool:
     return False
 
 
+def ydotool_socket_candidates() -> list[str]:
+    out: list[str] = []
+    for value in (
+        os.getenv("YDOTOOL_SOCKET"),
+        (
+            str(Path(os.getenv("XDG_RUNTIME_DIR")) / ".ydotool_socket")
+            if os.getenv("XDG_RUNTIME_DIR")
+            else None
+        ),
+        "/tmp/.ydotool_socket",
+    ):
+        if value and value not in out:
+            out.append(value)
+    return out
+
+
+def _ydotool_debug_with_socket(socket_path: str) -> tuple[bool, str]:
+    env = os.environ.copy()
+    env["YDOTOOL_SOCKET"] = socket_path
+    try:
+        result = subprocess.run(
+            ["ydotool", "debug"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+            env=env,
+        )
+    except Exception as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, socket_path
+    return False, (result.stderr or result.stdout or "ydotool debug failed").strip()
+
+
 def ydotool_daemon_status() -> tuple[bool, str]:
     if not command_exists("ydotool"):
         return False, "ydotool binary missing"
 
-    sockets = [
-        Path("/tmp/.ydotool_socket"),
-        Path(os.getenv("XDG_RUNTIME_DIR", "")) / ".ydotool_socket"
-        if os.getenv("XDG_RUNTIME_DIR") else None,
-    ]
-    sockets = [p for p in sockets if p is not None]
-    if any(p.exists() for p in sockets):
-        return True, "socket ready"
+    for socket_path in ydotool_socket_candidates():
+        if Path(socket_path).exists():
+            return True, f"socket present: {socket_path}"
 
     if command_exists("pgrep"):
         p = subprocess.run(
@@ -1479,53 +1509,127 @@ def ydotool_daemon_status() -> tuple[bool, str]:
 def ydotool_cli_health() -> tuple[bool, str]:
     if not command_exists("ydotool"):
         return False, "ydotool binary missing"
-    try:
-        result = subprocess.run(
-            ["ydotool", "debug"],
-            capture_output=True,
-            text=True,
-            timeout=1.5,
-            check=False,
-        )
-    except Exception as exc:
-        return False, str(exc)
-    if result.returncode == 0:
-        return True, "ydotoold socket accepts commands"
-    return False, (result.stderr or result.stdout or "ydotool debug failed").strip()
+
+    last = "no ydotool socket accepted commands"
+    for socket_path in ydotool_socket_candidates():
+        ok, detail = _ydotool_debug_with_socket(socket_path)
+        if ok:
+            os.environ["YDOTOOL_SOCKET"] = socket_path
+            return True, f"socket accepts commands: {socket_path}"
+        last = detail
+    return False, last
 
 
-def enable_ydotool_service() -> bool:
+def _system_service_exists(service: str) -> bool:
+    result = subprocess.run(
+        ["systemctl", "list-unit-files", service, "--no-legend"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        check=False,
+    )
+    return service in result.stdout
+
+
+def repair_ydotool_service_socket(assume_yes: bool = False) -> bool:
+    """Repair the Fedora/Bazzite client/daemon socket-path mismatch.
+
+    Fedora 44 packages can run ydotoold on /tmp/.ydotool_socket while the
+    client searches $XDG_RUNTIME_DIR/.ydotool_socket. The override keeps the
+    system daemon privileged for /dev/uinput, but gives the current desktop user
+    exclusive access to the /tmp socket and Astra always passes that socket to
+    the client.
+    """
+    if platform.system() != "Linux" or not command_exists("systemctl"):
+        return False
+    daemon = shutil.which("ydotoold")
+    if not daemon:
+        return False
+
+    service = next(
+        (
+            name
+            for name in ("ydotool.service", "ydotoold.service")
+            if _system_service_exists(name)
+        ),
+        None,
+    )
+    if not service:
+        return False
+
+    if not ask(
+        "Repair the ydotool system service socket for this desktop user?",
+        True,
+        assume_yes,
+    ):
+        return False
+
+    uid = os.getuid()
+    gid = os.getgid()
+    override = (
+        "[Service]\n"
+        "ExecStart=\n"
+        f"ExecStart={daemon} --socket-path=/tmp/.ydotool_socket "
+        f"--socket-perm=0600 --socket-own={uid}:{gid}\n"
+    )
+
+    with tempfile.TemporaryDirectory(prefix="astra-ydotool-") as td:
+        local = Path(td) / "override.conf"
+        local.write_text(override, encoding="utf-8")
+        target_dir = f"/etc/systemd/system/{service}.d"
+        if run(["sudo", "mkdir", "-p", target_dir]).returncode != 0:
+            return False
+        if run(
+            ["sudo", "install", "-m", "0644", str(local), f"{target_dir}/astra.conf"]
+        ).returncode != 0:
+            return False
+
+    run(["sudo", "systemctl", "daemon-reload"])
+    restart = run(["sudo", "systemctl", "restart", service])
+    if restart.returncode != 0:
+        return False
+
+    for _ in range(15):
+        time.sleep(0.2)
+        healthy, detail = ydotool_cli_health()
+        if healthy:
+            print(f"[WAYLAND] ydotool repaired: {detail}")
+            return True
+
+    return False
+
+
+def enable_ydotool_service(assume_yes: bool = False) -> bool:
     if platform.system() != "Linux" or not command_exists("systemctl"):
         return False
     if not command_exists("ydotool"):
         return False
 
-    ready, detail = ydotool_daemon_status()
-    if ready:
-        print(f"[WAYLAND] ydotool: {detail}")
+    healthy, detail = ydotool_cli_health()
+    if healthy:
+        print(f"[WAYLAND] ydotool ready: {detail}")
         return True
 
     print("\n[WAYLAND] Starting ydotool daemon...")
     for service in ("ydotool.service", "ydotoold.service"):
-        exists = subprocess.run(
-            ["systemctl", "list-unit-files", service, "--no-legend"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            check=False,
-        )
-        if service not in exists.stdout:
+        if not _system_service_exists(service):
             continue
         p = run(["sudo", "systemctl", "enable", "--now", service])
         if p.returncode == 0:
             time.sleep(0.5)
-            ready, detail = ydotool_daemon_status()
-            if ready:
+            healthy, detail = ydotool_cli_health()
+            if healthy:
                 print(f"[WAYLAND] ydotool ready: {detail}")
                 return True
 
-    print("ydotool is installed, but its daemon/socket is not usable yet.")
-    print("Astra will keep running; native Wayland input may be unavailable until ydotoold is configured.")
+    # Known Fedora/Bazzite package mismatch: daemon may be alive on /tmp while
+    # the client looks in XDG_RUNTIME_DIR. Repair it automatically in setup.
+    if repair_ydotool_service_socket(assume_yes):
+        return True
+
+    healthy, detail = ydotool_cli_health()
+    print("ydotool is installed, but its daemon/socket is still unusable.")
+    print("Detail:", detail)
     return False
 
 
@@ -2608,7 +2712,7 @@ def main() -> int:
                 if not install_ydotool(pm, args.allow_layering):
                     print("[ERR] ydotool is required on Wayland.")
                     return 9
-            enable_ydotool_service()
+            enable_ydotool_service(args.yes)
             healthy, detail = ydotool_cli_health()
             print(("[OK] " if healthy else "[ERR] ") + "Wayland input: " + detail)
             if not healthy:
@@ -2701,9 +2805,9 @@ def main() -> int:
         if not command_exists("ydotool"):
             if ask("\nInstall ydotool for Wayland gesture control?", True, args.yes):
                 if install_ydotool(pm, args.allow_layering):
-                    enable_ydotool_service()
+                    enable_ydotool_service(args.yes)
         else:
-            enable_ydotool_service()
+            enable_ydotool_service(args.yes)
 
     if not args.no_mesh:
         print("\n[MESH] Secure PC/Android network")
