@@ -302,6 +302,7 @@ class GestureEngine:
 
         transform_enabled = (
             pointer_pose
+            and not self.feature_enabled("drag")
             and (self.feature_enabled("zoom") or self.feature_enabled("rotate"))
         )
         pinch_tracking_enabled = (
