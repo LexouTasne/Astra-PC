@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('astra', {
   status: () => ipcRenderer.invoke('astra:status'),
   ask: payload => ipcRenderer.invoke('astra:ask', payload),
   chooseImage: () => ipcRenderer.invoke('astra:choose-image'),
+  dictate: () => ipcRenderer.invoke('astra:dictate'),
   run: (command, args = []) => ipcRenderer.invoke('astra:run', { command, args }),
   stop: id => ipcRenderer.invoke('astra:stop', id),
   update: () => ipcRenderer.invoke('astra:update'),
