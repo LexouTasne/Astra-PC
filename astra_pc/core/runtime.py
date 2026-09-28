@@ -52,6 +52,7 @@ class AstraRuntime:
         self.gesture_control = GestureControlState()
         self._gesture_system_enabled = True
         self._pointer_control_enabled = self.pointer_enabled
+        self._gesture_control_signature = None
         self.screen_origin = (0, 0)
 
     def run(self) -> None:
@@ -267,13 +268,31 @@ class AstraRuntime:
             gestures.set_feature_enabled(name, bool(overrides.get(name, default)))
 
         pointer_enabled = bool(overrides.get("pointer", self.pointer_enabled))
-        changed = (
-            enabled != self._gesture_system_enabled
-            or pointer_enabled != self._pointer_control_enabled
+        signature = (
+            enabled,
+            tuple(sorted((str(k), bool(v)) for k, v in overrides.items())),
         )
+        changed = signature != self._gesture_control_signature
+
         if changed and self.backend:
             self.backend.failsafe_release()
+        if changed and (
+            not enabled
+            or not bool(overrides.get("pause", True))
+        ):
+            gestures.set_paused(False)
 
+        if changed:
+            feature_text = ", ".join(
+                f"{name}={'on' if value else 'off'}"
+                for name, value in sorted(overrides.items())
+            ) or "defaults"
+            print(
+                f"[gestures] control: system={'on' if enabled else 'off'} | "
+                f"{feature_text}"
+            )
+
+        self._gesture_control_signature = signature
         self._gesture_system_enabled = enabled
         self._pointer_control_enabled = enabled and pointer_enabled
 
