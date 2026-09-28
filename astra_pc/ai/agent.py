@@ -42,6 +42,29 @@ class AstraBrain:
             num_ctx=6144 if strong else 3072,
             num_predict=220 if strong else 96,
             temperature=0.15,
+            think=False,
+        )
+
+    def ask_fast(self, text: str) -> str:
+        """Fast conversational path for voice and lightweight chat."""
+        return self.text_client.chat(
+            text,
+            system=SYSTEM_PROMPT,
+            num_ctx=2048,
+            num_predict=72,
+            temperature=0.10,
+            think=False,
+        )
+
+    def ask_fast_stream(self, text: str):
+        """Stream a fast pt-BR answer as soon as Ollama produces tokens."""
+        yield from self.text_client.chat_stream(
+            text,
+            system=SYSTEM_PROMPT,
+            num_ctx=2048,
+            num_predict=72,
+            temperature=0.10,
+            think=False,
         )
 
     def see(self, image: str | Path, prompt: str) -> str:
@@ -52,6 +75,7 @@ class AstraBrain:
             num_ctx=6144,
             num_predict=128,
             temperature=0.15,
+            think=False,
         )
 
     def inspect_frames(self, frames: list[Path], prompt: str) -> str:
@@ -62,4 +86,5 @@ class AstraBrain:
             num_ctx=8192,
             num_predict=160,
             temperature=0.15,
+            think=False,
         )
