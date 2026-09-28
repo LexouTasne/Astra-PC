@@ -83,6 +83,7 @@ class OllamaClient:
         temperature: float = 0.2,
         num_ctx: int = 4096,
         num_predict: int = 120,
+        think: bool | str | None = False,
     ) -> str:
         messages: list[dict] = []
         if system:
@@ -107,11 +108,77 @@ class OllamaClient:
                 "top_p": 0.9,
             },
         }
+        if think is not None:
+            payload["think"] = think
         data = self._request("/api/chat", payload)
         try:
             return str(data["message"]["content"]).strip()
         except Exception as exc:
             raise OllamaError(f"Unexpected Ollama response: {data!r}") from exc
+
+    def chat_stream(
+        self,
+        prompt: str,
+        *,
+        images: Iterable[str | Path] = (),
+        system: str | None = None,
+        temperature: float = 0.15,
+        num_ctx: int = 3072,
+        num_predict: int = 96,
+        think: bool | str | None = False,
+    ):
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+
+        user: dict = {"role": "user", "content": prompt}
+        encoded = [self._encode_image(Path(p)) for p in images]
+        if encoded:
+            user["images"] = encoded
+        messages.append(user)
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "keep_alive": self.keep_alive,
+            "options": {
+                "temperature": temperature,
+                "num_ctx": num_ctx,
+                "num_predict": num_predict,
+                "top_k": 20,
+                "top_p": 0.9,
+            },
+        }
+        if think is not None:
+            payload["think"] = think
+
+        body = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            self.host + "/api/chat",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                for raw in response:
+                    if not raw.strip():
+                        continue
+                    data = json.loads(raw.decode("utf-8"))
+                    message = data.get("message") or {}
+                    piece = str(message.get("content") or "")
+                    if piece:
+                        yield piece
+                    if data.get("done"):
+                        break
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "ignore")
+            raise OllamaError(f"Ollama HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise OllamaError(
+                "Ollama is not reachable. Start it with 'ollama serve' or run installer.py."
+            ) from exc
 
     def pull(self, model: str | None = None) -> None:
         target = model or self.model
