@@ -2,7 +2,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 contextBridge.exposeInMainWorld('astra', {
   status: () => ipcRenderer.invoke('astra:status'),
-  ask: prompt => ipcRenderer.invoke('astra:ask', prompt),
+  ask: payload => ipcRenderer.invoke('astra:ask', payload),
+  chooseImage: () => ipcRenderer.invoke('astra:choose-image'),
   run: (command, args = []) => ipcRenderer.invoke('astra:run', { command, args }),
   stop: id => ipcRenderer.invoke('astra:stop', id),
   update: () => ipcRenderer.invoke('astra:update'),
