@@ -47,6 +47,8 @@ class YdotoolBackend(InputBackend):
         self._commands: queue.Queue[tuple[str, ...]] = queue.Queue(maxsize=64)
         self._latest_move: tuple[int, int] | None = None
         self._move_lock = threading.Lock()
+        self._pending_wheel = 0
+        self._wheel_lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._last_error = ""
@@ -138,6 +140,12 @@ class YdotoolBackend(InputBackend):
             self._latest_move = None
             return move
 
+    def _take_wheel(self) -> int:
+        with self._wheel_lock:
+            amount = int(self._pending_wheel)
+            self._pending_wheel = 0
+            return amount
+
     def _queue_command(self, *args: str) -> None:
         move = self._take_move()
         if move is not None:
@@ -164,6 +172,14 @@ class YdotoolBackend(InputBackend):
                 self._execute(command)
                 did_work = True
 
+            wheel = self._take_wheel()
+            if wheel and not self._stop.is_set():
+                wheel = max(-24, min(24, int(wheel)))
+                self._execute(
+                    ("mousemove", "--wheel", "--", "0", str(wheel))
+                )
+                did_work = True
+
             move = self._take_move()
             if move is not None and not self._stop.is_set():
                 self._execute(
@@ -172,7 +188,7 @@ class YdotoolBackend(InputBackend):
                 did_work = True
 
             if not did_work:
-                self._wake.wait(0.008)
+                self._wake.wait(0.003)
                 self._wake.clear()
 
     def screen_size(self) -> tuple[int, int]:
@@ -209,16 +225,14 @@ class YdotoolBackend(InputBackend):
         self._left_down = False
 
     def scroll(self, amount: int) -> None:
-        if amount:
-            # '--' is required before positional wheel values so a negative
-            # amount (scroll down) is not parsed as another command-line option.
-            self._queue_command(
-                "mousemove",
-                "--wheel",
-                "--",
-                "0",
-                str(int(amount)),
-            )
+        if not amount:
+            return
+        # Wheel events are high-frequency during hand scroll. Coalesce them in
+        # memory instead of spawning one ydotool process for every video frame.
+        with self._wheel_lock:
+            self._pending_wheel += int(amount)
+            self._pending_wheel = max(-24, min(24, self._pending_wheel))
+        self._wake.set()
 
     def hotkey(self, keys: list[str]) -> None:
         sequence = []
