@@ -1318,7 +1318,7 @@ def configure_voice_capture(
         silence_ms=480,
         pre_roll_ms=300,
         start_speech_ms=60,
-        min_utterance_ms=240,
+        min_utterance_ms=180,
         max_utterance_s=18.0,
         vad_mode=2,
         adaptive_retry=True,
