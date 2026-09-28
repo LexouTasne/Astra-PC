@@ -18,21 +18,28 @@ def voice_state_path() -> Path:
     return data_dir() / "voice.json"
 
 
+def load_voice_state() -> dict:
+    path = voice_state_path()
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
 def resolve_piper_model(explicit: str | Path | None = None) -> Path | None:
     if explicit:
         path = Path(explicit).expanduser()
         if path.exists():
             return path
 
-    state = voice_state_path()
-    if state.exists():
-        try:
-            payload = json.loads(state.read_text(encoding="utf-8"))
-            path = Path(str(payload.get("model_path", ""))).expanduser()
-            if path.exists():
-                return path
-        except Exception:
-            pass
+    payload = load_voice_state()
+    if payload:
+        path = Path(str(payload.get("model_path", ""))).expanduser()
+        if path.exists():
+            return path
 
     candidate = data_dir() / "voices" / f"{DEFAULT_PIPER_VOICE}.onnx"
     return candidate if candidate.exists() else None
@@ -49,19 +56,32 @@ class PiperSpeaker:
         self,
         model: str | Path,
         *,
-        length_scale: float = 0.94,
-        noise_scale: float = 0.62,
-        noise_w_scale: float = 0.82,
-        volume: float = 1.0,
+        length_scale: float | None = None,
+        noise_scale: float | None = None,
+        noise_w_scale: float | None = None,
+        volume: float | None = None,
     ):
         self.model = Path(model).expanduser()
         if not self.model.exists():
             raise FileNotFoundError(self.model)
 
-        self.length_scale = max(0.6, min(1.5, float(length_scale)))
-        self.noise_scale = max(0.0, min(2.0, float(noise_scale)))
-        self.noise_w_scale = max(0.0, min(2.0, float(noise_w_scale)))
-        self.volume = max(0.1, min(2.0, float(volume)))
+        state = load_voice_state()
+        self.length_scale = max(
+            0.6,
+            min(1.5, float(length_scale if length_scale is not None else state.get("length_scale", 0.90))),
+        )
+        self.noise_scale = max(
+            0.0,
+            min(2.0, float(noise_scale if noise_scale is not None else state.get("noise_scale", 0.60))),
+        )
+        self.noise_w_scale = max(
+            0.0,
+            min(2.0, float(noise_w_scale if noise_w_scale is not None else state.get("noise_w_scale", 0.80))),
+        )
+        self.volume = max(
+            0.1,
+            min(2.0, float(volume if volume is not None else state.get("volume", 1.0))),
+        )
         self._cancel = threading.Event()
 
         try:
