@@ -61,8 +61,9 @@ class FastWhisperVoiceEngine:
         self.initial_prompt = initial_prompt or "Português do Brasil. Assistente Astra."
         # Keep this list short. Too many hotwords can bias ordinary speech.
         self.hotwords = hotwords or (
-            "Astra Discord Brave Spotify VS Code terminal navegador "
-            "Downloads arquivo pasta volume clipboard"
+            "Astra Discord Brave Spotify VS Code GitHub Ollama Python Bazzite "
+            "terminal navegador Downloads arquivo pasta volume clipboard zoom "
+            "gestos mouse teclado"
         )
         self.input_device = input_device
         self.adaptive_retry = adaptive_retry
@@ -136,6 +137,18 @@ class FastWhisperVoiceEngine:
         src = np.frombuffer(pcm, dtype=np.int16)
         if src.size == 0:
             return b""
+
+        # Most desktop microphones run at 48 kHz. For exact integer ratios,
+        # average each source group before decimation. This cheap low-pass step
+        # preserves consonants better than point interpolation and reduces
+        # aliasing before Whisper sees the audio.
+        if self.capture_rate % self.sample_rate == 0:
+            ratio = self.capture_rate // self.sample_rate
+            usable = (src.size // ratio) * ratio
+            if usable:
+                converted = src[:usable].astype(np.float32).reshape(-1, ratio).mean(axis=1)
+                return np.clip(converted, -32768, 32767).astype(np.int16).tobytes()
+
         target_len = max(
             1,
             int(round(src.size * self.sample_rate / self.capture_rate)),
@@ -344,7 +357,7 @@ class FastWhisperVoiceEngine:
                 text = retry_text
                 confidence = retry_confidence
 
-        text = " ".join(text.strip().split())
+        text = self._normalize_transcript(" ".join(text.strip().split()))
         if not text:
             return
         if self._is_hallucination(text, confidence, raw_rms):
@@ -384,6 +397,24 @@ class FastWhisperVoiceEngine:
             for seg, weight in zip(items, weights)
         ) / sum(weights)
         return text, confidence
+
+    @staticmethod
+    def _normalize_transcript(text: str) -> str:
+        import re
+
+        cleaned = " ".join(text.strip().split())
+        replacements = (
+            (r"\basta\b", "Astra"),
+            (r"\bdiscor(?:d|de)?\b", "Discord"),
+            (r"\bspot(?:i|y)fy\b", "Spotify"),
+            (r"\bvs\s*code\b", "VS Code"),
+            (r"\bgit\s*hub\b", "GitHub"),
+            (r"\bolama\b", "Ollama"),
+            (r"\bbazite\b", "Bazzite"),
+        )
+        for pattern, replacement in replacements:
+            cleaned = re.sub(pattern, replacement, cleaned, flags=re.I)
+        return cleaned
 
     def _is_hallucination(self, text: str, confidence: float, rms: float) -> bool:
         q = " ".join(text.lower().strip().split())
