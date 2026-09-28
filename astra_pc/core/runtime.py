@@ -161,7 +161,9 @@ class AstraRuntime:
                 out = gestures.update(hands)
                 label = out.label
 
-                if out.pointer is not None and self._pointer_control_enabled:
+                if out.pointer is not None and (
+                    self._pointer_control_enabled or out.label == "drag"
+                ):
                     x, y = self._map_pointer(out.pointer, screen_w, screen_h)
                     if self.backend:
                         self.backend.move(x, y)
