@@ -262,6 +262,20 @@ def _run_home(args, config) -> None:
         }
         if choice in {"0", "q", "quit", "sair"}:
             return
+        if choice.startswith("astra "):
+            import shlex
+            try:
+                command = shlex.split(choice)[1:]
+            except ValueError as exc:
+                print(f"Comando inválido: {exc}")
+                continue
+            if not command:
+                continue
+            try:
+                subprocess.call([sys.executable, "-m", "astra_pc", *command])
+            except KeyboardInterrupt:
+                print("\nVoltando ao menu Astra.")
+            continue
         command = commands.get(choice)
         if not command:
             print("Escolha 0-9.")
