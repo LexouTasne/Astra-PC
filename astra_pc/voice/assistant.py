@@ -88,6 +88,23 @@ class FastSpeaker:
                 check=False,
             )
 
+    def dictate_once(self, timeout: float = 15.0) -> str:
+        target: queue.Queue[str] = queue.Queue(maxsize=1)
+        with self._dictation_lock:
+            if self._dictation_target is not None:
+                raise RuntimeError("dictation already active")
+            self._dictation_target = target
+        if self.speaker:
+            self.speaker.cancel()
+        try:
+            return target.get(timeout=max(1.0, float(timeout)))
+        except queue.Empty as exc:
+            raise TimeoutError("Não ouvi uma frase completa.") from exc
+        finally:
+            with self._dictation_lock:
+                if self._dictation_target is target:
+                    self._dictation_target = None
+
     def stop(self) -> None:
         self.cancel()
         self._stop.set()
@@ -189,6 +206,8 @@ class AstraVoiceAssistant:
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
         self._stop = threading.Event()
         self._dedicated_wake_until = 0.0
+        self._dictation_lock = threading.Lock()
+        self._dictation_target: queue.Queue[str] | None = None
         self._wake_detector = None
         if wakeword_model:
             try:
@@ -284,6 +303,16 @@ class AstraVoiceAssistant:
         return re.search(r"\b(?:" + "|".join(aliases) + r")\b", text, re.I)
 
     def _on_text(self, text: str) -> None:
+        with self._dictation_lock:
+            target = self._dictation_target
+            if target is not None:
+                self._dictation_target = None
+                try:
+                    target.put_nowait(text.strip())
+                except queue.Full:
+                    pass
+                return
+
         normalized = text.lower().strip()
         wake = self._wake_match(text)
         now = time.monotonic()
