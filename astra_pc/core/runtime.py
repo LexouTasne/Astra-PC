@@ -22,17 +22,22 @@ class AstraRuntime:
         dry_run: bool = False,
         voice_model: Path | None = None,
         tutorial: bool | None = None,
+        air_mouse: bool = False,
+        drag: bool = False,
     ):
         self.config = config
         self.show_camera = show_camera
         self.dry_run = dry_run
         self.voice_model = voice_model
         self.tutorial = tutorial
+        self.air_mouse = bool(air_mouse)
+        self.drag = bool(drag)
         self.backend = None if dry_run else create_input_backend()
         self.router = CommandRouter()
         self.voice = None
 
         pointer = config.section("pointer")
+        self.pointer_enabled = bool(pointer.get("enabled", False) or self.air_mouse)
         self.smoothing = float(pointer["smoothing"])
         self.deadzone = float(pointer["deadzone_px"])
         self.margin = float(pointer["active_margin"])
@@ -64,7 +69,11 @@ class AstraRuntime:
         # initialization noise and latency when there is no usable video source.
         from astra_pc.vision.hands import HandTracker
         tracker = HandTracker(self.config.section("tracking"))
-        gestures = GestureEngine(self.config.section("gestures"))
+        gesture_cfg = dict(self.config.section("gestures"))
+        gesture_cfg["drag_enabled"] = bool(
+            gesture_cfg.get("drag_enabled", False) and self.drag
+        )
+        gestures = GestureEngine(gesture_cfg)
 
         monitors = get_monitors()
         if monitors:
@@ -96,8 +105,8 @@ class AstraRuntime:
                 tracker,
                 gestures,
                 mirror=bool(cam_cfg.get("mirror", True)),
-                backend=self.backend,
-                map_pointer=self._map_pointer,
+                backend=None,
+                map_pointer=None,
                 screen_w=screen_w,
                 screen_h=screen_h,
             )
@@ -110,11 +119,17 @@ class AstraRuntime:
         self._start_voice_if_requested(gestures)
 
         print("Astra v0.8 gesture engine online.")
-        print("Indicador = ponteiro | polegar+indicador = clique/arrastar")
-        print("Indicador+medio = scroll | polegar+medio = clique direito")
-        print("Palma aberta = pausar/retomar | Ctrl+C sai")
+        print("Modo seguro: air-mouse OFF | drag OFF")
+        print("Polegar+indicador = clique | indicador+medio = scroll")
+        print("Polegar+medio = clique direito | palma aberta = pausar/retomar")
+        if self.pointer_enabled:
+            print("Air-mouse experimental ATIVO")
+        if gesture_cfg.get("drag_enabled"):
+            print("Drag experimental ATIVO")
+        print("Ctrl+C sai")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
+        had_hands = False
         try:
             while True:
                 started = time.perf_counter()
@@ -126,13 +141,21 @@ class AstraRuntime:
                     frame = cv2.flip(frame, 1)
 
                 hands = tracker.process(frame)
+                if had_hands and not hands and self.backend:
+                    self.backend.failsafe_release()
+                    self._smooth_xy = None
+                had_hands = bool(hands)
+
                 out = gestures.update(hands)
                 label = out.label
 
-                if out.pointer is not None:
+                if out.pointer is not None and self.pointer_enabled:
                     x, y = self._map_pointer(out.pointer, screen_w, screen_h)
                     if self.backend:
                         self.backend.move(x, y)
+
+                if out.left_click and self.backend:
+                    self.backend.left_click()
 
                 if out.left_down is not None and self.backend:
                     self.backend.left_button(out.left_down)
@@ -198,7 +221,7 @@ class AstraRuntime:
             if self.voice:
                 self.voice.stop()
             if self.backend:
-                self.backend.left_button(False)
+                self.backend.failsafe_release()
                 close = getattr(self.backend, "close", None)
                 if callable(close):
                     close()
