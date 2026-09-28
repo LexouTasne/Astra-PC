@@ -31,6 +31,21 @@ def fake_hand(x_offset: float = 0.0) -> Hand:
     return Hand(tuple(pts), "Right")
 
 
+def open_hand(x_offset: float = 0.0) -> Hand:
+    pts = [Point(0.5 + x_offset, 0.82, 0.0) for _ in range(21)]
+    pts[0] = Point(0.5 + x_offset, 0.86, 0.0)
+    for tip, pip, x in (
+        (8, 6, 0.40),
+        (12, 10, 0.48),
+        (16, 14, 0.56),
+        (20, 18, 0.64),
+    ):
+        pts[pip] = Point(x + x_offset, 0.56, 0.0)
+        pts[tip] = Point(x + x_offset, 0.30, 0.0)
+    pts[4] = Point(0.28 + x_offset, 0.50, 0.0)
+    return Hand(tuple(pts), "Right")
+
+
 def test_pointer_gesture():
     engine = GestureEngine(CFG)
     result = engine.update([fake_hand()])
@@ -40,5 +55,5 @@ def test_pointer_gesture():
 
 def test_two_hand_mode_is_detected():
     engine = GestureEngine(CFG)
-    result = engine.update([fake_hand(-0.15), fake_hand(0.15)])
-    assert result.label == "two-hand"
+    result = engine.update([open_hand(-0.15), open_hand(0.15)])
+    assert result.label == "two-hand-ready"
