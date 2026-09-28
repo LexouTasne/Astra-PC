@@ -74,8 +74,16 @@ def _run_setup(args, config) -> None:
         cmd.append("--yes")
     if getattr(args, "allow_layering", False):
         cmd.append("--allow-layering")
+    if getattr(args, "droidcam", None):
+        cmd.extend(["--droidcam", args.droidcam])
+    if getattr(args, "camera_scan_timeout", None) is not None:
+        cmd.extend(["--camera-scan-timeout", str(args.camera_scan_timeout)])
 
-    raise SystemExit(subprocess.call(cmd, cwd=str(installer.parent)))
+    try:
+        raise SystemExit(subprocess.call(cmd, cwd=str(installer.parent)))
+    except KeyboardInterrupt:
+        print("\nSetup cancelado.")
+        raise SystemExit(130)
 
 
 def _run_home(args, config) -> None:
@@ -652,6 +660,18 @@ def build_parser() -> argparse.ArgumentParser:
     setup_camera = setup_sub.add_parser("camera", help="detect/install/configure camera or DroidCam")
     setup_camera.add_argument("--yes", action="store_true")
     setup_camera.add_argument("--allow-layering", action="store_true")
+    setup_camera.add_argument(
+        "--droidcam",
+        default=None,
+        help="DroidCam IP:port, e.g. 192.168.1.50:4747",
+    )
+    setup_camera.add_argument(
+        "--scan-timeout",
+        dest="camera_scan_timeout",
+        type=float,
+        default=10.0,
+        help="automatic LAN discovery timeout in seconds",
+    )
     setup_full = setup_sub.add_parser("full", help="run the complete guided installer")
     setup_full.add_argument("--yes", action="store_true")
     setup_full.add_argument("--allow-layering", action="store_true")
