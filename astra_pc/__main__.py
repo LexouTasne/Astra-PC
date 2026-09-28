@@ -16,7 +16,7 @@ def _brain(config):
     ai = config.data.get("ai", {})
     host = ai.get("host", "http://127.0.0.1:11434")
     timeout = int(ai.get("timeout", 180))
-    keep_alive = ai.get("keep_alive", "-1")
+    keep_alive = ai.get("keep_alive", -1)
 
     text_client = OllamaClient(
         model=ai.get("text_model", "qwen3:0.6b"),
@@ -167,7 +167,11 @@ def _run_home(args, config) -> None:
         if not command:
             print("Escolha 0-7.")
             continue
-        subprocess.call([sys.executable, "-m", "astra_pc", *command])
+        try:
+            subprocess.call([sys.executable, "-m", "astra_pc", *command])
+        except KeyboardInterrupt:
+            print("\nVoltando ao menu Astra.")
+            continue
 
 
 def _run_ask(args, config) -> None:
