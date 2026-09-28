@@ -29,7 +29,7 @@ def load_voice_state() -> dict:
 
         # Runtime migration for voice profiles created before the audio v2
         # pipeline. Do not require users to delete/recreate voice.json.
-        if int(value.get("audio_profile_version", 0) or 0) < 2:
+        if int(value.get("audio_profile_version", 0) or 0) < 3:
             value["silence_ms"] = 480
             value["pre_roll_ms"] = 300
             value["start_speech_ms"] = 60
@@ -37,10 +37,10 @@ def load_voice_state() -> dict:
             value["max_utterance_s"] = 18.0
             value["vad_mode"] = 2
             value["adaptive_retry"] = True
-            value["length_scale"] = 0.96
+            value["length_scale"] = 0.90
             value["noise_scale"] = 0.62
             value["noise_w_scale"] = 0.76
-            value["audio_profile_version"] = 2
+            value["audio_profile_version"] = 3
         return value
     except Exception:
         return {}
@@ -85,7 +85,7 @@ class PiperSpeaker:
         state = load_voice_state()
         self.length_scale = max(
             0.6,
-            min(1.5, float(length_scale if length_scale is not None else state.get("length_scale", 0.96))),
+            min(1.5, float(length_scale if length_scale is not None else state.get("length_scale", 0.90))),
         )
         self.noise_scale = max(
             0.0,
