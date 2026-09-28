@@ -69,6 +69,10 @@ def _run_setup(args, config) -> None:
         cmd.append("--voice-only")
         if getattr(args, "tts_voice", None):
             cmd.extend(["--tts-voice", args.tts_voice])
+        if getattr(args, "microphone", None):
+            cmd.extend(["--microphone", args.microphone])
+        if getattr(args, "asr_model", None):
+            cmd.extend(["--asr-model", args.asr_model])
     elif args.setup_command == "full":
         cmd.append("--full")
     elif args.setup_command == "location":
@@ -443,8 +447,22 @@ def _run_voice(args, config) -> None:
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
 
-    from .voice.piper_tts import resolve_piper_model
+    from .voice.piper_tts import load_voice_state, resolve_piper_model
+    voice_state = load_voice_state()
     piper_model = resolve_piper_model(voice_cfg.get("piper_model") or None)
+    whisper_model = (
+        args.whisper_model
+        or voice_state.get("whisper_model")
+        or voice_cfg.get("whisper_model", "small")
+    )
+    language = (
+        args.language
+        or voice_state.get("language")
+        or voice_cfg.get("language", "pt")
+    )
+    input_device = voice_state.get("input_device_name") or None
+    if not input_device and voice_state.get("input_device_index") is not None:
+        input_device = int(voice_state["input_device_index"])
 
     assistant = AstraVoiceAssistant(
         brain,
@@ -452,13 +470,17 @@ def _run_voice(args, config) -> None:
         wake_word=args.wake_word,
         speak=not args.no_speak,
         engine=args.engine,
-        whisper_model=args.whisper_model,
-        language=args.language,
+        whisper_model=whisper_model,
+        language=language,
         request_handler=request_handler,
         conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
         wakeword_model=args.wakeword_model,
         wakeword_threshold=args.wakeword_threshold,
         piper_model=piper_model,
+        input_device=input_device,
+        silence_ms=int(voice_state.get("silence_ms", voice_cfg.get("silence_ms", 260))),
+        pre_roll_ms=int(voice_state.get("pre_roll_ms", voice_cfg.get("pre_roll_ms", 200))),
+        adaptive_retry=bool(voice_state.get("adaptive_retry", True)),
     )
     try:
         assistant.run()
@@ -771,8 +793,8 @@ def build_parser() -> argparse.ArgumentParser:
     voice.add_argument("--voice-model", type=Path, default=None, help="Vosk model path for fallback engine")
     voice.add_argument("--wake-word", default="astra")
     voice.add_argument("--engine", choices=["fast", "vosk"], default="fast")
-    voice.add_argument("--whisper-model", default="base", help="faster-whisper model: tiny/base/small")
-    voice.add_argument("--language", default="pt")
+    voice.add_argument("--whisper-model", default=None, help="override faster-whisper model: tiny/base/small")
+    voice.add_argument("--language", default=None)
     voice.add_argument("--no-speak", action="store_true")
     voice.add_argument("--wakeword-model", type=Path, default=None)
     voice.add_argument("--wakeword-threshold", type=float, default=0.55)
@@ -853,6 +875,13 @@ def build_parser() -> argparse.ArgumentParser:
         dest="tts_voice",
         default=None,
         choices=["pt_BR-faber-medium", "pt_BR-cadu-medium", "pt_BR-jeff-medium"],
+    )
+    setup_voice.add_argument("--microphone", default=None, help="microphone index or name substring")
+    setup_voice.add_argument(
+        "--asr-model",
+        choices=["base", "small"],
+        default=None,
+        help="speech recognition model",
     )
     setup_voice.add_argument("--yes", action="store_true")
     setup_full = setup_sub.add_parser("full", help="run the complete guided installer")
