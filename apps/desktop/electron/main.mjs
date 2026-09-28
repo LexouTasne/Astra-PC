@@ -97,7 +97,7 @@ const actionMap = {
   awareness: ['awareness'],
   'setup-voice': ['setup', 'voice', '--yes'],
   'setup-gestures': ['setup', 'gestures', '--yes'],
-  'setup-camera': ['setup', 'camera'],
+  'setup-camera': ['setup', 'camera', '--yes'],
   'mesh-pair': ['mesh', 'pair-code'],
   benchmark: ['benchmark', '--rounds', '2']
 }
