@@ -23,14 +23,19 @@ class DesktopTools:
     def execute(self, action: dict) -> ToolResult:
         name = str(action.get("action", "")).lower()
 
+        if name == "move":
+            x = int(action.get("x", 0))
+            y = int(action.get("y", 0))
+            self.backend.move(x, y)
+            return ToolResult(True, f"moved {x},{y}")
+
         if name == "click":
             x = int(action.get("x", 0))
             y = int(action.get("y", 0))
             x = min(max(x, 0), self.width - 1)
             y = min(max(y, 0), self.height - 1)
             self.backend.move(x, y)
-            self.backend.left_button(True)
-            self.backend.left_button(False)
+            self.backend.left_click()
             return ToolResult(True, f"clicked {x},{y}")
 
         if name == "right_click":
