@@ -129,8 +129,17 @@ class AstraDaemon:
         self._voice_lock = threading.RLock()
         self.mesh_server = None
         self.mesh_sensor_state: dict[str, dict[str, Any]] = {}
-        self._chat_history: list[tuple[str, str]] = []
         self._chat_lock = threading.RLock()
+        self._chat_history: list[tuple[str, str]] = []
+        stored_chat = self.memory.get("recent_chat", [])
+        if isinstance(stored_chat, list):
+            for item in stored_chat[-12:]:
+                if not isinstance(item, dict):
+                    continue
+                user = str(item.get("user", "")).strip()
+                answer = str(item.get("assistant", "")).strip()
+                if user and answer:
+                    self._chat_history.append((user, answer))
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
@@ -419,6 +428,14 @@ class AstraDaemon:
             self._chat_history.append((user_text, answer))
             if len(self._chat_history) > 12:
                 self._chat_history = self._chat_history[-12:]
+            payload = [
+                {"user": user, "assistant": assistant}
+                for user, assistant in self._chat_history
+            ]
+        try:
+            self.memory.set("recent_chat", payload)
+        except Exception:
+            pass
 
     def _assistant_context(
         self,
@@ -427,7 +444,7 @@ class AstraDaemon:
         current = self.context.current
         skills = self.skills.describe()
         with self._chat_lock:
-            recent = list(self._chat_history[-6:])
+            recent = list(self._chat_history[-10:])
 
         parts = [
             f"Perfil atual: {current.profile}",
@@ -455,6 +472,27 @@ class AstraDaemon:
         last_path = self.memory.get("last_files_path", None)
         if last_path:
             parts.append(f"Último caminho de arquivos usado: {last_path}")
+
+        listing = self.memory.get("last_files_listing", None)
+        if isinstance(listing, dict):
+            entries = listing.get("entries")
+            if isinstance(entries, list) and entries:
+                compact = [
+                    {
+                        "name": str(item.get("name", "")),
+                        "path": str(item.get("path", "")),
+                        "type": str(item.get("type", "")),
+                    }
+                    for item in entries[:40]
+                    if isinstance(item, dict)
+                ]
+                parts.append(
+                    "Última listagem real de arquivos (use para resolver referências):\n"
+                    + json.dumps(
+                        {"path": listing.get("path"), "entries": compact},
+                        ensure_ascii=False,
+                    )[:7000]
+                )
         return "\n\n".join(parts)
 
     def _semantic_context(self, text: str) -> list[dict[str, Any]]:
@@ -667,8 +705,41 @@ class AstraDaemon:
             return {"ok": all(x.get("ok") for x in results), "results": results}
 
         text = str(request.get("text", "")).strip()
-        if not text:
+        image_raw = request.get("image")
+        if not text and not image_raw:
             return {"ok": False, "error": "empty request"}
+        if not text:
+            text = "Analise esta imagem e descreva o que é importante."
+
+        if image_raw:
+            try:
+                image_path = Path(str(image_raw)).expanduser().resolve()
+                allowed = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+                if (
+                    not image_path.is_file()
+                    or image_path.suffix.casefold() not in allowed
+                    or image_path.stat().st_size > 25 * 1024 * 1024
+                ):
+                    return {
+                        "ok": False,
+                        "error": "Imagem inválida. Use PNG/JPG/WEBP/BMP com até 25 MB.",
+                    }
+                memories = self._semantic_context(text)
+                answer = self.brain.see(
+                    image_path,
+                    text,
+                    extra_context=self._assistant_context(memories),
+                )
+                user_turn = f"{text} [imagem: {image_path.name}]"
+                self._record_chat(user_turn, answer)
+                self._background(self._remember_conversation, user_turn, answer)
+                return {
+                    "ok": True,
+                    "message": answer,
+                    "plan": {"type": "vision", "image": str(image_path)},
+                }
+            except Exception as exc:
+                return {"ok": False, "error": f"Não consegui analisar a imagem: {exc}"}
 
         lowered = text.lower().strip()
         profile_aliases = {
@@ -695,7 +766,9 @@ class AstraDaemon:
             message = results[-1].get("message", "") if results else "Rotina vazia."
             return {"ok": ok, "message": message, "results": results}
 
-        planning_needed = self.planner.needs_planning(text)
+        last_listing = self.memory.get("last_files_listing", None)
+        followup_plan = self.planner.file_followup_plan(text, last_listing)
+        planning_needed = bool(followup_plan) or self.planner.needs_planning(text)
         cacheable = (
             not planning_needed
             and not any(
@@ -745,20 +818,19 @@ class AstraDaemon:
             }
 
         planner_text = text
-        if not AstraPlanner.extract_path(text):
+        if not followup_plan and not AstraPlanner.extract_path(text):
             q = lowered
             if any(
                 phrase in q
                 for phrase in (
-                    "tem dentro",
-                    "contém dentro",
-                    "contem dentro",
                     "nessa pasta",
                     "dessa pasta",
                     "nesse diretório",
                     "nesse diretorio",
                     "lá dentro",
                     "la dentro",
+                    "dentro dele",
+                    "dentro dela",
                 )
             ):
                 last_path = self.memory.get("last_files_path", None)
@@ -776,7 +848,7 @@ class AstraDaemon:
         if any(x in title for x in ("chrome", "chromium", "firefox", "brave", "edge")):
             browser_dom = self.browser.snapshot(limit=45)
 
-        plan = self.planner.plan(
+        plan = followup_plan or self.planner.plan(
             planner_text,
             self.context.current,
             self._accessibility_cache,
@@ -809,6 +881,18 @@ class AstraDaemon:
                 )
                 if used_path:
                     self.memory.set("last_files_path", str(used_path))
+                if str(plan.get("action", "")) == "list_dir":
+                    entries = data.get("entries") if isinstance(data, dict) else None
+                    if isinstance(entries, list):
+                        self.memory.set(
+                            "last_files_listing",
+                            {
+                                "path": str(data.get("path") or used_path or ""),
+                                "display_path": str(data.get("display_path") or ""),
+                                "entries": entries[:250],
+                                "total": int(data.get("total", len(entries))),
+                            },
+                        )
             self._record_chat(text, result.message)
             self._background(
                 self.semantic.remember,
