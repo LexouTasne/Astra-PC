@@ -1,4 +1,5 @@
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -6,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("astra_installer", ROOT / "installer.py")
 assert SPEC is not None and SPEC.loader is not None
 installer = importlib.util.module_from_spec(SPEC)
+sys.modules["astra_installer"] = installer
 SPEC.loader.exec_module(installer)
 
 
