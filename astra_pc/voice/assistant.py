@@ -356,11 +356,11 @@ class AstraVoiceAssistant:
                     path = "daemon-action"
                 except Exception as exc:
                     print(f"[voice] daemon action failed, local fallback: {exc}")
-                    answer = self.brain.ask_fast(self._short_prompt(request))
-                    path = "text-fallback"
+                    answer = self.brain.ask_voice(self._short_prompt(request))
+                    path = "text-fallback-2b"
             else:
                 answer, already_spoken = self._stream_conversation(request)
-                path = "text-stream"
+                path = "text-stream-2b"
 
         answer = (answer or "").strip()
         if not answer:
@@ -384,7 +384,7 @@ class AstraVoiceAssistant:
         prompt = self._short_prompt(request)
 
         try:
-            for piece in self.brain.ask_fast_stream(prompt):
+            for piece in self.brain.ask_voice_stream(prompt):
                 full += piece
                 speech_buffer += piece
 
@@ -417,7 +417,7 @@ class AstraVoiceAssistant:
                 "Não use inglês. Responda curto e natural. Pedido original: "
                 + request
             )
-            full = self.brain.ask_fast(repair)
+            full = self.brain.ask_voice(repair)
             spoke = False
 
         return full.strip(), spoke
