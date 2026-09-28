@@ -34,10 +34,11 @@ jobs:
           assert hasattr(mp.solutions, "hands")
           print("MediaPipe Solutions API OK")
           PY
-      - name: Bare Astra without camera must not crash
+      - name: Astra TUI without camera must not crash
         run: |
-          python -m astra_pc </dev/null
+          python -m astra_pc tui </dev/null
           python -m astra_pc setup camera --help
+          python -m astra_pc desktop-status | python -m json.tool >/dev/null
       - name: Compile
         run: python -m compileall -q astra_pc installer.py
       - name: Test
@@ -182,3 +183,20 @@ jobs:
           name: astra-android-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+
+  desktop-shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate Electron desktop syntax
+        run: |
+          node --check apps/desktop/main.mjs
+          node --check apps/desktop/preload.mjs
+          node --check apps/desktop/app.js
+      - name: Validate desktop package metadata
+        run: |
+          node -e "const p=require('./apps/desktop/package.json'); if(p.productName!=='Astra'||!p.dependencies.electron) process.exit(1)"
