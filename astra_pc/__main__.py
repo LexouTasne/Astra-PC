@@ -340,14 +340,44 @@ def _run_chat(args, config) -> None:
 
 
 def _run_voice(args, config) -> None:
+    from .core.ipc import daemon_request
     from .voice.assistant import AstraVoiceAssistant
 
     brain, client = _brain(config)
-    if not client.available():
+    voice_cfg = config.data.get("voice", {})
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    request_handler = None
+    try:
+        probe = daemon_request(
+            {"type": "awareness"},
+            host=host,
+            port=port,
+            timeout=1.0,
+        )
+        if probe.get("ok"):
+            def resident_request(text: str) -> str:
+                result = daemon_request(
+                    {"type": "ask", "text": text},
+                    host=host,
+                    port=port,
+                    timeout=30.0,
+                )
+                if not result.get("ok"):
+                    raise RuntimeError(result.get("error") or "daemon request failed")
+                return str(result.get("message", ""))
+            request_handler = resident_request
+            print("[voice] using resident Astra daemon")
+    except Exception:
+        request_handler = None
+
+    if request_handler is None and not client.available():
         raise SystemExit(
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
-    voice_cfg = config.data.get("voice", {})
+
     assistant = AstraVoiceAssistant(
         brain,
         args.voice_model,
@@ -356,6 +386,7 @@ def _run_voice(args, config) -> None:
         engine=args.engine,
         whisper_model=args.whisper_model,
         language=args.language,
+        request_handler=request_handler,
         conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
         wakeword_model=args.wakeword_model,
         wakeword_threshold=args.wakeword_threshold,
