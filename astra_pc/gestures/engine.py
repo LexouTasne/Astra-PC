@@ -84,6 +84,14 @@ class GestureEngine:
 
         self._right_latched = False
 
+        self._stable_finger_state: tuple[bool, bool, bool, bool] | None = None
+        self._candidate_finger_state: tuple[bool, bool, bool, bool] | None = None
+        self._candidate_finger_frames = 0
+        self._pose_confirm_frames = max(
+            1,
+            int(cfg.get("pose_confirm_frames", 2)),
+        )
+
         self._scroll_filtered_y: float | None = None
         self._scroll_last_y: float | None = None
         self._scroll_accum = 0.0
@@ -123,6 +131,9 @@ class GestureEngine:
         self._palm_started = None
         self._palm_latched = False
         self._right_latched = False
+        self._stable_finger_state = None
+        self._candidate_finger_state = None
+        self._candidate_finger_frames = 0
         self._last_swipe_fire = 0.0
         self._reset_transient()
         self._reset_two_hand()
@@ -149,14 +160,44 @@ class GestureEngine:
 
         return self._update_one_hand(hands[0])
 
+    def _stable_fingers(
+        self,
+        raw: tuple[bool, bool, bool, bool],
+    ) -> tuple[bool, bool, bool, bool]:
+        if self._stable_finger_state is None:
+            self._stable_finger_state = raw
+            self._candidate_finger_state = None
+            self._candidate_finger_frames = 0
+            return raw
+
+        if raw == self._stable_finger_state:
+            self._candidate_finger_state = None
+            self._candidate_finger_frames = 0
+            return self._stable_finger_state
+
+        if raw != self._candidate_finger_state:
+            self._candidate_finger_state = raw
+            self._candidate_finger_frames = 1
+            return self._stable_finger_state
+
+        self._candidate_finger_frames += 1
+        if self._candidate_finger_frames >= self._pose_confirm_frames:
+            self._stable_finger_state = raw
+            self._candidate_finger_state = None
+            self._candidate_finger_frames = 0
+        return self._stable_finger_state
+
     def _update_one_hand(self, hand: Hand) -> GestureOutput:
         now = time.monotonic()
         thumb, index, middle = hand[4], hand[8], hand[12]
 
-        index_up = _finger_extended(hand, 8, 6)
-        middle_up = _finger_extended(hand, 12, 10)
-        ring_up = _finger_extended(hand, 16, 14)
-        pinky_up = _finger_extended(hand, 20, 18)
+        raw_fingers = (
+            _finger_extended(hand, 8, 6),
+            _finger_extended(hand, 12, 10),
+            _finger_extended(hand, 16, 14),
+            _finger_extended(hand, 20, 18),
+        )
+        index_up, middle_up, ring_up, pinky_up = self._stable_fingers(raw_fingers)
 
         open_palm = index_up and middle_up and ring_up and pinky_up
         pause_hold = float(self.cfg.get("pause_hold_ms", 420)) / 1000.0
@@ -185,14 +226,17 @@ class GestureEngine:
         # Right click: thumb + middle pinch, separated from the left-click pinch.
         right_distance = _dist(thumb, middle)
         right_on = right_distance <= float(self.cfg.get("right_pinch_threshold", 0.05))
+        right_off = right_distance >= float(
+            self.cfg.get("right_release_threshold", self.cfg.get("click_release_threshold", 0.072))
+        )
         index_separate = _dist(thumb, index) > float(
             self.cfg.get("click_release_threshold", 0.065)
         )
         if self.feature_enabled("right_click"):
-            if right_on and not self._right_latched and index_separate:
+            if right_on and not self._right_latched and index_separate and middle_up:
                 self._right_latched = True
                 return GestureOutput(right_click=True, label="right-click")
-            if not right_on:
+            if right_off:
                 self._right_latched = False
         else:
             self._right_latched = False
