@@ -28,6 +28,7 @@ class AstraViewport:
         self._zoom_max = max(self._zoom_min, float(self.cfg.get("zoom_max", 5.0)))
         self._rotation_quadrants = 0
         self._primary_output: str | None = None
+        self._zoom_prepared = False
 
     @property
     def zoom_level(self) -> float:
@@ -41,6 +42,7 @@ class AstraViewport:
         if not steps or self.backend is None:
             return False
         with self._lock:
+            self._ensure_zoom_backend()
             direction = 1 if steps > 0 else -1
             changed = False
             for _ in range(abs(int(steps))):
@@ -88,6 +90,43 @@ class AstraViewport:
             self.reset_rotation()
         except Exception:
             pass
+
+    def _ensure_zoom_backend(self) -> None:
+        if self._zoom_prepared:
+            return
+        self._zoom_prepared = True
+
+        if platform.system() != "Linux":
+            return
+        if shutil.which("kwriteconfig6"):
+            try:
+                subprocess.run(
+                    [
+                        "kwriteconfig6",
+                        "--file", "kwinrc",
+                        "--group", "Plugins",
+                        "--key", "zoomEnabled",
+                        "true",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=1.0,
+                    check=False,
+                )
+            except Exception:
+                pass
+        qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+        if qdbus:
+            try:
+                subprocess.run(
+                    [qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=1.0,
+                    check=False,
+                )
+            except Exception:
+                pass
 
     def _apply_rotation(self) -> bool:
         if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
