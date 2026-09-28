@@ -46,6 +46,23 @@ def _center(hand: Hand) -> tuple[float, float]:
     )
 
 
+def _hand_scale(hand: Hand) -> float:
+    # Robust palm-size estimate in normalized image coordinates.
+    # The max() keeps synthetic/partial test hands compatible.
+    wrist_to_middle = _dist(hand[0], hand[9])
+    across_knuckles = _dist(hand[5], hand[17])
+    return max(wrist_to_middle, across_knuckles, 1e-4)
+
+
+def _scaled_threshold(hand: Hand, base: float, reference: float) -> float:
+    scale = _hand_scale(hand)
+    if scale <= 0.01:
+        return base
+    factor = scale / max(0.05, reference)
+    factor = max(0.65, min(1.55, factor))
+    return base * factor
+
+
 def _open_palm(hand: Hand) -> bool:
     return all(
         _finger_extended(hand, tip, pip)
@@ -224,14 +241,31 @@ class GestureEngine:
             return GestureOutput(label="paused")
 
         # Right click: thumb + middle pinch, separated from the left-click pinch.
+        hand_ref = float(self.cfg.get("reference_hand_scale", 0.20))
         right_distance = _dist(thumb, middle)
-        right_on = right_distance <= float(self.cfg.get("right_pinch_threshold", 0.05))
-        right_off = right_distance >= float(
-            self.cfg.get("right_release_threshold", self.cfg.get("click_release_threshold", 0.072))
+        right_on_threshold = _scaled_threshold(
+            hand,
+            float(self.cfg.get("right_pinch_threshold", 0.05)),
+            hand_ref,
         )
-        index_separate = _dist(thumb, index) > float(
-            self.cfg.get("click_release_threshold", 0.065)
+        right_release_threshold = _scaled_threshold(
+            hand,
+            float(
+                self.cfg.get(
+                    "right_release_threshold",
+                    self.cfg.get("click_release_threshold", 0.072),
+                )
+            ),
+            hand_ref,
         )
+        left_release_threshold = _scaled_threshold(
+            hand,
+            float(self.cfg.get("click_release_threshold", 0.065)),
+            hand_ref,
+        )
+        right_on = right_distance <= right_on_threshold
+        right_off = right_distance >= right_release_threshold
+        index_separate = _dist(thumb, index) > left_release_threshold
         if self.feature_enabled("right_click"):
             if right_on and not self._right_latched and index_separate and middle_up:
                 self._right_latched = True
@@ -242,8 +276,12 @@ class GestureEngine:
             self._right_latched = False
 
         pinch = _dist(thumb, index)
-        pinch_on = pinch <= float(self.cfg.get("pinch_threshold", 0.045))
-        pinch_off = pinch >= float(self.cfg.get("click_release_threshold", 0.065))
+        pinch_on = pinch <= _scaled_threshold(
+            hand,
+            float(self.cfg.get("pinch_threshold", 0.045)),
+            hand_ref,
+        )
+        pinch_off = pinch >= left_release_threshold
         out = GestureOutput()
 
         pointer_pose = index_up and not middle_up and not ring_up and not pinky_up
