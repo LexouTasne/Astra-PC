@@ -65,6 +65,10 @@ def _run_setup(args, config) -> None:
     cmd = [sys.executable, str(installer)]
     if args.setup_command == "camera":
         cmd.append("--camera-only")
+    elif args.setup_command == "voice":
+        cmd.append("--voice-only")
+        if getattr(args, "tts_voice", None):
+            cmd.extend(["--tts-voice", args.tts_voice])
     elif args.setup_command == "full":
         cmd.append("--full")
     elif args.setup_command == "location":
@@ -201,6 +205,7 @@ def _run_home(args, config) -> None:
     print("6 - Configurar/reparar câmera")
     print("7 - Rodar instalador completo")
     print("8 - Instalar/migrar Astra para outra pasta/disco")
+    print("9 - Configurar voz natural")
     print("0 - Sair")
 
     if not sys.stdin.isatty():
@@ -229,12 +234,13 @@ def _run_home(args, config) -> None:
             "6": ["setup", "camera"],
             "7": ["setup", "full"],
             "8": ["setup", "location"],
+            "9": ["setup", "voice"],
         }
         if choice in {"0", "q", "quit", "sair"}:
             return
         command = commands.get(choice)
         if not command:
-            print("Escolha 0-8.")
+            print("Escolha 0-9.")
             continue
         if choice == "8":
             try:
@@ -414,6 +420,9 @@ def _run_voice(args, config) -> None:
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
 
+    from .voice.piper_tts import resolve_piper_model
+    piper_model = resolve_piper_model(voice_cfg.get("piper_model") or None)
+
     assistant = AstraVoiceAssistant(
         brain,
         args.voice_model,
@@ -426,7 +435,7 @@ def _run_voice(args, config) -> None:
         conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
         wakeword_model=args.wakeword_model,
         wakeword_threshold=args.wakeword_threshold,
-        piper_model=voice_cfg.get("piper_model") or None,
+        piper_model=piper_model,
     )
     assistant.run()
 
@@ -798,6 +807,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=10.0,
         help="automatic LAN discovery timeout in seconds",
     )
+
+    setup_voice = setup_sub.add_parser(
+        "voice",
+        help="install/change Astra's natural local pt-BR voice",
+    )
+    setup_voice.add_argument(
+        "--voice",
+        dest="tts_voice",
+        default=None,
+        choices=["pt_BR-faber-medium", "pt_BR-cadu-medium", "pt_BR-jeff-medium"],
+    )
+    setup_voice.add_argument("--yes", action="store_true")
     setup_full = setup_sub.add_parser("full", help="run the complete guided installer")
     setup_full.add_argument("--yes", action="store_true")
     setup_full.add_argument("--allow-layering", action="store_true")
