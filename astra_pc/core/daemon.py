@@ -279,6 +279,17 @@ class AstraDaemon:
 
             time.sleep(self.context_interval)
 
+    def _background(self, fn, *args, **kwargs) -> None:
+        def runner():
+            try:
+                fn(*args, **kwargs)
+            except Exception:
+                pass
+        threading.Thread(target=runner, daemon=True).start()
+
+    def _remember_conversation(self, text: str, answer: str) -> None:
+        self._background(self._remember_conversation, text, answer)
+
     def _remember_event(self, event) -> None:
         if event.name.startswith("context.") or event.name == "mesh.sensor":
             return
@@ -516,6 +527,19 @@ class AstraDaemon:
             if cached is not None:
                 return {"ok": True, "message": cached, "cached": True}
 
+        # Ordinary conversation should not pay the desktop-planner cost.
+        # This keeps voice/chat latency low and avoids an extra model call.
+        if not self.planner.needs_planning(text):
+            answer = self.brain.ask(text)
+            if cacheable and answer:
+                self.cache.put(cache_key, answer)
+            self._background(self._remember_conversation, text, answer)
+            return {
+                "ok": True,
+                "message": answer,
+                "plan": {"type": "answer", "path": "direct"},
+            }
+
         memories = self.semantic.search(text, limit=5)
         reference = self.reference.resolve(
             text,
@@ -550,7 +574,8 @@ class AstraDaemon:
                 "data": result.data,
                 "plan": plan,
             }
-            self.semantic.remember(
+            self._background(
+                self.semantic.remember,
                 f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
                 kind="action",
                 metadata={"ok": result.ok, "profile": self.context.current.profile},
