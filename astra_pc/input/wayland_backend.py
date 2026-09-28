@@ -210,9 +210,12 @@ class YdotoolBackend(InputBackend):
 
     def scroll(self, amount: int) -> None:
         if amount:
+            # '--' is required before positional wheel values so a negative
+            # amount (scroll down) is not parsed as another command-line option.
             self._queue_command(
                 "mousemove",
                 "--wheel",
+                "--",
                 "0",
                 str(int(amount)),
             )
