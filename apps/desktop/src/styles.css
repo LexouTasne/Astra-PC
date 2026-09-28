@@ -745,3 +745,14 @@ textarea, pre, .message-body, .log-view { user-select: text; }
   cursor: pointer;
 }
 .attachment-card button:hover { background: #1a1a1a; color: #ddd; }
+
+.mic-tool.listening {
+  color: #f4f4f4;
+  background: #242424;
+  animation: micPulse 1.05s ease-in-out infinite;
+}
+.mic-tool.listening svg { transform: scale(1.06); }
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,.02); }
+  50% { box-shadow: 0 0 0 5px rgba(255,255,255,.07); }
+}
