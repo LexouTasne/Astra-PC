@@ -17,3 +17,9 @@ def test_desktop_action_uses_planner():
     assert AstraPlanner.needs_planning("abra o navegador")
     assert AstraPlanner.needs_planning("volume 30")
     assert AstraPlanner.needs_planning("rode os testes")
+
+
+def test_colloquial_math_is_instant():
+    result = CommandRouter().execute("quanto que é um mais um?")
+    assert result.handled
+    assert result.message == "É 2."
