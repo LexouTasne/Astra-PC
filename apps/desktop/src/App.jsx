@@ -239,6 +239,7 @@ function ChatPage({ ask, status, run }) {
   const [messages, setMessages] = useState(loadStoredChat)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [listening, setListening] = useState(false)
   const [attachment, setAttachment] = useState(null)
   const endRef = useRef(null)
 
@@ -297,6 +298,23 @@ function ChatPage({ ask, status, run }) {
     }])
   }
 
+  const dictate = async () => {
+    if (busy || listening) return
+    setListening(true)
+    const result = await window.astra.dictate()
+    setListening(false)
+
+    if (!result?.ok || !result?.text) {
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        text: result?.error || 'Não consegui ouvir uma frase completa.'
+      }])
+      return
+    }
+
+    await submit(result.text)
+  }
+
   return (
     <div className="chat-page">
       <div className="chat-scroll">
@@ -352,7 +370,12 @@ function ChatPage({ ask, status, run }) {
             <button className="composer-tool" onClick={chooseImage} title="Enviar imagem" disabled={busy}>
               <ImagePlus size={17} />
             </button>
-            <button className="composer-tool" onClick={() => run('voice')} title="Iniciar voz" disabled={busy}>
+            <button
+              className={`composer-tool mic-tool ${listening ? 'listening' : ''}`}
+              onClick={dictate}
+              title={listening ? 'Ouvindo…' : 'Falar uma mensagem'}
+              disabled={busy || listening}
+            >
               <Mic2 size={17} />
             </button>
             <button
@@ -364,7 +387,7 @@ function ChatPage({ ask, status, run }) {
             </button>
           </div>
         </div>
-        <span className="composer-hint">Enter envia · Shift+Enter quebra linha · imagem e voz locais</span>
+        <span className="composer-hint">{listening ? 'Ouvindo… fale normalmente e faça uma pausa para enviar' : 'Enter envia · Shift+Enter quebra linha · clique no mic para falar'}</span>
       </div>
     </div>
   )
