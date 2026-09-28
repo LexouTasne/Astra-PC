@@ -1189,6 +1189,26 @@ def _microphone_score(name: str, index: int, default_index: int | None) -> int:
     return score
 
 
+def prefetch_asr_model(model_name: str) -> bool:
+    print(f"Preparing faster-whisper model: {model_name}")
+    try:
+        from faster_whisper import WhisperModel
+
+        model = WhisperModel(
+            model_name,
+            device="cpu",
+            compute_type="int8",
+            cpu_threads=max(2, min(4, os.cpu_count() or 2)),
+        )
+        del model
+        print("ASR model ready:", model_name)
+        return True
+    except Exception as exc:
+        print("Could not prefetch ASR model:", exc)
+        print("Astra can still try downloading it on first voice start.")
+        return False
+
+
 def configure_voice_capture(
     assume_yes: bool = False,
     selected_microphone: str | None = None,
@@ -1303,6 +1323,7 @@ def configure_voice_capture(
     print("Astra microphone:", label)
     print("ASR model:", target_asr)
     print("Voice state:", path)
+    prefetch_asr_model(target_asr)
     return True
 
 
