@@ -43,7 +43,10 @@
     "swipe_window_ms": 240,
     "pose_confirm_frames": 2,
     "right_release_threshold": 0.074,
-    "reference_hand_scale": 0.2
+    "reference_hand_scale": 0.2,
+    "transform_hold_ms": 140,
+    "pinch_zoom_ratio": 0.1,
+    "pinch_rotate_threshold_deg": 12
   },
   "actions": {
     "zoom_in": [
@@ -240,5 +243,10 @@
     "sync_memory": false,
     "sync_clipboard": "manual",
     "allow_remote_over_vpn": true
+  },
+  "viewport": {
+    "zoom_step": 0.16,
+    "zoom_min": 1,
+    "zoom_max": 5
   }
 }
