@@ -224,8 +224,16 @@ ipcMain.handle('astra:choose-image', async () => {
 
 ipcMain.handle('astra:dictate', async () => {
   try {
-    const text = await collectAstra(['listen-once', '--timeout', '15'], 30000)
-    return { ok: true, text: String(text || '').trim() }
+    const raw = await collectAstra(['listen-once', '--timeout', '15'], 30000)
+    const lines = String(raw || '')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(Boolean)
+    const text = lines.at(-1) || ''
+    if (!text || text.startsWith('[asr]')) {
+      return { ok: false, error: 'Não consegui entender a fala.' }
+    }
+    return { ok: true, text }
   } catch (error) {
     return { ok: false, error: friendlyError(error) }
   }
