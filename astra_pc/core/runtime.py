@@ -12,6 +12,7 @@ from astra_pc.gestures.engine import GestureEngine
 from astra_pc.input.factory import create_input_backend
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.voice.commands import CommandRouter
+from astra_pc.viewport.controller import AstraViewport
 from astra_pc.vision.camera_source import open_first_camera
 
 
@@ -36,6 +37,10 @@ class AstraRuntime:
         self.backend = None if dry_run else create_input_backend()
         self.router = CommandRouter()
         self.voice = None
+        self.viewport = AstraViewport(
+            self.backend,
+            config.data.get("viewport", {}),
+        )
 
         pointer = config.section("pointer")
         self.pointer_enabled = bool(
@@ -185,10 +190,10 @@ class AstraRuntime:
                     self.backend.scroll(out.scroll)
 
                 if out.zoom_steps:
-                    self._dispatch_action("zoom_in" if out.zoom_steps > 0 else "zoom_out")
+                    self.viewport.zoom(out.zoom_steps)
 
                 if out.rotate_steps:
-                    self._dispatch_action("rotate_right" if out.rotate_steps > 0 else "rotate_left")
+                    self.viewport.rotate(out.rotate_steps)
 
                 if out.swipe:
                     self._dispatch_action(f"swipe_{out.swipe}")
