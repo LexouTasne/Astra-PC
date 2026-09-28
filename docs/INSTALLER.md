@@ -249,3 +249,58 @@ astra setup camera --scan-timeout 5
 ```
 
 The endpoint is only remembered after Astra successfully starts the DroidCam CLI path; the next setup attempts that saved endpoint before scanning.
+
+
+## Choosing the installation location
+
+The bootstrap installer supports application, runtime, data and cache locations independently.
+
+### Application folder
+
+```bash
+./install.sh --dest "/path/to/Astra-PC"
+```
+
+or after installation:
+
+```bash
+astra setup location "/path/to/Astra-PC"
+```
+
+### Portable mode
+
+```bash
+astra setup location "/run/media/$USER/USB/Astra-PC" --portable-data
+```
+
+Portable data places Astra memory/cache next to the application. The Python runtime is still automatically moved to a local user directory when the selected Linux filesystem is known to be unsuitable for virtualenv executable/symlink behavior.
+
+### Explicit runtime/data
+
+```bash
+./install.sh \
+  --dest "/mnt/fast/Astra-PC" \
+  --runtime-dir "$HOME/.local/share/astra-pc/runtime-fast/.venv" \
+  --data-dir "/mnt/fast/AstraData" \
+  --cache-dir "/mnt/fast/AstraCache"
+```
+
+### Windows
+
+Run the downloaded script with:
+
+```powershell
+.\install.ps1 -InstallDir "D:\Astra-PC"
+```
+
+Portable data:
+
+```powershell
+.\install.ps1 -InstallDir "E:\Astra-PC" -PortableData
+```
+
+### Guided vs automatic
+
+The default installer is guided and asks about optional components, including local AI, Qwen 4B, Awareness extras, ComfyUI, autostart and starting Astra now.
+
+Use `--yes` for recommended non-interactive answers. Use `--full` for the complete heavy setup.
