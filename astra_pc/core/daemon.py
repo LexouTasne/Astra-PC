@@ -675,11 +675,31 @@ class AstraDaemon:
             message = results[-1].get("message", "") if results else "Rotina vazia."
             return {"ok": ok, "message": message, "results": results}
 
-        cacheable = not any(
-            word in lowered
-            for word in ("agora", "hoje", "tela", "isso", "isto", "aqui", "status", "processo")
+        planning_needed = self.planner.needs_planning(text)
+        cacheable = (
+            not planning_needed
+            and not any(
+                word in lowered
+                for word in (
+                    "agora",
+                    "hoje",
+                    "tela",
+                    "isso",
+                    "isto",
+                    "aqui",
+                    "status",
+                    "processo",
+                    "arquivo",
+                    "pasta",
+                    "diretório",
+                    "diretorio",
+                )
+            )
         )
-        cache_key = self.cache.key(text, self.context.current.profile)
+        cache_namespace = (
+            f"{self.context.current.profile}|brain-2b-v2|{self.text_client.model}"
+        )
+        cache_key = self.cache.key(text, cache_namespace)
         if cacheable:
             cached = self.cache.get(cache_key)
             if cached is not None:
@@ -688,7 +708,7 @@ class AstraDaemon:
         # GUI/chat uses the stronger 2B brain with recent conversation,
         # real skill manifest and relevant memory. The 0.6B model is reserved
         # for the low-latency voice path.
-        if not self.planner.needs_planning(text):
+        if not planning_needed:
             memories = self._semantic_context(text)
             answer = self.brain.ask(
                 text,
