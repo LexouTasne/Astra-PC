@@ -214,3 +214,38 @@ On Linux Astra prefers an already installed standard `v4l2loopback` module becau
 On Bazzite/Fedora Atomic, Astra first tries an existing/prebuilt loopback module. Host layering is never silently performed; interactive mode asks first, while non-interactive `--yes` still requires `--allow-layering` for immutable-host changes.
 
 After DroidCam is launched, Astra can wait for the phone and repeatedly probe until real frames arrive.
+
+
+### Network discovery and manual IP
+
+DroidCam discovery is bounded to 10 seconds by default.
+
+Astra checks, in order:
+
+- an endpoint passed with `--droidcam`;
+- the last successfully used endpoint;
+- known LAN neighbours;
+- the local private subnet in parallel on port `4747`.
+
+If interactive discovery finds nothing, Astra offers:
+
+```text
+1 - Enter IP:port manually
+2 - Search the network again
+3 - Wait for video without network discovery
+0 - Cancel
+```
+
+Direct endpoint:
+
+```bash
+astra setup camera --droidcam 192.168.1.50:4747
+```
+
+Custom scan window:
+
+```bash
+astra setup camera --scan-timeout 5
+```
+
+The endpoint is only remembered after Astra successfully starts the DroidCam CLI path; the next setup attempts that saved endpoint before scanning.
