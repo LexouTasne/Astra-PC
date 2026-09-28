@@ -10,6 +10,7 @@ import {
   Hand,
   Headphones,
   History,
+  ImagePlus,
   Laptop,
   Maximize2,
   Menu,
@@ -224,24 +225,70 @@ function EmptyChat({ onPrompt, aiOnline }) {
   )
 }
 
-function ChatPage({ ask, status }) {
-  const [messages, setMessages] = useState([])
+function loadStoredChat() {
+  try {
+    const raw = localStorage.getItem('astra.chat.messages')
+    const parsed = JSON.parse(raw || '[]')
+    return Array.isArray(parsed) ? parsed.slice(-40) : []
+  } catch {
+    return []
+  }
+}
+
+function ChatPage({ ask, status, run }) {
+  const [messages, setMessages] = useState(loadStoredChat)
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
+  const [attachment, setAttachment] = useState(null)
   const endRef = useRef(null)
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, busy])
 
+  useEffect(() => {
+    try {
+      const serializable = messages.slice(-40).map(({ image, ...message }) => message)
+      localStorage.setItem('astra.chat.messages', JSON.stringify(serializable))
+    } catch {}
+  }, [messages])
+
+  const chooseImage = async () => {
+    if (busy) return
+    const picked = await window.astra.chooseImage()
+    if (!picked) return
+    if (picked.error) {
+      setMessages(prev => [...prev, { role: 'assistant', text: picked.error }])
+      return
+    }
+    setAttachment(picked)
+  }
+
   const submit = async (override = null) => {
-    const text = String(override ?? value).trim()
-    if (!text || busy) return
-    if (override === null) setValue('')
-    setMessages(prev => [...prev, { role: 'user', text }])
+    const typed = String(override ?? value).trim()
+    const selected = override === null ? attachment : null
+    if ((!typed && !selected) || busy) return
+
+    const prompt = typed || 'Analise esta imagem e descreva o que é importante.'
+    if (override === null) {
+      setValue('')
+      setAttachment(null)
+    }
+
+    setMessages(prev => [...prev, {
+      role: 'user',
+      text: prompt,
+      image: selected?.preview || null,
+      imageName: selected?.name || null
+    }])
+
     setBusy(true)
-    const result = await ask(text)
+    const result = await ask({
+      prompt,
+      imagePath: selected?.path || null
+    })
     setBusy(false)
+
     setMessages(prev => [...prev, {
       role: 'assistant',
       text: result.ok
@@ -258,7 +305,15 @@ function ChatPage({ ask, status }) {
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.role}`}>
                 {message.role === 'assistant' && <div className="assistant-avatar"><AstraMark /></div>}
-                <div className="message-body">{message.text}</div>
+                <div className="message-body">
+                  {message.image && (
+                    <div className="message-image-wrap">
+                      <img src={message.image} alt={message.imageName || 'Imagem enviada'} className="message-image" />
+                      {message.imageName && <span>{message.imageName}</span>}
+                    </div>
+                  )}
+                  <div>{message.text}</div>
+                </div>
               </div>
             ))}
             {busy && (
@@ -273,6 +328,13 @@ function ChatPage({ ask, status }) {
       </div>
 
       <div className="composer-shell">
+        {attachment && (
+          <div className="attachment-card">
+            <img src={attachment.preview} alt={attachment.name} />
+            <div><strong>{attachment.name}</strong><span>Imagem pronta para enviar</span></div>
+            <button onClick={() => setAttachment(null)} title="Remover imagem"><X size={14} /></button>
+          </div>
+        )}
         <div className="composer">
           <textarea
             value={value}
@@ -283,15 +345,26 @@ function ChatPage({ ask, status }) {
                 submit()
               }
             }}
-            placeholder="Fale com a Astra..."
+            placeholder={attachment ? 'Pergunte algo sobre a imagem...' : 'Fale com a Astra...'}
             rows={1}
           />
           <div className="composer-actions">
-            <button className="composer-mic" title="Voz"><Mic2 size={17} /></button>
-            <button className="send-btn" onClick={submit} disabled={!value.trim() || busy}><Send size={16} /></button>
+            <button className="composer-tool" onClick={chooseImage} title="Enviar imagem" disabled={busy}>
+              <ImagePlus size={17} />
+            </button>
+            <button className="composer-tool" onClick={() => run('voice')} title="Iniciar voz" disabled={busy}>
+              <Mic2 size={17} />
+            </button>
+            <button
+              className="send-btn"
+              onClick={() => submit()}
+              disabled={(!value.trim() && !attachment) || busy}
+            >
+              <Send size={16} />
+            </button>
           </div>
         </div>
-        <span className="composer-hint">Enter envia · Shift+Enter quebra linha · processamento local</span>
+        <span className="composer-hint">Enter envia · Shift+Enter quebra linha · imagem e voz locais</span>
       </div>
     </div>
   )
@@ -565,7 +638,7 @@ export default function App() {
   const [title, subtitle] = pageMeta(page)
 
   const content = useMemo(() => ({
-    chat: <ChatPage ask={ask} status={status} />,
+    chat: <ChatPage ask={ask} status={status} run={run} />,
     voice: <VoicePage run={run} processes={processes} status={status} />,
     gestures: <GesturesPage run={run} processes={processes} />,
     mesh: <MeshPage run={run} processes={processes} status={status} />,
