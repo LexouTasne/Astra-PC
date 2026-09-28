@@ -53,6 +53,8 @@ def _run_gestures(args, config) -> None:
             dry_run=args.dry_run,
             voice_model=args.voice_model,
             tutorial=tutorial,
+            air_mouse=getattr(args, "air_mouse", False),
+            drag=getattr(args, "drag", False),
         ).run()
     except RuntimeError as exc:
         detail = str(exc)
@@ -804,6 +806,16 @@ def build_parser() -> argparse.ArgumentParser:
     gestures.add_argument("--show-camera", action="store_true")
     gestures.add_argument("--dry-run", action="store_true")
     gestures.add_argument("--voice-model", type=Path)
+    gestures.add_argument(
+        "--air-mouse",
+        action="store_true",
+        help="EXPERIMENTAL: move cursor continuously with index finger",
+    )
+    gestures.add_argument(
+        "--drag",
+        action="store_true",
+        help="EXPERIMENTAL: allow hold-pinch dragging",
+    )
     gestures.add_argument("--tutorial", action="store_true", help="force interactive gesture tutorial")
     gestures.add_argument("--no-tutorial", action="store_true", help="skip first-run tutorial")
 
