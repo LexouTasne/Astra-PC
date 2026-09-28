@@ -34,3 +34,26 @@ def test_embedded_close_discord_is_action():
         "action": "close_app",
         "args": {"name": "discord"},
     }
+
+
+def test_time_question_is_local_fast_path():
+    result = CommandRouter().execute("que horas são?")
+    assert result.handled
+    assert result.message.startswith("Agora ")
+
+
+def test_spoken_time_1830_is_natural_ptbr():
+    assert CommandRouter._format_time(18, 30) == "Agora são seis e meia da tarde."
+
+
+def test_spoken_time_1831_is_natural_ptbr():
+    assert CommandRouter._format_time(18, 31) == "Agora são seis e trinta e um da tarde."
+
+
+def test_spoken_time_1300_uses_singular():
+    assert CommandRouter._format_time(13, 0) == "Agora é uma da tarde."
+
+
+def test_spoken_time_special_cases():
+    assert CommandRouter._format_time(0, 0) == "Agora é meia-noite."
+    assert CommandRouter._format_time(12, 30) == "Agora é meio-dia e meia."
