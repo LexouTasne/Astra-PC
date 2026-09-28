@@ -2113,7 +2113,13 @@ def main() -> int:
         for idx, w, h in cameras:
             print(f"  camera {idx}: {w}x{h}")
     else:
-        maybe_install_droidcam(pm, args.yes, args.allow_layering)
+        maybe_install_droidcam(
+            pm,
+            args.yes,
+            args.allow_layering,
+            args.droidcam,
+            args.camera_scan_timeout,
+        )
 
     if system == "Linux" and session.lower() == "wayland":
         if not command_exists("ydotool"):
