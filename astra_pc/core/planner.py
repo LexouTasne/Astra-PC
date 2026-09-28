@@ -32,7 +32,7 @@ class AstraPlanner:
         "o que tem dentro", "oque tem dentro", "o que contém", "o que contem",
         "listar", "liste", "me lista", "mostre os arquivos",
         "conteúdo da pasta", "conteudo da pasta",
-        "dentro do", "dentro da", "dentro dele", "dentro dela",
+        "dentro do", "dentro da", "dentro de", "dentro dele", "dentro dela",
         "lá dentro", "la dentro", "primeiro item", "primeira pasta",
         "segundo item", "terceiro item", "item da lista",
     )
