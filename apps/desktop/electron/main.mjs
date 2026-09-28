@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -166,14 +167,58 @@ ipcMain.handle('astra:status', async () => {
   }
 })
 
-ipcMain.handle('astra:ask', async (_event, prompt) => {
-  const text = String(prompt || '').trim()
-  if (!text) return { ok: false, error: 'Mensagem vazia.' }
+ipcMain.handle('astra:ask', async (_event, payload) => {
+  const text = String(
+    typeof payload === 'string' ? payload : (payload?.prompt || '')
+  ).trim()
+  const imagePath = typeof payload === 'object' && payload
+    ? String(payload.imagePath || '').trim()
+    : ''
+  if (!text && !imagePath) return { ok: false, error: 'Mensagem vazia.' }
+
+  const prompt = text || 'Analise esta imagem e descreva o que é importante.'
+  const args = ['ask', prompt]
+  if (imagePath) args.push('--image', imagePath)
+
   try {
-    const answer = await collectAstra(['ask', text], 45000)
+    const answer = await collectAstra(args, imagePath ? 90000 : 45000)
     return { ok: true, answer }
   } catch (error) {
     return { ok: false, error: friendlyError(error) }
+  }
+})
+
+ipcMain.handle('astra:choose-image', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Imagens', extensions: ['png', 'jpg', 'jpeg', 'webp', 'bmp'] }
+    ]
+  })
+  if (result.canceled || !result.filePaths[0]) return null
+
+  const filePath = result.filePaths[0]
+  try {
+    const stat = await fs.stat(filePath)
+    if (!stat.isFile() || stat.size > 25 * 1024 * 1024) {
+      return { error: 'A imagem precisa ter no máximo 25 MB.' }
+    }
+    const ext = path.extname(filePath).slice(1).toLowerCase()
+    const mime = ext === 'jpg' || ext === 'jpeg'
+      ? 'image/jpeg'
+      : ext === 'webp'
+        ? 'image/webp'
+        : ext === 'bmp'
+          ? 'image/bmp'
+          : 'image/png'
+    const bytes = await fs.readFile(filePath)
+    return {
+      path: filePath,
+      name: path.basename(filePath),
+      preview: `data:${mime};base64,${bytes.toString('base64')}`
+    }
+  } catch (error) {
+    return { error: friendlyError(error) }
   }
 })
 
