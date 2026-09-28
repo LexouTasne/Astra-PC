@@ -854,3 +854,81 @@ astra setup camera --droidcam 192.168.1.50:4747
 ```
 
 Change the address to the one shown by DroidCam on your phone.
+
+
+## Install anywhere: SSD / HDD / USB
+
+Astra no longer requires `~/Astra-PC`.
+
+### Fresh Linux/macOS install
+
+The normal installer asks for the application folder:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.sh)
+```
+
+Direct path:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.sh) \
+  --dest "/mnt/My SSD/Astra-PC"
+```
+
+USB example:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/LexouTasne/Astra-PC/main/install.sh) \
+  --dest "/run/media/$USER/MYUSB/Astra-PC" \
+  --portable-data
+```
+
+### Move/reinstall an existing Astra
+
+Interactive:
+
+```bash
+astra
+```
+
+Choose **8 - Instalar/migrar Astra para outra pasta/disco**.
+
+Direct:
+
+```bash
+astra setup location "/mnt/My SSD/Astra-PC"
+```
+
+Portable data:
+
+```bash
+astra setup location "/run/media/$USER/MYUSB/Astra-PC" --portable-data
+```
+
+Astra does a safe reinstall into the new destination and rewrites the user launcher/autostart. The old checkout is left untouched until you choose to remove it.
+
+### Storage layout
+
+Astra separates:
+
+```text
+Application   source code / Astra package
+Runtime       isolated Python 3.12 environment
+Data          memory, Mesh identity, skills, macros
+Cache         response/cache databases
+```
+
+On normal Linux filesystems the runtime can live beside Astra.
+
+On FAT/vfat/exFAT/NTFS-style removable mounts under Linux, Astra automatically keeps the Python runtime on the local user filesystem while leaving the application and optional portable data on the selected drive. This avoids broken executable/symlink semantics on removable filesystems.
+
+Custom advanced paths:
+
+```bash
+install.sh --dest /disk/Astra-PC \
+  --runtime-dir ~/.local/share/astra-pc/runtime-custom/.venv \
+  --data-dir /disk/AstraData \
+  --cache-dir /disk/AstraCache
+```
+
+If a removable drive is absent, the `astra` launcher prints a clear mount/drive error instead of a Python traceback, and Linux systemd will not start the service while the application path is missing.
