@@ -123,6 +123,7 @@ class GestureEngine:
         self._palm_started = None
         self._palm_latched = False
         self._right_latched = False
+        self._last_swipe_fire = 0.0
         self._reset_transient()
         self._reset_two_hand()
 
@@ -206,7 +207,10 @@ class GestureEngine:
             out.pointer = (index.x, index.y)
             out.label = "pointer"
 
-        if self.feature_enabled("click") and pinch_on and not self._pinching:
+        pinch_tracking_enabled = (
+            self.feature_enabled("click") or self.feature_enabled("drag")
+        )
+        if pinch_tracking_enabled and pinch_on and not self._pinching:
             self._pinching = True
             self._pinch_started = now
             out.label = "pinch"
@@ -225,9 +229,11 @@ class GestureEngine:
                 if self._dragging:
                     out.left_down = False
                     out.label = "drop"
-                else:
+                elif self.feature_enabled("click"):
                     out.left_click = True
                     out.label = "click"
+                else:
+                    out.label = "pinch-release"
                 self._pinching = False
                 self._dragging = False
 
