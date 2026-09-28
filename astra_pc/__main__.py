@@ -149,6 +149,140 @@ def _run_setup(args, config) -> None:
         raise SystemExit(130)
 
 
+def _run_desktop(args, config) -> None:
+    import os
+    import shutil
+
+    root = Path(__file__).resolve().parent.parent
+    desktop = root / "apps" / "desktop"
+    package = desktop / "package.json"
+    if not package.exists():
+        raise SystemExit("Astra Desktop não foi encontrado nesta instalação.")
+
+    npm = shutil.which("npm")
+    if not npm:
+        raise SystemExit(
+            "Astra Desktop precisa de Node.js/npm. Instale Node.js e rode 'astra' novamente."
+        )
+
+    electron_marker = desktop / "node_modules" / "electron"
+    if not electron_marker.exists():
+        print("[Astra Desktop] Preparando a GUI na primeira abertura...")
+        result = subprocess.call(
+            [npm, "install", "--no-audit", "--no-fund"],
+            cwd=str(desktop),
+        )
+        if result != 0:
+            raise SystemExit("Falha ao instalar as dependências do Astra Desktop.")
+
+    env = os.environ.copy()
+    env["ASTRA_ROOT"] = str(root)
+    env["ASTRA_PYTHON"] = sys.executable
+    raise SystemExit(
+        subprocess.call(
+            [npm, "start", "--silent"],
+            cwd=str(desktop),
+            env=env,
+        )
+    )
+
+
+def _run_desktop_status(args, config) -> None:
+    import json
+    import os
+    import platform
+
+    from .core.ipc import daemon_request
+    from .voice.piper_tts import load_voice_state
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+    daemon_online = False
+    daemon_starting = False
+
+    try:
+        reply = daemon_request(
+            {"type": "ping"},
+            host=host,
+            port=port,
+            timeout=0.55,
+        )
+        daemon_online = bool(reply.get("ok"))
+    except Exception:
+        if sys.platform.startswith("linux"):
+            try:
+                state = subprocess.run(
+                    ["systemctl", "--user", "is-active", "astra-pc.service"],
+                    capture_output=True,
+                    text=True,
+                    timeout=0.6,
+                    check=False,
+                ).stdout.strip()
+                daemon_starting = state in {"active", "activating"}
+            except Exception:
+                pass
+
+    voice_state = load_voice_state()
+    camera_available = False
+    camera_label = "Não detectada"
+    if platform.system() == "Linux":
+        import glob
+
+        cameras = sorted(glob.glob("/dev/video*"))
+        if cameras:
+            camera_available = True
+            camera_label = os.path.basename(cameras[0])
+    else:
+        camera_available = True
+        camera_label = "Sistema"
+
+    mesh_cfg = config.data.get("mesh", {})
+    ai = config.data.get("ai", {})
+    payload = {
+        "ok": True,
+        "daemon": {
+            "online": daemon_online,
+            "starting": daemon_starting and not daemon_online,
+        },
+        "camera": {
+            "available": camera_available,
+            "label": camera_label,
+        },
+        "voice": {
+            "configured": bool(
+                voice_state.get("model_path")
+                or voice_state.get("whisper_model")
+                or voice_state.get("input_device_name")
+            ),
+            "microphone": voice_state.get("input_device_name") or "Padrão do sistema",
+            "asr": voice_state.get("whisper_model") or config.data.get("voice", {}).get("whisper_model", "small"),
+            "tts": (
+                f"Piper · {voice_state.get('voice_id')}"
+                if voice_state.get("voice_id")
+                else "Sistema"
+            ),
+        },
+        "mesh": {
+            "enabled": bool(mesh_cfg.get("enabled", True)),
+            "online": daemon_online and bool(mesh_cfg.get("enabled", True)),
+        },
+        "model": ai.get("text_model", "qwen3:0.6b"),
+        "platform": f"{platform.system()} · {platform.machine()}",
+    }
+    print(json.dumps(payload, ensure_ascii=False))
+
+
+def _run_desktop_update(args, config) -> None:
+    root = Path(__file__).resolve().parent.parent
+    if not (root / ".git").exists():
+        raise SystemExit("Esta instalação não é um checkout Git.")
+    result = subprocess.call(["git", "-C", str(root), "pull", "--ff-only"])
+    if result != 0:
+        raise SystemExit(result)
+    print("Astra atualizado. Feche e abra a GUI para carregar a nova versão.")
+
+
 def _run_home(args, config) -> None:
     from .core.ipc import daemon_request
     from .vision.camera_source import open_first_camera
@@ -802,6 +936,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=None)
     sub = parser.add_subparsers(dest="command")
 
+    sub.add_parser("gui", aliases=["desktop"], help="open Astra Desktop GUI")
+    sub.add_parser("tui", help="open the legacy terminal control panel")
+    sub.add_parser("desktop-status", help=argparse.SUPPRESS)
+    sub.add_parser("desktop-update", help=argparse.SUPPRESS)
+
     gestures = sub.add_parser("gestures", help="start real-time hand control")
     gestures.add_argument("--show-camera", action="store_true")
     gestures.add_argument("--dry-run", action="store_true")
@@ -1005,9 +1144,14 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(args.config)
 
-    command = args.command or "home"
+    command = args.command or "gui"
 
     runners = {
+        "gui": _run_desktop,
+        "desktop": _run_desktop,
+        "tui": _run_home,
+        "desktop-status": _run_desktop_status,
+        "desktop-update": _run_desktop_update,
         "home": _run_home,
         "setup": _run_setup,
         "gestures": _run_gestures,
