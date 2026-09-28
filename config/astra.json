@@ -56,13 +56,15 @@
   "ai": {
     "provider": "ollama",
     "host": "http://127.0.0.1:11434",
-    "text_model": "qwen3:0.6b",
+    "text_model": "qwen3-vl:2b-instruct",
     "vision_model": "qwen3-vl:2b-instruct",
     "timeout": 180,
     "keep_alive": -1,
-    "fast_context": 3072,
+    "fast_context": 2048,
     "vision_context": 6144,
-    "strong_model": "qwen3:4b"
+    "strong_model": "",
+    "fast_model": "qwen3:0.6b",
+    "text_context": 6144
   },
   "voice": {
     "engine": "fast",
