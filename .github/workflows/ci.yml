@@ -90,6 +90,24 @@ jobs:
           PY
 
 
+  desktop-gui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm install --no-audit --no-fund --package-lock=false
+      - name: Build Astra Desktop
+        working-directory: apps/desktop
+        run: npm run build
+      - name: Verify desktop output
+        run: |
+          test -f apps/desktop/dist/index.html
+          test -d apps/desktop/dist/assets
+
   windows:
     runs-on: windows-latest
     steps:
