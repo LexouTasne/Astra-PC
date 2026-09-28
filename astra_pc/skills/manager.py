@@ -16,6 +16,7 @@ from .input_control import InputControlSkill
 from .notifications import NotificationsSkill
 from .system import SystemSkill
 from .terminal import TerminalSkill
+from .viewport import ViewportSkill
 from .windows import WindowsSkill
 
 
@@ -32,6 +33,7 @@ class SkillManager:
             FilesSkill(),
             GitSkill(),
             InputControlSkill(),
+            ViewportSkill(),
             ClipboardSkill(),
             NotificationsSkill(),
             TerminalSkill(),
