@@ -351,7 +351,16 @@ class AstraDaemon:
             return False
 
     def _voice_request(self, text: str) -> str:
-        result = self.handle({"type": "ask", "text": text, "voice": True})
+        q = text.lower()
+        screen_phrases = (
+            "minha tela",
+            "na tela",
+            "tela agora",
+            "o que estou vendo",
+            "essa janela",
+        )
+        kind = "screen" if any(phrase in q for phrase in screen_phrases) else "ask"
+        result = self.handle({"type": kind, "text": text, "voice": True})
         return str(result.get("message") or result.get("error") or "")
 
     def _warm_text(self) -> None:
@@ -777,6 +786,15 @@ class AstraDaemon:
                 "ok": True,
                 "message": time_answer,
                 "plan": {"type": "answer", "path": "system-local-time"},
+            }
+
+        math_answer = CommandRouter._math(text)
+        if math_answer is not None:
+            self._record_chat(text, math_answer)
+            return {
+                "ok": True,
+                "message": math_answer,
+                "plan": {"type": "answer", "path": "system-local-math"},
             }
 
         profile_aliases = {
