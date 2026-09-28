@@ -34,9 +34,8 @@ astra gestures --no-tutorial
 
 | Gesture | Action |
 | --- | --- |
-| Only index finger raised | Move pointer |
-| Thumb + index pinch and release | Left click |
-| Hold thumb + index pinch | Drag |
+| Only index finger raised | Recognition pose only in safe mode |
+| Thumb + index pinch and release | Atomic left click at current cursor |
 | Index + middle raised, other fingers down | Scroll |
 | Thumb + middle pinch | Right click |
 | Open palm once | Pause/resume gesture control |
@@ -44,11 +43,20 @@ astra gestures --no-tutorial
 | Rotate the line between two hands | Rotate |
 | Three raised fingers + fast horizontal motion | Swipe left/right |
 
-The tutorial validates the seven core gestures one by one. Advanced two-hand zoom/rotation and swipe are shown after the core tutorial.
+The tutorial validates the safe core gestures one by one. It never moves or clicks the real mouse while teaching.
+
+Continuous air-mouse and drag are disabled by default because camera jitter or tracking loss can make them unpleasant or unsafe. They are available only as explicit experimental modes:
+
+```bash
+astra gestures --air-mouse
+astra gestures --air-mouse --drag
+```
+
+In normal safe mode, there is no continuously held mouse button.
 
 ## Safety during tutorial
 
-The tutorial detects all gestures but only sends pointer movement to the operating system. It does not emit click/scroll/right-click while teaching, so learning the gesture cannot accidentally activate something on the desktop.
+The tutorial detects gestures visually but sends **no mouse action at all** to the operating system. Learning a gesture cannot move the cursor, click, scroll or start a drag.
 
 ## Linux / Wayland
 
