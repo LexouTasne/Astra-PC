@@ -13,8 +13,8 @@ class AstraPlanner:
     """Deterministic routes first, local model only when necessary."""
 
     ACTIONISH = re.compile(
-        r"^\s*(?:por\s+favor\s+)?(?:"
-        r"abra|abre|abrir|feche|fecha|fechar|clique|clica|clicar|"
+        r"\b(?:"
+        r"abra|abre|abrir|feche|fecha|fechar|encerre|encerra|encerrar|clique|clica|clicar|"
         r"digite|digita|escreva|escreve|copie|copia|cole|cola|"
         r"mova|move|renomeie|renomear|apague|apagar|delete|deletar|"
         r"execute|executa|rodar|rode|inicie|iniciar|pare|pausar|"
@@ -108,6 +108,19 @@ class AstraPlanner:
                 "type": "skill",
                 "skill": "apps",
                 "action": "open_app",
+                "args": {"name": m.group(1)},
+            }
+
+        m = re.search(
+            r"\b(?:feche|fecha|fechar|encerre|encerra|encerrar)\s+"
+            r"(?:o\s+|a\s+)?([\w.+À-ÿ-]+)",
+            q,
+        )
+        if m:
+            return {
+                "type": "skill",
+                "skill": "apps",
+                "action": "close_app",
                 "args": {"name": m.group(1)},
             }
 
