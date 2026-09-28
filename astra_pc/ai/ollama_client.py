@@ -20,12 +20,35 @@ class OllamaClient:
         model: str,
         host: str = "http://127.0.0.1:11434",
         timeout: int = 180,
-        keep_alive: str = "-1",
+        keep_alive: str | int | float = -1,
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout = timeout
-        self.keep_alive = keep_alive
+        self.keep_alive = self._normalize_keep_alive(keep_alive)
+
+    @staticmethod
+    def _normalize_keep_alive(value: str | int | float) -> str | int | float:
+        """Ollama accepts duration strings (5m) or numeric keep-alive values.
+
+        Older Astra configs stored -1 as the string "-1". Newer Ollama parses
+        strings as Go durations, where "-1" is invalid because it has no unit.
+        Convert plain numeric strings to JSON numbers while preserving values
+        such as "5m", "30s" and "1h".
+        """
+        if isinstance(value, (int, float)):
+            return value
+        text = str(value).strip()
+        try:
+            if text and all(ch in "+-0123456789" for ch in text):
+                return int(text)
+            if text.count(".") == 1 and all(
+                ch in "+-.0123456789" for ch in text
+            ):
+                return float(text)
+        except ValueError:
+            pass
+        return text or -1
 
     def available(self) -> bool:
         try:
