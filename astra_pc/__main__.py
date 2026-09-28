@@ -127,17 +127,48 @@ def _run_home(args, config) -> None:
 
     daemon_cfg = config.data.get("daemon", {})
     daemon_online = False
+    daemon_starting = False
     awareness = None
-    try:
-        awareness = daemon_request(
-            {"type": "awareness"},
-            host=daemon_cfg.get("host", "127.0.0.1"),
-            port=int(daemon_cfg.get("port", 8765)),
-            timeout=1.2,
-        )
-        daemon_online = bool(awareness.get("ok"))
-    except Exception:
-        pass
+    daemon_host = daemon_cfg.get("host", "127.0.0.1")
+    daemon_port = int(daemon_cfg.get("port", 8765))
+
+    for attempt in range(8):
+        try:
+            ping = daemon_request(
+                {"type": "ping"},
+                host=daemon_host,
+                port=daemon_port,
+                timeout=0.45,
+            )
+            if ping.get("ok"):
+                daemon_online = True
+                break
+        except Exception:
+            if attempt < 7:
+                __import__("time").sleep(0.18)
+
+    if daemon_online:
+        try:
+            awareness = daemon_request(
+                {"type": "awareness"},
+                host=daemon_host,
+                port=daemon_port,
+                timeout=1.5,
+            )
+        except Exception:
+            awareness = None
+    elif sys.platform.startswith("linux"):
+        try:
+            state = subprocess.run(
+                ["systemctl", "--user", "is-active", "astra-pc.service"],
+                capture_output=True,
+                text=True,
+                timeout=0.8,
+                check=False,
+            )
+            daemon_starting = state.stdout.strip() in {"active", "activating"}
+        except Exception:
+            pass
 
     camera = open_first_camera(
         preferred=int(config.data.get("camera", {}).get("index", 0)),
@@ -157,7 +188,8 @@ def _run_home(args, config) -> None:
     print("============================================================")
     print(" ASTRA 0.8 // MESH")
     print("============================================================")
-    print(f"Daemon : {'ONLINE' if daemon_online else 'OFFLINE'}")
+    daemon_label = "ONLINE" if daemon_online else ("STARTING" if daemon_starting else "OFFLINE")
+    print(f"Daemon : {daemon_label}")
     print(f"Mesh   : {'ONLINE' if mesh_online else 'OFFLINE'}")
     print(f"Camera : {camera_label}")
     print()
@@ -350,12 +382,16 @@ def _run_voice(args, config) -> None:
     port = int(daemon_cfg.get("port", 8765))
 
     request_handler = None
+    target_seconds = max(
+        2.0,
+        float(voice_cfg.get("target_response_ms", 7000)) / 1000.0,
+    )
     try:
         probe = daemon_request(
-            {"type": "awareness"},
+            {"type": "ping"},
             host=host,
             port=port,
-            timeout=1.0,
+            timeout=0.8,
         )
         if probe.get("ok"):
             def resident_request(text: str) -> str:
@@ -363,7 +399,7 @@ def _run_voice(args, config) -> None:
                     {"type": "ask", "text": text},
                     host=host,
                     port=port,
-                    timeout=30.0,
+                    timeout=target_seconds,
                 )
                 if not result.get("ok"):
                     raise RuntimeError(result.get("error") or "daemon request failed")
