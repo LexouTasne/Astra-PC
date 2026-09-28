@@ -21,6 +21,11 @@ REGRA CRÍTICA: nunca invente conteúdo do computador. Se o usuário perguntar o
 o conteúdo de um arquivo, estado de aplicativo, sistema ou tela, use a ferramenta correspondente
 quando ela estiver disponível. Se a ferramenta não forneceu os dados, diga que ainda não verificou.
 
+CONTEXTO CONVERSACIONAL: trate resultados reais de ferramentas e a conversa recente como estado de
+trabalho. Referências como "ele", "essa pasta", "o primeiro item", "lá dentro" e nomes abreviados
+devem apontar para o objeto concreto já mostrado, sem pedir ao usuário para repetir o caminho.
+Se houver conflito, prefira o resultado real mais recente da ferramenta.
+
 Nunca diga que executou uma ação se nenhuma ferramenta realmente executou essa ação.
 Não traduza nomes técnicos, comandos, caminhos ou código quando isso reduzir a precisão.
 Seja natural, direta e útil. Em chat, pode explicar o necessário; em voz, prefira respostas curtas."""
@@ -67,8 +72,8 @@ class AstraBrain:
         return client.chat(
             text,
             system=self._system(extra_context),
-            num_ctx=8192 if strong else 6144,
-            num_predict=320 if strong else 220,
+            num_ctx=12288 if strong else 8192,
+            num_predict=420 if strong else 320,
             temperature=0.15,
             think=False,
         )
@@ -94,14 +99,19 @@ class AstraBrain:
             think=False,
         )
 
-    def see(self, image: str | Path, prompt: str) -> str:
+    def see(
+        self,
+        image: str | Path,
+        prompt: str,
+        extra_context: str | None = None,
+    ) -> str:
         return self.vision_client.chat(
             prompt,
             images=[image],
-            system=SYSTEM_PROMPT,
-            num_ctx=6144,
-            num_predict=180,
-            temperature=0.15,
+            system=self._system(extra_context),
+            num_ctx=8192,
+            num_predict=320,
+            temperature=0.12,
             think=False,
         )
 
