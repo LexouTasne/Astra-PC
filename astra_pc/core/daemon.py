@@ -321,7 +321,14 @@ class AstraDaemon:
         threading.Thread(target=runner, daemon=True).start()
 
     def _remember_conversation(self, text: str, answer: str) -> None:
-        self._background(self._remember_conversation, text, answer)
+        self.semantic.remember(
+            f"Usuário: {text}\nAstra: {answer}",
+            kind="conversation",
+            metadata={
+                "profile": self.context.current.profile,
+                "window": self.context.current.active_window,
+            },
+        )
 
     def _remember_event(self, event) -> None:
         if event.name.startswith("context.") or event.name == "mesh.sensor":
@@ -632,14 +639,7 @@ class AstraDaemon:
             return reply
 
         answer = str(plan.get("answer") or self.brain.ask(text))
-        self.semantic.remember(
-            f"Usuário: {text}\nAstra: {answer}",
-            kind="conversation",
-            metadata={
-                "profile": self.context.current.profile,
-                "window": self.context.current.active_window,
-            },
-        )
+        self._background(self._remember_conversation, text, answer)
         if cacheable and answer:
             self.cache.put(cache_key, answer)
         return {"ok": True, "message": answer, "plan": plan}
