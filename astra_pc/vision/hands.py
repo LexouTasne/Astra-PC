@@ -22,9 +22,21 @@ class HandTracker:
             1.0,
             max(0.0, float(cfg.get("landmark_smoothing", 0.72))),
         )
+        self._slow_alpha = min(
+            1.0,
+            max(0.05, float(cfg.get("landmark_slow_alpha", 0.58))),
+        )
+        self._fast_alpha = min(
+            1.0,
+            max(self._slow_alpha, float(cfg.get("landmark_fast_alpha", 0.94))),
+        )
+        self._motion_threshold = max(
+            0.002,
+            float(cfg.get("landmark_motion_threshold", 0.018)),
+        )
         self._snap_distance = max(
-            0.01,
-            float(cfg.get("landmark_snap_distance", 0.10)),
+            self._motion_threshold,
+            float(cfg.get("landmark_snap_distance", 0.085)),
         )
         self._previous: dict[str, tuple[Point, ...]] = {}
 
@@ -50,21 +62,31 @@ class HandTracker:
             self._previous[key] = points
             return points
 
-        a = self._smoothing
         smoothed = []
         for old, new in zip(previous, points):
-            # Fast deliberate motion should never feel like it is dragging
-            # through syrup. Snap on large jumps; EMA only the small jitter.
-            if self._distance(old, new) >= self._snap_distance:
+            motion = self._distance(old, new)
+            # Adaptive EMA: tiny movements are stabilized, deliberate motion is
+            # almost raw, and large jumps snap immediately. This keeps gesture
+            # poses stable without adding perceptible hand lag.
+            if motion >= self._snap_distance:
                 smoothed.append(new)
+                continue
+
+            if motion <= self._motion_threshold:
+                ratio = motion / self._motion_threshold
+                a = self._slow_alpha + (self._smoothing - self._slow_alpha) * ratio
             else:
-                smoothed.append(
-                    Point(
-                        old.x + (new.x - old.x) * a,
-                        old.y + (new.y - old.y) * a,
-                        old.z + (new.z - old.z) * a,
-                    )
+                span = max(1e-6, self._snap_distance - self._motion_threshold)
+                ratio = min(1.0, (motion - self._motion_threshold) / span)
+                a = self._smoothing + (self._fast_alpha - self._smoothing) * ratio
+
+            smoothed.append(
+                Point(
+                    old.x + (new.x - old.x) * a,
+                    old.y + (new.y - old.y) * a,
+                    old.z + (new.z - old.z) * a,
                 )
+            )
         result = tuple(smoothed)
         self._previous[key] = result
         return result
