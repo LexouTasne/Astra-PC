@@ -29,18 +29,18 @@ def load_voice_state() -> dict:
 
         # Runtime migration for voice profiles created before the audio v2
         # pipeline. Do not require users to delete/recreate voice.json.
-        if int(value.get("audio_profile_version", 0) or 0) < 3:
-            value["silence_ms"] = 480
-            value["pre_roll_ms"] = 300
-            value["start_speech_ms"] = 60
-            value["min_utterance_ms"] = 180
+        if int(value.get("audio_profile_version", 0) or 0) < 4:
+            value["silence_ms"] = 340
+            value["pre_roll_ms"] = 240
+            value["start_speech_ms"] = 45
+            value["min_utterance_ms"] = 150
             value["max_utterance_s"] = 18.0
             value["vad_mode"] = 2
             value["adaptive_retry"] = True
             value["length_scale"] = 0.90
             value["noise_scale"] = 0.62
             value["noise_w_scale"] = 0.76
-            value["audio_profile_version"] = 3
+            value["audio_profile_version"] = 4
         return value
     except Exception:
         return {}
