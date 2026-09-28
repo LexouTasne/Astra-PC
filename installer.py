@@ -2317,7 +2317,14 @@ def main() -> int:
         if ask("\nInstall Astra low-latency local AI (Qwen3 0.6B + Qwen3-VL 2B)?", True, args.yes):
             if install_ollama():
                 ensure_astra_models()
-                if args.strong_ai:
+                want_strong = args.strong_ai
+                if not args.yes and not args.strong_ai:
+                    want_strong = ask(
+                        "\nInstall optional Qwen3 4B for harder reasoning tasks?",
+                        False,
+                        False,
+                    )
+                if want_strong:
                     print("\n[STRONG AI] Optional Qwen3 4B reasoning model")
                     run(["ollama", "pull", "qwen3:4b"])
 
@@ -2328,14 +2335,28 @@ def main() -> int:
         if install_autostart(with_voice=not args.no_voice):
             print("Astra resident daemon autostart enabled.")
 
-    if args.awareness_extras:
+    want_awareness = args.awareness_extras
+    if not args.yes and not args.awareness_extras:
+        want_awareness = ask(
+            "\nInstall Awareness extras (wake word ONNX + browser DOM)?",
+            True,
+            False,
+        )
+    if want_awareness:
         if not install_awareness_extras():
             print("Awareness extras were only partially installed; core Astra remains usable.")
 
-    if args.media:
+    want_media = args.media
+    if not args.yes and not args.media:
+        want_media = ask(
+            "\nSet up optional local image/video generation support (ComfyUI)?",
+            False,
+            False,
+        )
+    if want_media:
         if comfyui_available():
             print("\n[MEDIA GENERATION] A local ComfyUI server is already reachable.")
-        elif ask("\nSet up optional local ComfyUI media generation?", False, args.yes):
+        elif ask("\nInstall local ComfyUI now?", True, args.yes):
             install_comfyui()
 
     microphones = probe_microphones()
@@ -2366,6 +2387,23 @@ def main() -> int:
     print("Accessibility:", "yes" if (
         importlib.util.find_spec("pyatspi") or importlib.util.find_spec("pywinauto")
     ) else "visual fallback")
+    print("\n[INSTALL LOCATIONS]")
+    print("Application:", ROOT)
+    print("Python runtime:", Path(sys.executable).resolve().parent.parent)
+    print(
+        "Data:",
+        os.getenv(
+            "ASTRA_DATA_DIR",
+            str(Path.home() / ".local" / "share" / "astra-pc"),
+        ),
+    )
+    print(
+        "Cache:",
+        os.getenv(
+            "ASTRA_CACHE_DIR",
+            str(Path.home() / ".cache" / "astra-pc"),
+        ),
+    )
 
     if system == "Linux" and pm == "rpm-ostree":
         print("\nNOTE: package layering on Bazzite/Fedora Atomic may require a reboot.")
@@ -2389,7 +2427,10 @@ def main() -> int:
     print("\nMesh pairing:")
     print("  astra mesh pair-code")
 
-    if args.start:
+    want_start = args.start
+    if not args.yes and not args.start:
+        want_start = ask("\nStart Astra now?", True, False)
+    if want_start:
         print("\n[START]")
         start_astra(with_voice=not args.no_voice)
 
