@@ -22,6 +22,8 @@ class PermissionLayer:
         "window_snap_right", "window_move_monitor",
         "mouse_move", "mouse_click", "mouse_right_click", "mouse_scroll",
         "type_text",
+        "zoom_in", "zoom_out", "zoom_reset",
+        "rotate_left", "rotate_right", "rotation_reset",
     }
     CONFIRM = {
         "write_file", "rename_file", "move_file", "install_package",
