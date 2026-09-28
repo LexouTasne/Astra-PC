@@ -24,7 +24,24 @@ def load_voice_state() -> dict:
         return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
+        if not isinstance(value, dict):
+            return {}
+
+        # Runtime migration for voice profiles created before the audio v2
+        # pipeline. Do not require users to delete/recreate voice.json.
+        if int(value.get("audio_profile_version", 0) or 0) < 2:
+            value["silence_ms"] = 480
+            value["pre_roll_ms"] = 300
+            value["start_speech_ms"] = 60
+            value["min_utterance_ms"] = 240
+            value["max_utterance_s"] = 18.0
+            value["vad_mode"] = 2
+            value["adaptive_retry"] = True
+            value["length_scale"] = 0.96
+            value["noise_scale"] = 0.62
+            value["noise_w_scale"] = 0.76
+            value["audio_profile_version"] = 2
+        return value
     except Exception:
         return {}
 
@@ -68,15 +85,15 @@ class PiperSpeaker:
         state = load_voice_state()
         self.length_scale = max(
             0.6,
-            min(1.5, float(length_scale if length_scale is not None else state.get("length_scale", 0.90))),
+            min(1.5, float(length_scale if length_scale is not None else state.get("length_scale", 0.96))),
         )
         self.noise_scale = max(
             0.0,
-            min(2.0, float(noise_scale if noise_scale is not None else state.get("noise_scale", 0.60))),
+            min(2.0, float(noise_scale if noise_scale is not None else state.get("noise_scale", 0.62))),
         )
         self.noise_w_scale = max(
             0.0,
-            min(2.0, float(noise_w_scale if noise_w_scale is not None else state.get("noise_w_scale", 0.80))),
+            min(2.0, float(noise_w_scale if noise_w_scale is not None else state.get("noise_w_scale", 0.76))),
         )
         self.volume = max(
             0.1,
