@@ -10,6 +10,10 @@ const ASTRA_PYTHON = process.env.ASTRA_PYTHON || process.env.PYTHON || 'python3'
 const processes = new Map()
 let mainWindow = null
 
+if (process.platform === 'linux' && process.env.WAYLAND_DISPLAY) {
+  app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
+}
+
 function emit(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
 }
