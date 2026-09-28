@@ -90,6 +90,9 @@ def test_gesture_control_parser_is_specific():
     assert parse_gesture_control("desliga todos os gestos") == (
         "system", None, False
     )
+    assert parse_gesture_control("ativa a pausa por palma") == (
+        "feature", "pause", True
+    )
 
 
 def test_gesture_control_state_persists(tmp_path):
