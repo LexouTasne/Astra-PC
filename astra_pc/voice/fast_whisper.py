@@ -26,6 +26,8 @@ class FastWhisperVoiceEngine:
         raw_frame_callback: Callable[[bytes], None] | None = None,
         initial_prompt: str | None = None,
         hotwords: str | None = None,
+        input_device: int | str | None = None,
+        adaptive_retry: bool = True,
     ):
         try:
             import sounddevice as sd
@@ -55,6 +57,8 @@ class FastWhisperVoiceEngine:
             "Astra DroidCam navegador terminal volume clipboard "
             "um dois três quatro cinco seis sete oito nove dez"
         )
+        self.input_device = input_device
+        self.adaptive_retry = adaptive_retry
         self.sample_rate = sample_rate
         self.frame_ms = frame_ms
         self.silence_frames = max(1, silence_ms // frame_ms)
@@ -93,6 +97,7 @@ class FastWhisperVoiceEngine:
                     pass
 
         with self.sd.RawInputStream(
+            device=self.input_device,
             samplerate=self.sample_rate,
             blocksize=self.frame_samples,
             dtype="int16",
@@ -143,11 +148,28 @@ class FastWhisperVoiceEngine:
         if audio.size < self.sample_rate // 4:
             return
 
+        text, confidence = self._decode(audio, beam_size=1)
+        if self.adaptive_retry and self._needs_retry(text, confidence):
+            retry_text, retry_confidence = self._decode(audio, beam_size=4)
+            if retry_text and (
+                not text
+                or retry_confidence >= confidence - 0.05
+                or len(retry_text) > len(text)
+            ):
+                text = retry_text
+
+        text = text.strip()
+        if text:
+            self.on_text(text)
+
+    def _decode(self, audio: np.ndarray, beam_size: int) -> tuple[str, float]:
         segments, _ = self.model.transcribe(
             audio,
             language=self.language,
-            beam_size=1,
+            task="transcribe",
+            beam_size=beam_size,
             best_of=1,
+            patience=1.0,
             temperature=0.0,
             vad_filter=False,
             condition_on_previous_text=False,
@@ -155,7 +177,32 @@ class FastWhisperVoiceEngine:
             word_timestamps=False,
             initial_prompt=self.initial_prompt,
             hotwords=self.hotwords,
+            suppress_blank=True,
+            log_prob_threshold=-1.3,
+            no_speech_threshold=0.72,
         )
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-        if text:
-            self.on_text(text)
+        items = list(segments)
+        text = " ".join(seg.text.strip() for seg in items).strip()
+        if not items:
+            return text, -99.0
+        weights = [max(1.0, float(seg.end - seg.start)) for seg in items]
+        confidence = sum(
+            float(seg.avg_logprob) * weight
+            for seg, weight in zip(items, weights)
+        ) / sum(weights)
+        return text, confidence
+
+    @staticmethod
+    def _needs_retry(text: str, confidence: float) -> bool:
+        cleaned = text.strip()
+        if not cleaned:
+            return True
+        if len(cleaned) <= 2:
+            return True
+        if confidence < -0.72:
+            return True
+        words = cleaned.lower().split()
+        if len(words) >= 3 and len(set(words)) <= max(1, len(words) // 3):
+            return True
+        return False
+
