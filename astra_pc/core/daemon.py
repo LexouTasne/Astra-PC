@@ -684,6 +684,7 @@ class AstraDaemon:
                     "vision_max_width": perf.vision_max_width,
                 },
                 "skills": self.skills.describe(),
+                "gestures": self.gesture_control.snapshot(force=True),
                 "mesh": {
                     "enabled": self.mesh_server is not None,
                     "port": (
