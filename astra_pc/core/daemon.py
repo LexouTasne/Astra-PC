@@ -769,16 +769,26 @@ class AstraDaemon:
         last_listing = self.memory.get("last_files_listing", None)
         followup_plan = self.planner.file_followup_plan(text, last_listing)
         planning_needed = bool(followup_plan) or self.planner.needs_planning(text)
+        context_sensitive = (
+            len(text.split()) <= 7
+            or any(
+                word in lowered
+                for word in (
+                    " ele", " ela", " isso", " isto", " esse", " essa",
+                    " desse", " dessa", " dele", " dela", " ali", " aí", " ai",
+                    "primeiro", "segundo", "terceiro", "anterior", "último", "ultimo",
+                )
+            )
+        )
         cacheable = (
             not planning_needed
+            and not context_sensitive
             and not any(
                 word in lowered
                 for word in (
                     "agora",
                     "hoje",
                     "tela",
-                    "isso",
-                    "isto",
                     "aqui",
                     "status",
                     "processo",
