@@ -1005,3 +1005,27 @@ astra gestures --show-camera
 On Wayland, Astra validates the ydotoold socket instead of silently falling back to a backend that may not work. KDE Wayland multi-monitor geometry can also be read through `kscreen-doctor`.
 
 See `docs/GESTURES.md` for the complete control map and troubleshooting guide.
+
+
+### Safe gesture defaults
+
+Gesture control now starts in a conservative mode:
+
+- continuous hand-controlled cursor movement is **off**;
+- gesture drag is **off**;
+- thumb+index release generates one atomic left click;
+- losing hand tracking forces a left-button release;
+- Ctrl+C/normal exit also forces a release;
+- the tutorial never sends real mouse actions.
+
+Experimental air-mouse:
+
+```bash
+astra gestures --air-mouse
+```
+
+Experimental air-mouse + drag:
+
+```bash
+astra gestures --air-mouse --drag
+```
