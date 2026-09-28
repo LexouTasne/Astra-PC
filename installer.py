@@ -1315,14 +1315,14 @@ def configure_voice_capture(
         input_device_index=chosen.get("index"),
         whisper_model=target_asr,
         language="pt",
-        silence_ms=480,
-        pre_roll_ms=300,
-        start_speech_ms=60,
-        min_utterance_ms=180,
+        silence_ms=340,
+        pre_roll_ms=240,
+        start_speech_ms=45,
+        min_utterance_ms=150,
         max_utterance_s=18.0,
         vad_mode=2,
         adaptive_retry=True,
-        audio_profile_version=3,
+        audio_profile_version=4,
     )
     label = chosen.get("name") or "system default"
     print("Astra microphone:", label)
@@ -1401,7 +1401,7 @@ def install_natural_voice(
         noise_scale=0.62,
         noise_w_scale=0.76,
         volume=1.0,
-        audio_profile_version=3,
+        audio_profile_version=4,
     )
     print("Natural voice configured:", voice_id)
     print("Voice state:", state_path)
