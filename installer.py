@@ -1476,6 +1476,24 @@ def ydotool_daemon_status() -> tuple[bool, str]:
     return False, "daemon/socket not detected"
 
 
+def ydotool_cli_health() -> tuple[bool, str]:
+    if not command_exists("ydotool"):
+        return False, "ydotool binary missing"
+    try:
+        result = subprocess.run(
+            ["ydotool", "debug"],
+            capture_output=True,
+            text=True,
+            timeout=1.5,
+            check=False,
+        )
+    except Exception as exc:
+        return False, str(exc)
+    if result.returncode == 0:
+        return True, "ydotoold socket accepts commands"
+    return False, (result.stderr or result.stdout or "ydotool debug failed").strip()
+
+
 def enable_ydotool_service() -> bool:
     if platform.system() != "Linux" or not command_exists("systemctl"):
         return False
@@ -2465,6 +2483,7 @@ def main() -> int:
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     parser.add_argument("--camera-only", action="store_true", help="repair/test only camera and DroidCam setup")
+    parser.add_argument("--gestures-only", action="store_true", help="repair/test gesture camera + MediaPipe + input backend")
     parser.add_argument("--voice-only", action="store_true", help="repair/install only voice + natural TTS setup")
     parser.add_argument(
         "--tts-voice",
@@ -2536,7 +2555,7 @@ def main() -> int:
             "Wayland input backend",
             command_exists("ydotool"),
             (
-                "ydotool found; " + ydotool_daemon_status()[1]
+                "ydotool found; " + ydotool_cli_health()[1]
                 if command_exists("ydotool")
                 else "ydotool missing"
             ),
@@ -2546,6 +2565,62 @@ def main() -> int:
     summary(checks)
 
     if args.diagnose_only:
+        return 0
+
+    if args.gestures_only:
+        print("\n[GESTURES-ONLY MODE]")
+        print("Checking camera, MediaPipe and desktop input before tutorial...")
+
+        if not install_python_core():
+            print("Gesture dependencies could not be installed.")
+            return 7
+
+        cameras = probe_cameras_opencv()
+        if not cameras:
+            maybe_install_droidcam(
+                pm,
+                args.yes,
+                args.allow_layering,
+                args.droidcam,
+                args.camera_scan_timeout,
+            )
+            cameras = probe_cameras_opencv()
+        if not cameras:
+            print("No working camera is available for gestures.")
+            print("Run: astra setup camera")
+            return 4
+
+        print("[OK] Camera:")
+        for idx, width, height in cameras:
+            print(f"  camera {idx}: {width}x{height}")
+
+        try:
+            import mediapipe as mp
+            if not hasattr(mp, "solutions") or not hasattr(mp.solutions, "hands"):
+                raise RuntimeError("MediaPipe Hands/Solutions API unavailable")
+            print("[OK] MediaPipe Hands")
+        except Exception as exc:
+            print("[ERR] MediaPipe:", exc)
+            return 8
+
+        if system == "Linux" and session.lower() == "wayland":
+            if not command_exists("ydotool"):
+                if not install_ydotool(pm, args.allow_layering):
+                    print("[ERR] ydotool is required on Wayland.")
+                    return 9
+            enable_ydotool_service()
+            healthy, detail = ydotool_cli_health()
+            print(("[OK] " if healthy else "[ERR] ") + "Wayland input: " + detail)
+            if not healthy:
+                print("ydotool is installed but ydotoold cannot accept commands.")
+                print("Try logging out/in or rebooting after host package changes.")
+                return 10
+        else:
+            print("[OK] Desktop input backend:", system, session)
+
+        print("\nGesture stack is ready.")
+        print("Next: astra gestures --tutorial")
+        print("The normal 'astra gestures' command also opens the tutorial on first use.")
         return 0
 
     if args.voice_only:
