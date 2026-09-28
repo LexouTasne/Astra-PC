@@ -19,10 +19,16 @@ def _brain(config):
     keep_alive = ai.get("keep_alive", -1)
 
     text_client = OllamaClient(
-        model=ai.get("text_model", "qwen3:0.6b"),
+        model=ai.get("text_model", "qwen3-vl:2b-instruct"),
         host=host,
         timeout=timeout,
         keep_alive=keep_alive,
+    )
+    fast_client = OllamaClient(
+        model=ai.get("fast_model", "qwen3:0.6b"),
+        host=host,
+        timeout=timeout,
+        keep_alive="10m",
     )
     vision_client = OllamaClient(
         model=ai.get("vision_model", "qwen3-vl:2b-instruct"),
@@ -35,7 +41,15 @@ def _brain(config):
         OllamaClient(strong_name, host=host, timeout=timeout, keep_alive="5m")
         if strong_name else None
     )
-    return AstraBrain(text_client, vision_client, strong_client), text_client
+    return (
+        AstraBrain(
+            text_client,
+            vision_client,
+            strong_client,
+            fast_client=fast_client,
+        ),
+        text_client,
+    )
 
 
 def _run_gestures(args, config) -> None:
