@@ -11,6 +11,7 @@ from astra_pc.vision.types import Hand, Point
 class GestureOutput:
     pointer: tuple[float, float] | None = None
     left_down: bool | None = None
+    left_click: bool = False
     right_click: bool = False
     scroll: int = 0
     zoom_steps: int = 0
@@ -65,9 +66,15 @@ class GestureEngine:
 
     def update(self, hands: list[Hand]) -> GestureOutput:
         if not hands:
+            was_dragging = self._dragging
             self._last_scroll_y = None
             self._reset_two_hand()
-            return GestureOutput(label="no-hand")
+            self._pinching = False
+            self._dragging = False
+            return GestureOutput(
+                left_down=False if was_dragging else None,
+                label="no-hand",
+            )
 
         if len(hands) >= 2:
             out = self._update_two_hands(hands[0], hands[1])
@@ -127,20 +134,24 @@ class GestureEngine:
         if pinch_on and not self._pinching:
             self._pinching = True
             self._pinch_started = now
-            out.left_down = True
-            out.pointer = (index.x, index.y)
             out.label = "pinch"
 
         if self._pinching:
             hold_ms = (now - self._pinch_started) * 1000.0
-            if hold_ms >= float(self.cfg["drag_hold_ms"]):
+            drag_enabled = bool(self.cfg.get("drag_enabled", False))
+            if drag_enabled and hold_ms >= float(self.cfg["drag_hold_ms"]):
+                if not self._dragging:
+                    out.left_down = True
                 self._dragging = True
-                out.left_down = True
                 out.pointer = (index.x, index.y)
                 out.label = "drag"
             if pinch_off:
-                out.left_down = False
-                out.label = "drop" if self._dragging else "click"
+                if self._dragging:
+                    out.left_down = False
+                    out.label = "drop"
+                else:
+                    out.left_click = True
+                    out.label = "click"
                 self._pinching = False
                 self._dragging = False
 
