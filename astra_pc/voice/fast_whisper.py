@@ -10,7 +10,11 @@ import numpy as np
 
 
 class FastWhisperVoiceEngine:
-    """Low-latency microphone ASR with WebRTC VAD and a resident faster-whisper model."""
+    """Continuous low-latency microphone ASR for Brazilian Portuguese.
+
+    Capture/VAD and Whisper decoding run on different threads so the microphone
+    never stops being consumed while a previous utterance is being decoded.
+    """
 
     def __init__(
         self,
@@ -20,9 +24,12 @@ class FastWhisperVoiceEngine:
         language: str = "pt",
         sample_rate: int = 16000,
         frame_ms: int = 30,
-        silence_ms: int = 360,
-        pre_roll_ms: int = 240,
-        max_utterance_s: float = 10.0,
+        silence_ms: int = 480,
+        pre_roll_ms: int = 300,
+        start_speech_ms: int = 60,
+        min_utterance_ms: int = 240,
+        max_utterance_s: float = 18.0,
+        vad_mode: int = 2,
         raw_frame_callback: Callable[[bytes], None] | None = None,
         initial_prompt: str | None = None,
         hotwords: str | None = None,
@@ -39,7 +46,8 @@ class FastWhisperVoiceEngine:
             ) from exc
 
         self.sd = sd
-        self.vad = webrtcvad.Vad(2)
+        self.vad_mode = max(0, min(3, int(vad_mode)))
+        self.vad = webrtcvad.Vad(self.vad_mode)
         self.model = WhisperModel(
             model_size,
             device="auto",
@@ -50,38 +58,37 @@ class FastWhisperVoiceEngine:
         self.raw_frame_callback = raw_frame_callback
         self.language = language
         self.initial_prompt = initial_prompt or (
-            "Astra é uma assistente local em português do Brasil. "
-            "O usuário costuma dar comandos como abrir ou fechar Discord, "
-            "Brave, Spotify, terminal e VS Code. Transcreva números, contas, "
-            "nomes de aplicativos e verbos de ação com precisão."
+            "Conversa natural em português do Brasil com a assistente Astra. "
+            "Transcreva exatamente o que a pessoa disser, incluindo nomes de "
+            "programas, caminhos, números e comandos, sem completar frases."
         )
+        # Keep this list short. Too many hotwords can bias ordinary speech.
         self.hotwords = hotwords or (
-            "Astra abrir abre abra fechar feche fecha Discord DroidCam "
-            "Brave Spotify VS Code navegador terminal volume clipboard "
-            "clicar clique scroll pausar retomar "
-            "um dois três quatro cinco seis sete oito nove dez"
+            "Astra Discord Brave Spotify VS Code terminal navegador "
+            "Downloads arquivo pasta volume clipboard"
         )
         self.input_device = input_device
         self.adaptive_retry = adaptive_retry
         self.sample_rate = int(sample_rate)
         self.capture_rate = self._resolve_capture_rate(self.sample_rate)
-        self.frame_ms = frame_ms
-        self.silence_frames = max(1, silence_ms // frame_ms)
-        self.pre_roll_frames = max(1, pre_roll_ms // frame_ms)
-        self.max_frames = max(1, int(max_utterance_s * 1000 / frame_ms))
-        self.frame_samples = int(self.sample_rate * frame_ms / 1000)
+        self.frame_ms = int(frame_ms)
+        self.silence_frames = max(1, int(silence_ms) // self.frame_ms)
+        self.pre_roll_frames = max(1, int(pre_roll_ms) // self.frame_ms)
+        self.start_speech_frames = max(1, int(start_speech_ms) // self.frame_ms)
+        self.min_speech_frames = max(1, int(min_utterance_ms) // self.frame_ms)
+        self.max_frames = max(1, int(max_utterance_s * 1000 / self.frame_ms))
+        self.tail_frames = max(1, 150 // self.frame_ms)
+        self.frame_samples = int(self.sample_rate * self.frame_ms / 1000)
         self.capture_frame_samples = int(
-            round(self.capture_rate * frame_ms / 1000)
+            round(self.capture_rate * self.frame_ms / 1000)
         )
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._decoder_thread: threading.Thread | None = None
+        self._utterances: queue.Queue[bytes | None] = queue.Queue(maxsize=4)
 
     def _resolve_capture_rate(self, target_rate: int) -> int:
-        """Use target rate when possible, otherwise capture at a native rate.
-
-        If a saved device disappeared or became invalid, fall back to the
-        current default input instead of letting the ASR thread crash.
-        """
+        """Use target rate when possible, otherwise capture at a native rate."""
         candidates = [self.input_device]
         if self.input_device is not None:
             candidates.append(None)
@@ -141,32 +148,112 @@ class FastWhisperVoiceEngine:
         converted = np.interp(new_x, old_x, src.astype(np.float32))
         return np.clip(converted, -32768, 32767).astype(np.int16).tobytes()
 
+    @staticmethod
+    def _condition_audio(audio: np.ndarray) -> np.ndarray:
+        """Cheap conditioning for quiet desktop microphones.
+
+        Removes DC offset and applies conservative gain only when speech is
+        genuinely quiet. It intentionally avoids heavy denoising libraries.
+        """
+        if audio.size == 0:
+            return audio.astype(np.float32, copy=False)
+
+        out = audio.astype(np.float32, copy=True)
+        out -= float(np.mean(out))
+        rms = float(np.sqrt(np.mean(np.square(out)) + 1e-12))
+        peak = float(np.max(np.abs(out)))
+
+        if rms < 0.003 or peak < 0.008:
+            return out
+
+        if rms < 0.055 and peak < 0.85:
+            gain = min(3.0, 0.07 / max(rms, 1e-6))
+            out *= gain
+
+        return np.clip(out, -0.98, 0.98)
+
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="astra-fast-asr", daemon=True)
+        if self._thread and self._thread.is_alive():
+            return
+        self._stop.clear()
+        self._decoder_thread = threading.Thread(
+            target=self._decode_loop,
+            name="astra-whisper-decode",
+            daemon=True,
+        )
+        self._thread = threading.Thread(
+            target=self._run,
+            name="astra-fast-asr",
+            daemon=True,
+        )
+        self._decoder_thread.start()
         self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
+        try:
+            self._utterances.put_nowait(None)
+        except queue.Full:
+            pass
         if self._thread:
             self._thread.join(timeout=1.5)
+        if self._decoder_thread:
+            self._decoder_thread.join(timeout=2.0)
+
+    def _enqueue_utterance(self, pcm: bytes) -> None:
+        if not pcm:
+            return
+        try:
+            self._utterances.put_nowait(pcm)
+            return
+        except queue.Full:
+            pass
+
+        # Prefer the newest thing the user said over stale queued audio.
+        try:
+            self._utterances.get_nowait()
+            self._utterances.put_nowait(pcm)
+            print("[asr] decoder backlog: dropped one stale utterance")
+        except (queue.Empty, queue.Full):
+            pass
+
+    def _decode_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                pcm = self._utterances.get(timeout=0.20)
+            except queue.Empty:
+                continue
+            if pcm is None:
+                return
+            try:
+                self._transcribe(pcm)
+            except Exception as exc:
+                print(f"[asr] transcription failed: {exc}")
 
     def _run(self) -> None:
-        audio_q: queue.Queue[bytes] = queue.Queue(maxsize=64)
+        audio_q: queue.Queue[bytes] = queue.Queue(maxsize=128)
         preroll = collections.deque(maxlen=self.pre_roll_frames)
         active = False
         speech: list[bytes] = []
         silent = 0
+        speech_run = 0
+        voiced = 0
 
         def callback(indata, frames, time_info, status):
             if status:
+                # PortAudio overflow/underflow is useful for diagnostics, but
+                # dropping the entire callback makes recognition worse.
+                print(f"[asr] audio status: {status}")
+            converted = self._to_target_rate(bytes(indata))
+            if not converted:
                 return
             try:
-                audio_q.put_nowait(self._to_target_rate(bytes(indata)))
+                audio_q.put_nowait(converted)
             except queue.Full:
                 try:
                     audio_q.get_nowait()
-                    audio_q.put_nowait(self._to_target_rate(bytes(indata)))
-                except queue.Empty:
+                    audio_q.put_nowait(converted)
+                except (queue.Empty, queue.Full):
                     pass
 
         with self.sd.RawInputStream(
@@ -176,7 +263,12 @@ class FastWhisperVoiceEngine:
             dtype="int16",
             channels=1,
             callback=callback,
+            latency="low",
         ):
+            print(
+                f"[asr] listening: {self.capture_rate}Hz -> {self.sample_rate}Hz, "
+                f"vad={self.vad_mode}, endpoint={self.silence_frames * self.frame_ms}ms"
+            )
             while not self._stop.is_set():
                 try:
                     frame = audio_q.get(timeout=0.15)
@@ -192,47 +284,71 @@ class FastWhisperVoiceEngine:
                     except Exception:
                         pass
 
-                is_speech = self.vad.is_speech(frame, self.sample_rate)
+                try:
+                    is_speech = self.vad.is_speech(frame, self.sample_rate)
+                except Exception:
+                    is_speech = False
 
                 if not active:
                     preroll.append(frame)
                     if is_speech:
+                        speech_run += 1
+                    else:
+                        speech_run = 0
+
+                    if speech_run >= self.start_speech_frames:
                         active = True
                         speech = list(preroll)
+                        voiced = speech_run
                         silent = 0
                     continue
 
                 speech.append(frame)
                 if is_speech:
+                    voiced += 1
                     silent = 0
                 else:
                     silent += 1
 
-                if silent >= self.silence_frames or len(speech) >= self.max_frames:
-                    utterance = b"".join(speech)
+                endpoint = (
+                    silent >= self.silence_frames
+                    and voiced >= self.min_speech_frames
+                )
+                forced = len(speech) >= self.max_frames
+                if endpoint or forced:
+                    # Keep a small natural tail but remove most endpoint silence.
+                    trim = max(0, silent - self.tail_frames)
+                    final_frames = speech[:-trim] if trim else speech
+                    self._enqueue_utterance(b"".join(final_frames))
+
                     active = False
                     speech = []
                     silent = 0
+                    speech_run = 0
+                    voiced = 0
                     preroll.clear()
-                    self._transcribe(utterance)
 
     def _transcribe(self, pcm: bytes) -> None:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         if audio.size < self.sample_rate // 4:
             return
 
+        audio = self._condition_audio(audio)
         text, confidence = self._decode(audio, beam_size=1)
+
         if self.adaptive_retry and self._needs_retry(text, confidence):
-            retry_text, retry_confidence = self._decode(audio, beam_size=4)
+            retry_text, retry_confidence = self._decode(audio, beam_size=5)
             if retry_text and (
                 not text
-                or retry_confidence >= confidence - 0.05
-                or len(retry_text) > len(text)
+                or retry_confidence >= confidence - 0.04
+                or len(retry_text.split()) > len(text.split())
             ):
                 text = retry_text
+                confidence = retry_confidence
 
-        text = text.strip()
+        text = " ".join(text.strip().split())
         if text:
+            print(f"[asr] {text} (score={confidence:.2f})")
             self.on_text(text)
 
     def _decode(self, audio: np.ndarray, beam_size: int) -> tuple[str, float]:
@@ -242,7 +358,7 @@ class FastWhisperVoiceEngine:
             task="transcribe",
             beam_size=beam_size,
             best_of=1,
-            patience=1.0,
+            patience=1.0 if beam_size == 1 else 1.2,
             temperature=0.0,
             vad_filter=False,
             condition_on_previous_text=False,
@@ -251,14 +367,15 @@ class FastWhisperVoiceEngine:
             initial_prompt=self.initial_prompt,
             hotwords=self.hotwords,
             suppress_blank=True,
-            log_prob_threshold=-1.3,
-            no_speech_threshold=0.72,
+            log_prob_threshold=-1.2,
+            no_speech_threshold=0.68,
+            compression_ratio_threshold=2.4,
         )
         items = list(segments)
         text = " ".join(seg.text.strip() for seg in items).strip()
         if not items:
             return text, -99.0
-        weights = [max(1.0, float(seg.end - seg.start)) for seg in items]
+        weights = [max(0.2, float(seg.end - seg.start)) for seg in items]
         confidence = sum(
             float(seg.avg_logprob) * weight
             for seg, weight in zip(items, weights)
@@ -272,10 +389,13 @@ class FastWhisperVoiceEngine:
             return True
         if len(cleaned) <= 2:
             return True
-        if confidence < -0.72:
+        if confidence < -0.68:
             return True
         words = cleaned.lower().split()
         if len(words) >= 3 and len(set(words)) <= max(1, len(words) // 3):
             return True
+        # Hallucinated captions/noise often arrive as punctuation-heavy junk.
+        alnum = sum(ch.isalnum() for ch in cleaned)
+        if alnum < max(2, len(cleaned) // 3):
+            return True
         return False
-
