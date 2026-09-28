@@ -117,7 +117,13 @@ def parse_gesture_control(text: str) -> tuple[str, str | None, bool | None] | No
         return ("status", None, None)
 
     enable = bool(re.search(r"\b(ativa|ativar|ative|liga|ligar|ligue|habilita|habilitar|retoma|retomar)\b", q))
-    disable = bool(re.search(r"\b(desativa|desativar|desative|desliga|desligar|desligue|pausa|pausar|bloqueia|bloquear)\b", q))
+    disable = bool(
+        re.search(
+            r"\b(desativa|desativar|desative|desliga|desligar|desligue|pausar|bloqueia|bloquear)\b",
+            q,
+        )
+        or re.search(r"^pausa\s+(?:os\s+|o\s+|a\s+)?(?:gestos|controle)", q)
+    )
     if enable == disable:
         return None
     value = enable
