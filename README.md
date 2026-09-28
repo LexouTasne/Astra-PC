@@ -1,5 +1,49 @@
 # Astra-PC
 
+> `astra` now opens the native Astra Desktop GUI by default.
+
+## Astra Desktop GUI
+
+Astra Desktop is a native Electron interface inspired by the official Hermes Desktop visual shell (MIT licensed), adapted to Astra's local backend.
+
+Run:
+
+```bash
+astra
+```
+
+Explicit desktop launch:
+
+```bash
+astra gui
+# or
+astra desktop
+```
+
+Legacy terminal panel:
+
+```bash
+astra tui
+```
+
+The first Desktop launch installs its local Electron dependency under `apps/desktop/node_modules`. Later launches reuse it.
+
+The GUI is chat-first and includes:
+
+- left navigation + local recent conversations;
+- local Astra/Qwen chat;
+- Voice control and setup;
+- safe Gesture control, tutorial and diagnostics;
+- Astra Mesh pairing/devices;
+- Camera, installation-location and update setup actions;
+- live process/activity output;
+- daemon/camera/voice/Mesh health panel;
+- dark/light appearance.
+
+Hermes attribution for the visual-shell derivation is in `apps/desktop/NOTICE` and `apps/desktop/LICENSE-HERMES-MIT.txt`.
+
+---
+
 **Astra** is a fast, local-first desktop assistant for Windows, Linux/Bazzite and macOS.
 
 It combines:
