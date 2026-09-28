@@ -11,7 +11,7 @@ import cv2
 from astra_pc.paths import data_dir
 
 
-TUTORIAL_VERSION = 3
+TUTORIAL_VERSION = 4
 HAND_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -56,7 +56,8 @@ class TutorialStep:
     instruction: str
     predicate: Callable
     hold_seconds: float = 0.0
-    timeout_seconds: float = 30.0
+    timeout_seconds: float = 35.0
+    hint: str = ""
 
 
 def _draw_hand(frame, hand) -> None:
@@ -66,64 +67,145 @@ def _draw_hand(frame, hand) -> None:
         for p in hand.points
     ]
     for a, b in HAND_CONNECTIONS:
-        cv2.line(frame, points[a], points[b], (90, 220, 255), 2, cv2.LINE_AA)
+        cv2.line(frame, points[a], points[b], (175, 175, 175), 2, cv2.LINE_AA)
     for idx, point in enumerate(points):
         radius = 5 if idx in {4, 8, 12, 16, 20} else 3
-        cv2.circle(frame, point, radius, (70, 255, 120), -1, cv2.LINE_AA)
+        shade = 245 if idx in {4, 8, 12, 16, 20} else 205
+        cv2.circle(frame, point, radius, (shade, shade, shade), -1, cv2.LINE_AA)
 
 
-def _overlay(frame, title: str, instruction: str, status: str, progress: float) -> None:
+def _put_line(frame, text: str, y: int, scale: float, shade: int, thickness: int = 1) -> None:
+    cv2.putText(
+        frame,
+        text,
+        (20, y),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        scale,
+        (shade, shade, shade),
+        thickness,
+        cv2.LINE_AA,
+    )
+
+
+def _overlay(
+    frame,
+    title: str,
+    instruction: str,
+    status: str,
+    progress: float,
+    hint: str = "",
+) -> None:
     h, w = frame.shape[:2]
-    cv2.rectangle(frame, (0, 0), (w, 118), (15, 15, 15), -1)
-    cv2.putText(
-        frame,
-        title,
-        (18, 30),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.72,
-        (255, 255, 255),
-        2,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        instruction[:92],
-        (18, 61),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.48,
-        (220, 220, 220),
-        1,
-        cv2.LINE_AA,
-    )
-    cv2.putText(
-        frame,
-        status[:92],
-        (18, 88),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.48,
-        (80, 255, 140),
-        1,
-        cv2.LINE_AA,
-    )
-    bar_w = max(1, w - 36)
-    cv2.rectangle(frame, (18, 100), (18 + bar_w, 109), (70, 70, 70), -1)
+    top_h = 146 if hint else 124
+    cv2.rectangle(frame, (0, 0), (w, top_h), (12, 12, 12), -1)
+    cv2.line(frame, (0, top_h), (w, top_h), (55, 55, 55), 1)
+
+    _put_line(frame, title, 31, 0.70, 250, 2)
+    _put_line(frame, instruction[:96], 61, 0.47, 220)
+    _put_line(frame, status[:96], 88, 0.47, 250)
+    if hint:
+        _put_line(frame, f"Dica: {hint[:88]}", 113, 0.42, 155)
+
+    bar_y = top_h - 13
+    bar_w = max(1, w - 40)
+    cv2.rectangle(frame, (20, bar_y), (20 + bar_w, bar_y + 5), (55, 55, 55), -1)
     cv2.rectangle(
         frame,
-        (18, 100),
-        (18 + int(bar_w * max(0.0, min(1.0, progress))), 109),
-        (80, 220, 120),
+        (20, bar_y),
+        (20 + int(bar_w * max(0.0, min(1.0, progress))), bar_y + 5),
+        (235, 235, 235),
         -1,
     )
-    cv2.putText(
-        frame,
-        "ESC/Q sair  |  S pular etapa",
-        (18, h - 16),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        0.44,
-        (210, 210, 210),
-        1,
-        cv2.LINE_AA,
+    _put_line(frame, "ESC/Q sair  |  S pular etapa", h - 15, 0.42, 180)
+
+
+def _steps(include_drag: bool) -> list[TutorialStep]:
+    steps = [
+        TutorialStep(
+            "1/12 - Enquadramento",
+            "Mostre uma mao inteira, incluindo pulso e pontas dos dedos.",
+            lambda hands, out: len(hands) >= 1,
+            hold_seconds=0.9,
+            hint="Mao inteira no quadro e luz vindo da frente.",
+        ),
+        TutorialStep(
+            "2/12 - Cursor",
+            "Levante apenas o indicador. Aqui o mouse real NAO se move.",
+            lambda hands, out: out.pointer is not None and out.label == "pointer",
+            hold_seconds=0.9,
+            hint="Feche medio, anelar e mindinho.",
+        ),
+        TutorialStep(
+            "3/12 - Clique esquerdo",
+            "Encoste polegar + indicador e solte.",
+            lambda hands, out: out.left_click or out.label == "click",
+            hint="Faca um toque curto; segurar e usado pelo drag opcional.",
+        ),
+        TutorialStep(
+            "4/12 - Scroll para cima",
+            "Indicador + medio levantados. Mova a mao para CIMA.",
+            lambda hands, out: out.scroll > 0 and out.label == "scroll-up",
+            hint="Mova a mao inteira, nao apenas dobre os dedos.",
+        ),
+        TutorialStep(
+            "5/12 - Scroll para baixo",
+            "Mantenha indicador + medio levantados e mova a mao para BAIXO.",
+            lambda hands, out: out.scroll < 0 and out.label == "scroll-down",
+            hint="Se inverter a direcao, a Astra zera o impulso anterior.",
+        ),
+        TutorialStep(
+            "6/12 - Clique direito",
+            "Encoste polegar + dedo medio, mantendo o indicador separado.",
+            lambda hands, out: out.right_click or out.label == "right-click",
+        ),
+        TutorialStep(
+            "7/12 - Swipe esquerda",
+            "Levante indicador + medio + anelar e mova a mao para a ESQUERDA.",
+            lambda hands, out: out.swipe == "left",
+            hint="Movimento curto e decidido; nao precisa ser rapido demais.",
+        ),
+        TutorialStep(
+            "8/12 - Swipe direita",
+            "Mesma pose de tres dedos, agora mova a mao para a DIREITA.",
+            lambda hands, out: out.swipe == "right",
+        ),
+        TutorialStep(
+            "9/12 - Zoom in",
+            "Mostre DUAS palmas abertas e afaste as maos.",
+            lambda hands, out: out.zoom_steps > 0,
+            hint="As duas maos precisam estar abertas para evitar disparos acidentais.",
+        ),
+        TutorialStep(
+            "10/12 - Zoom out",
+            "Com duas palmas abertas, aproxime as maos.",
+            lambda hands, out: out.zoom_steps < 0,
+        ),
+        TutorialStep(
+            "11/12 - Rotacao",
+            "Com duas palmas abertas, gire a linha entre as maos.",
+            lambda hands, out: out.rotate_steps != 0,
+            hint="A Astra escolhe zoom OU rotacao, nunca os dois ao mesmo tempo.",
+        ),
+    ]
+    if include_drag:
+        steps.append(
+            TutorialStep(
+                "Extra - Drag",
+                "Encoste polegar + indicador e SEGURE; mova o indicador.",
+                lambda hands, out: out.label == "drag",
+                hold_seconds=0.4,
+                hint="Drag so existe quando voce ativa --drag ou manda a Astra ativar.",
+            )
+        )
+    steps.append(
+        TutorialStep(
+            "12/12 - Pausar",
+            "Abra uma palma e SEGURE por meio segundo.",
+            lambda hands, out: out.toggle_pause,
+            hint="O hold evita pausa acidental quando voce apenas mostra a mao.",
+        )
     )
+    return steps
 
 
 def run_gesture_tutorial(
@@ -137,54 +219,21 @@ def run_gesture_tutorial(
     screen_w: int = 1920,
     screen_h: int = 1080,
 ) -> bool:
-    steps = [
-        TutorialStep(
-            "1/6 - Mostre uma mao",
-            "Deixe a mao inteira visivel e bem iluminada na camera.",
-            lambda hands, out: len(hands) >= 1,
-            hold_seconds=0.8,
-        ),
-        TutorialStep(
-            "2/6 - Indicador",
-            "Levante somente o indicador. O tutorial reconhece a pose, mas NAO move seu mouse.",
-            lambda hands, out: out.pointer is not None and out.label == "pointer",
-            hold_seconds=1.0,
-        ),
-        TutorialStep(
-            "3/6 - Clique seguro",
-            "Encoste polegar + indicador e SOLTE. O clique real sera atomico, sem segurar o botao.",
-            lambda hands, out: out.left_click or out.label == "click",
-        ),
-        TutorialStep(
-            "4/6 - Scroll",
-            "Levante indicador + medio, abaixe os outros e mova os dois para cima/baixo.",
-            lambda hands, out: out.label == "scroll",
-            hold_seconds=0.8,
-        ),
-        TutorialStep(
-            "5/6 - Clique direito",
-            "Encoste polegar + dedo medio sem encostar o indicador.",
-            lambda hands, out: out.right_click or out.label == "right-click",
-        ),
-        TutorialStep(
-            "6/6 - Pausar",
-            "Abra a palma inteira uma vez. Repita depois para voltar ao modo ativo.",
-            lambda hands, out: out.toggle_pause,
-        ),
-    ]
+    steps = _steps(engine.feature_enabled("drag"))
 
     print("\n============================================================")
-    print(" ASTRA // TUTORIAL DE GESTOS")
+    print(" ASTRA // CALIBRACAO DE GESTOS V4")
     print("============================================================")
-    print("A camera vai validar cada gesto antes do modo normal.")
-    print("Durante o tutorial, NENHUMA acao de mouse e enviada ao sistema.")
-    print("Ele apenas mostra na camera o que a Astra reconheceu.")
+    print("O tutorial valida direcao, estabilidade e conflitos de cada gesto.")
+    print("Nenhuma acao real de mouse/teclado e enviada durante a calibracao.")
     print()
 
-    window = "Astra - Tutorial de Gestos"
+    window = "Astra - Calibracao de Gestos"
     skipped = 0
     try:
-        for index, step in enumerate(steps):
+        for step in steps:
+            engine.set_paused(False)
+            engine.reset_tracking()
             matched_since = None
             started = time.monotonic()
             last_label = "idle"
@@ -223,11 +272,18 @@ def run_gesture_tutorial(
                     _draw_hand(frame, hand)
 
                 status = (
-                    f"Reconhecido: {last_label}"
+                    f"OK: {last_label}"
                     if matched
-                    else f"Vendo: {last_label} | maos: {len(hands)}"
+                    else f"Detectado: {last_label} | maos: {len(hands)}"
                 )
-                _overlay(frame, step.title, step.instruction, status, progress)
+                _overlay(
+                    frame,
+                    step.title,
+                    step.instruction,
+                    status,
+                    progress,
+                    step.hint,
+                )
                 cv2.imshow(window, frame)
                 key = cv2.waitKey(1) & 0xFF
 
@@ -244,67 +300,59 @@ def run_gesture_tutorial(
                 )
                 if complete:
                     print(f"[OK] {step.title} -> {last_label}")
-                    if index == len(steps) - 1:
-                        engine.set_paused(False)
-                    time.sleep(0.25)
+                    time.sleep(0.18)
                     break
 
                 if now - started > step.timeout_seconds:
-                    print(
-                        f"[gestures] nao consegui validar '{step.title}' em "
-                        f"{int(step.timeout_seconds)}s."
-                    )
-                    print(
-                        "Dica: afaste um pouco a camera, ilumine a mao e deixe "
-                        "todos os dedos dentro do quadro."
-                    )
+                    print(f"[gestures] nao validei '{step.title}' em {int(step.timeout_seconds)}s.")
+                    print("Dica: afaste a camera, melhore a luz e mantenha pulso + dedos no quadro.")
                     return False
 
-        # Final tutorial card.
-        for _ in range(70):
+        engine.set_paused(False)
+        engine.reset_tracking()
+
+        for _ in range(75):
             ok, frame = cap.read()
             if not ok or frame is None:
                 break
             if mirror:
                 frame = cv2.flip(frame, 1)
-            cv2.rectangle(frame, (0, 0), (frame.shape[1], frame.shape[0]), (15, 15, 15), -1)
+            cv2.rectangle(
+                frame,
+                (0, 0),
+                (frame.shape[1], frame.shape[0]),
+                (12, 12, 12),
+                -1,
+            )
             lines = [
-                "Tutorial concluido!",
-                "Modo seguro concluido!",
-                "- clique, scroll e clique direito ficam ativos",
-                "- air-mouse fica DESLIGADO por padrao",
-                "- drag fica DESLIGADO por padrao",
-                "Opcional: --air-mouse e --drag (experimentais)",
-                "O modo normal vai iniciar agora.",
+                ("Calibracao concluida", 0.78, 250),
+                ("Scroll agora detecta cima E baixo.", 0.52, 220),
+                ("Gestos possuem filtros contra jitter e conflito.", 0.52, 220),
+                ("Voce pode controlar recursos falando com a Astra:", 0.52, 220),
+                ('"desativa o scroll por gestos"', 0.48, 175),
+                ('"ativa o cursor por gestos"', 0.48, 175),
+                ('"desativa todos os gestos"', 0.48, 175),
+                ("O modo normal vai iniciar.", 0.52, 220),
             ]
-            y = 54
-            for line in lines:
-                cv2.putText(
-                    frame,
-                    line,
-                    (24, y),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.58 if y > 70 else 0.78,
-                    (240, 240, 240),
-                    2 if y <= 70 else 1,
-                    cv2.LINE_AA,
-                )
+            y = 55
+            for line, scale, shade in lines:
+                _put_line(frame, line, y, scale, shade, 2 if y == 55 else 1)
                 y += 34
             cv2.imshow(window, frame)
-            if cv2.waitKey(25) & 0xFF in (27, ord("q")):
+            if cv2.waitKey(24) & 0xFF in (27, ord("q")):
                 break
 
         if skipped == 0:
             mark_tutorial_completed()
         else:
             print(
-                f"[gestures] {skipped} etapa(s) foram puladas; "
-                "o tutorial sera oferecido novamente depois."
+                f"[gestures] {skipped} etapa(s) puladas; "
+                "a calibracao sera oferecida novamente."
             )
         return True
     except cv2.error as exc:
         print("[gestures] nao foi possivel abrir a janela do tutorial:", exc)
-        print("Use um desktop grafico ou rode: astra gestures --no-tutorial --show-camera")
+        print("Use desktop grafico ou rode: astra gestures --no-tutorial --show-camera")
         return False
     finally:
         try:
