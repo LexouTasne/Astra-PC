@@ -177,13 +177,13 @@ def _steps(include_drag: bool) -> list[TutorialStep]:
         ),
         TutorialStep(
             "10/12 - Zoom",
-            "No modo de pinça, abra polegar+indicador para aproximar e feche para afastar.",
+            "Repita: junte, segure e abra polegar+indicador; depois abra/feche para zoom.",
             lambda hands, out: out.zoom_steps != 0,
             hint="O zoom e global do Astra, nao depende do aplicativo.",
         ),
         TutorialStep(
             "11/12 - Rotacao",
-            "Ainda na pinça, gire a linha entre polegar e indicador.",
+            "Repita a entrada na pinça e depois gire a linha entre polegar e indicador.",
             lambda hands, out: out.rotate_steps != 0,
             hint="A rotacao age no viewport/tela, independente do app.",
         ),
