@@ -72,8 +72,8 @@ class AstraBrain:
         return client.chat(
             text,
             system=self._system(extra_context),
-            num_ctx=12288 if strong else 8192,
-            num_predict=420 if strong else 320,
+            num_ctx=8192 if strong else 6144,
+            num_predict=300 if strong else 220,
             temperature=0.15,
             think=False,
         )
@@ -83,8 +83,8 @@ class AstraBrain:
         return self.text_client.chat(
             text,
             system=self._system(extra_context),
-            num_ctx=4096,
-            num_predict=160,
+            num_ctx=3072,
+            num_predict=96,
             temperature=0.10,
             think=False,
         )
@@ -93,8 +93,8 @@ class AstraBrain:
         yield from self.text_client.chat_stream(
             text,
             system=self._system(extra_context),
-            num_ctx=4096,
-            num_predict=160,
+            num_ctx=3072,
+            num_predict=96,
             temperature=0.10,
             think=False,
         )
