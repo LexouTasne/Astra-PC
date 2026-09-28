@@ -14,7 +14,7 @@ class PermissionLayer:
     """Central policy for tool/skill execution."""
 
     SAFE = {
-        "open_app", "open_url", "volume", "media", "window_layout",
+        "open_app", "open_url", "close_app", "volume", "media", "window_layout",
         "status", "top_processes", "search_files", "read_file", "read_context", "hotkey",
         "git_status", "git_diff", "git_branch",
         "clipboard_read", "clipboard_write", "notify", "project_summary",
