@@ -19,7 +19,7 @@ def test_left_button_uses_current_ydotool_masks():
 def test_scroll_uses_mousemove_wheel_not_removed_mousewheel_command():
     backend, calls = backend_stub()
     backend.scroll(3)
-    assert calls == [("mousemove", "--wheel", "0", "3")]
+    assert calls == [("mousemove", "--wheel", "--", "0", "3")]
 
 
 def test_atomic_left_click_uses_single_ydotool_event():
