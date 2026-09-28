@@ -387,7 +387,7 @@ textarea, pre, .message-body, .log-view { user-select: text; }
 }
 .composer textarea::placeholder { color: #555; }
 .composer-actions { display: flex; align-items: center; gap: 5px; }
-.composer-mic, .send-btn {
+.composer-tool, .send-btn {
   width: 35px;
   height: 35px;
   display: grid;
@@ -396,8 +396,9 @@ textarea, pre, .message-body, .log-view { user-select: text; }
   border: 0;
   cursor: pointer;
 }
-.composer-mic { background: transparent; color: #666; }
-.composer-mic:hover { color: #ddd; background: #181818; }
+.composer-tool { background: transparent; color: #666; }
+.composer-tool:hover { color: #ddd; background: #181818; }
+.composer-tool:disabled { opacity: .35; cursor: default; }
 .send-btn { background: #f1f1f1; color: #0b0b0b; }
 .send-btn:hover { background: #fff; }
 .send-btn:disabled { background: #1b1b1b; color: #555; cursor: default; }
@@ -670,3 +671,77 @@ textarea, pre, .message-body, .log-view { user-select: text; }
     scroll-behavior: auto !important;
   }
 }
+
+.message-image-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.message-image {
+  display: block;
+  width: min(340px, 100%);
+  max-height: 260px;
+  object-fit: contain;
+  border-radius: 9px;
+  border: 1px solid #303030;
+  background: #0b0b0b;
+}
+.message-image-wrap span {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #777;
+  font-size: 8px;
+}
+.attachment-card {
+  pointer-events: auto;
+  width: min(780px, 100%);
+  min-height: 54px;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 30px;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 7px;
+  padding: 7px 8px;
+  border: 1px solid #292929;
+  border-radius: 11px;
+  background: #101010;
+  box-shadow: 0 12px 36px rgba(0,0,0,.25);
+}
+.attachment-card img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 7px;
+  border: 1px solid #2b2b2b;
+  background: #080808;
+}
+.attachment-card strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #d8d8d8;
+  font-size: 10px;
+  font-weight: 550;
+}
+.attachment-card span {
+  display: block;
+  margin-top: 3px;
+  color: #5f5f5f;
+  font-size: 8px;
+}
+.attachment-card button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #666;
+  cursor: pointer;
+}
+.attachment-card button:hover { background: #1a1a1a; color: #ddd; }
