@@ -22,6 +22,14 @@ class FastSpeaker:
         self._q: queue.Queue[str] = queue.Queue(maxsize=8)
         self.piper_model = Path(piper_model).expanduser() if piper_model else None
         self._stop = threading.Event()
+        self._neural = None
+        if self.piper_model and self.piper_model.exists():
+            try:
+                from astra_pc.voice.piper_tts import PiperSpeaker
+                self._neural = PiperSpeaker(self.piper_model)
+                print(f"[tts] Piper neural voice ready: {self.piper_model.name}")
+            except Exception as exc:
+                print(f"[tts] Piper unavailable, using system fallback: {exc}")
         self._thread = threading.Thread(target=self._run, name="astra-tts", daemon=True)
         self._thread.start()
 
@@ -40,6 +48,11 @@ class FastSpeaker:
                 self._q.get_nowait()
             except queue.Empty:
                 break
+        if self._neural is not None:
+            try:
+                self._neural.cancel()
+            except Exception:
+                pass
         if shutil.which("spd-say"):
             subprocess.run(
                 ["spd-say", "-C"],
@@ -67,13 +80,12 @@ class FastSpeaker:
             if not text:
                 continue
 
-            if self.piper_model and self.piper_model.exists() and shutil.which("piper"):
+            if self._neural is not None:
                 try:
-                    from astra_pc.voice.piper_tts import PiperSpeaker
-                    PiperSpeaker(self.piper_model).say(text)
+                    self._neural.say(text)
                     continue
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"[tts] neural synthesis failed: {exc}")
 
             if shutil.which("spd-say"):
                 subprocess.run(
@@ -187,11 +199,8 @@ class AstraVoiceAssistant:
                 print(f"[warmup] text model skipped: {exc}")
         else:
             print("[warmup] resident text model already managed by daemon")
-        threading.Thread(
-            target=self._warm_vision,
-            name="astra-vision-warmup",
-            daemon=True,
-        ).start()
+        # Do not preload the vision model in voice-only mode. It can contend
+        # with the fast text model and is loaded lazily if a screen request occurs.
         self._voice.start()
         try:
             while not self._stop.is_set():
@@ -272,8 +281,13 @@ class AstraVoiceAssistant:
                 shot.unlink(missing_ok=True)
             path = "vision"
         elif self.request_handler is not None:
-            answer = self.request_handler(request)
-            path = "daemon"
+            try:
+                answer = self.request_handler(request)
+                path = "daemon"
+            except Exception as exc:
+                print(f"[voice] daemon request delayed/failed, direct fallback: {exc}")
+                answer = self.brain.ask(self._short_prompt(request))
+                path = "text-fallback"
         else:
             answer = self.brain.ask(self._short_prompt(request))
             path = "text"
