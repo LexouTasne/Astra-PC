@@ -72,6 +72,16 @@ class CommandRouter:
             return "Fui criada por Richard Mateus, também conhecido como Lex."
         if q in {"ta ai", "tá aí", "voce ta ai", "você tá aí", "esta ai", "está aí"}:
             return "Tô aqui."
+        if q in {
+            "o que voce consegue fazer", "o que você consegue fazer",
+            "oque voce consegue fazer", "oque você consegue fazer",
+            "o que voce faz", "o que você faz", "suas capacidades",
+        }:
+            return (
+                "Posso controlar mouse e teclado, abrir e fechar apps, mexer em arquivos, "
+                "usar a tela e visão, controlar gestos, zoom e rotação global, voz, "
+                "clipboard, Git, sistema e automações."
+            )
         if q in {"obrigado", "valeu", "vlw"}:
             return "Tamo junto."
         return None
