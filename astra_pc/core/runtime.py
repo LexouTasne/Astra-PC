@@ -7,6 +7,7 @@ import cv2
 
 from astra_pc.config import AstraConfig
 from astra_pc.gestures.context_mapper import GestureContextMapper
+from astra_pc.gestures.control import GestureControlState, apply_gesture_control
 from astra_pc.gestures.engine import GestureEngine
 from astra_pc.input.factory import create_input_backend
 from astra_pc.perception.monitors import get_monitors
@@ -48,6 +49,9 @@ class AstraRuntime:
         self.context_mapper = GestureContextMapper(
             config.data.get("gesture_profiles", {})
         )
+        self.gesture_control = GestureControlState()
+        self._gesture_system_enabled = True
+        self._pointer_control_enabled = self.pointer_enabled
         self.screen_origin = (0, 0)
 
     def run(self) -> None:
@@ -76,6 +80,7 @@ class AstraRuntime:
             gesture_cfg.get("drag_enabled", False) or self.drag
         )
         gestures = GestureEngine(gesture_cfg)
+        self._sync_gesture_control(gestures, gesture_cfg, force=True)
 
         monitors = get_monitors()
         if monitors:
@@ -121,9 +126,9 @@ class AstraRuntime:
         self._start_voice_if_requested(gestures)
 
         print("Astra v0.8 gesture engine online.")
-        print("Modo seguro: air-mouse OFF | drag OFF")
-        print("Polegar+indicador = clique | indicador+medio = scroll")
-        print("Polegar+medio = clique direito | palma aberta = pausar/retomar")
+        print("Gestos v2: estabilização, scroll bidirecional e controle por Astra")
+        print("Polegar+indicador = clique | indicador+medio = scroll para cima/baixo")
+        print("Polegar+medio = clique direito | palma aberta (segure) = pausar/retomar")
         if self.pointer_enabled:
             print("Air-mouse experimental ATIVO")
         if gesture_cfg.get("drag_enabled"):
@@ -142,7 +147,11 @@ class AstraRuntime:
                 if bool(cam_cfg.get("mirror", True)):
                     frame = cv2.flip(frame, 1)
 
-                hands = tracker.process(frame)
+                self._sync_gesture_control(gestures, gesture_cfg)
+                if self._gesture_system_enabled:
+                    hands = tracker.process(frame)
+                else:
+                    hands = []
                 if had_hands and not hands and self.backend:
                     self.backend.failsafe_release()
                     self._smooth_xy = None
@@ -151,7 +160,7 @@ class AstraRuntime:
                 out = gestures.update(hands)
                 label = out.label
 
-                if out.pointer is not None and self.pointer_enabled:
+                if out.pointer is not None and self._pointer_control_enabled:
                     x, y = self._map_pointer(out.pointer, screen_w, screen_h)
                     if self.backend:
                         self.backend.move(x, y)
@@ -181,7 +190,7 @@ class AstraRuntime:
                     color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
                     cv2.putText(
                         frame,
-                        f"ASTRA 0.8 | {label} | {'PAUSED' if gestures.paused else 'ACTIVE'}",
+                        f"ASTRA 0.8 | {label} | {'OFF' if not self._gesture_system_enabled else ('PAUSED' if gestures.paused else 'ACTIVE')}",
                         (18, 32),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
@@ -232,6 +241,42 @@ class AstraRuntime:
             cv2.destroyAllWindows()
             print("Astra offline.")
 
+    def _sync_gesture_control(
+        self,
+        gestures: GestureEngine,
+        gesture_cfg: dict,
+        *,
+        force: bool = False,
+    ) -> None:
+        snap = self.gesture_control.snapshot(force=force)
+        overrides = dict(snap.get("overrides", {}))
+        enabled = bool(snap.get("enabled", True))
+
+        defaults = {
+            "pointer": self.pointer_enabled,
+            "click": True,
+            "right_click": True,
+            "scroll": True,
+            "swipe": True,
+            "zoom": True,
+            "rotate": True,
+            "pause": True,
+            "drag": bool(gesture_cfg.get("drag_enabled", False)),
+        }
+        for name, default in defaults.items():
+            gestures.set_feature_enabled(name, bool(overrides.get(name, default)))
+
+        pointer_enabled = bool(overrides.get("pointer", self.pointer_enabled))
+        changed = (
+            enabled != self._gesture_system_enabled
+            or pointer_enabled != self._pointer_control_enabled
+        )
+        if changed and self.backend:
+            self.backend.failsafe_release()
+
+        self._gesture_system_enabled = enabled
+        self._pointer_control_enabled = enabled and pointer_enabled
+
     def _dispatch_action(self, name: str) -> None:
         actions = self.context_mapper.actions(self.actions)
         keys = actions.get(name, [])
@@ -274,6 +319,11 @@ class AstraRuntime:
         from astra_pc.voice.vosk_engine import VoskVoiceEngine
 
         def on_text(text: str) -> None:
+            control_message = apply_gesture_control(self.gesture_control, text)
+            if control_message:
+                print(f"[voice] {control_message}")
+                return
+
             result = self.router.execute(text)
             if result.message == "pause_gestures":
                 gestures.set_paused(True)
