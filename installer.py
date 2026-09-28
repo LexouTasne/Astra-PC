@@ -620,6 +620,9 @@ def comfyui_available() -> bool:
 
 
 def comfyui_location() -> Path:
+    override = os.getenv("ASTRA_DATA_DIR")
+    if override:
+        return Path(override).expanduser() / "ComfyUI"
     if platform.system() == "Windows":
         base = Path(os.getenv("LOCALAPPDATA", Path.home()))
         return base / "Astra-PC" / "ComfyUI"
@@ -704,16 +707,62 @@ def install_accessibility_support() -> bool:
     return False
 
 
+def install_metadata_path() -> Path:
+    if platform.system() == "Windows":
+        base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC"
+    elif platform.system() == "Darwin":
+        base = Path.home() / "Library" / "Application Support" / "Astra-PC"
+    else:
+        base = Path.home() / ".config" / "astra-pc"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "install.json"
+
+
+def write_install_metadata() -> None:
+    payload = {
+        "install_dir": str(ROOT),
+        "python": str(sys.executable),
+        "runtime_dir": str(Path(sys.executable).resolve().parent.parent),
+        "data_dir": os.getenv("ASTRA_DATA_DIR", ""),
+        "cache_dir": os.getenv("ASTRA_CACHE_DIR", ""),
+        "installed_at": time.time(),
+    }
+    install_metadata_path().write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _storage_env() -> dict[str, str]:
+    out = {"ASTRA_INSTALL_DIR": str(ROOT)}
+    for key in ("ASTRA_DATA_DIR", "ASTRA_CACHE_DIR"):
+        value = os.getenv(key)
+        if value:
+            out[key] = value
+    return out
+
+
 def install_user_launcher() -> Path | None:
+    envs = _storage_env()
+    write_install_metadata()
+
     if platform.system() == "Windows":
         base = Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC" / "bin"
         base.mkdir(parents=True, exist_ok=True)
         launcher = base / "astra.cmd"
-        launcher.write_text(
-            "@echo off\r\n"
-            f'"{sys.executable}" -m astra_pc %*\r\n',
-            encoding="utf-8",
-        )
+        lines = [
+            "@echo off",
+            f'if not exist "{ROOT / "astra_pc"}" (',
+            f'  echo Astra install is unavailable: {ROOT}',
+            "  echo If Astra is on a removable drive, connect/mount it first.",
+            "  exit /b 72",
+            ")",
+        ]
+        for key, value in envs.items():
+            lines.append(f'set "{key}={value}"')
+        lines.append(f'"{sys.executable}" -m astra_pc %*')
+        launcher.write_text("\r\n".join(lines) + "\r\n", encoding="utf-8")
+
         ps = shutil.which("powershell") or shutil.which("pwsh")
         if ps:
             script = (
@@ -731,17 +780,26 @@ def install_user_launcher() -> Path | None:
     base = Path.home() / ".local" / "bin"
     base.mkdir(parents=True, exist_ok=True)
     launcher = base / "astra"
-    launcher.write_text(
-        "#!/usr/bin/env sh\n"
-        f"exec {shlex.quote(str(sys.executable))} -m astra_pc \"$@\"\n",
-        encoding="utf-8",
+    lines = [
+        "#!/usr/bin/env sh",
+        f"ASTRA_ROOT={shlex.quote(str(ROOT))}",
+        'if [ ! -d "$ASTRA_ROOT/astra_pc" ]; then',
+        '  echo "Astra install is unavailable: $ASTRA_ROOT" >&2',
+        '  echo "If Astra is on a removable drive, connect/mount it first." >&2',
+        "  exit 72",
+        "fi",
+    ]
+    for key, value in envs.items():
+        lines.append(f"export {key}={shlex.quote(value)}")
+    lines.append(
+        f"exec {shlex.quote(str(sys.executable))} -m astra_pc \"$@\""
     )
+    launcher.write_text("\n".join(lines) + "\n", encoding="utf-8")
     launcher.chmod(0o755)
     print("Astra launcher:", launcher)
     if str(base) not in os.getenv("PATH", "").split(os.pathsep):
         print(f"NOTE: add {base} to PATH to run 'astra' from any terminal.")
     return launcher
-
 
 def install_autostart(with_voice: bool = True) -> bool:
     args = ["-m", "astra_pc", "daemon"]
@@ -752,27 +810,35 @@ def install_autostart(with_voice: bool = True) -> bool:
         service_dir = Path.home() / ".config" / "systemd" / "user"
         service_dir.mkdir(parents=True, exist_ok=True)
         service = service_dir / "astra-pc.service"
-        command = " ".join([str(sys.executable), *args])
+        def sq(value: str) -> str:
+            return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+        command = " ".join(sq(str(x)) for x in [sys.executable, *args])
+        env_lines = ["Environment=PYTHONUNBUFFERED=1"]
+        for key, value in _storage_env().items():
+            env_lines.append(f"Environment={sq(f'{key}={value}')}")
         service.write_text(
             "[Unit]\n"
             "Description=Astra-PC resident local assistant\n"
-            "After=graphical-session.target network.target\n\n"
+            "After=graphical-session.target network.target\n"
+            f"ConditionPathExists={sq(str(ROOT / 'astra_pc'))}\n\n"
             "[Service]\n"
             "Type=simple\n"
-            f"WorkingDirectory={ROOT}\n"
+            f"WorkingDirectory={sq(str(ROOT))}\n"
             f"ExecStart={command}\n"
             "Restart=on-failure\n"
             "RestartSec=2\n"
-            "Environment=PYTHONUNBUFFERED=1\n\n"
-            "[Install]\n"
-            "WantedBy=default.target\n",
+            + "\n".join(env_lines)
+            + "\n\n[Install]\nWantedBy=default.target\n",
             encoding="utf-8",
         )
         if not command_exists("systemctl"):
             print("systemctl was not found; service file was written but not enabled.")
             return False
         run(["systemctl", "--user", "daemon-reload"])
-        return run(["systemctl", "--user", "enable", "--now", "astra-pc.service"]).returncode == 0
+        enabled = run(["systemctl", "--user", "enable", "astra-pc.service"]).returncode == 0
+        restarted = run(["systemctl", "--user", "restart", "astra-pc.service"]).returncode == 0
+        return enabled and restarted
 
     if platform.system() == "Windows":
         appdata = os.getenv("APPDATA")
@@ -782,10 +848,16 @@ def install_autostart(with_voice: bool = True) -> bool:
         startup.mkdir(parents=True, exist_ok=True)
         script = startup / "Astra-PC.cmd"
         extra = " --voice" if with_voice else ""
+        env_lines = "".join(
+            f'set "{key}={value}"\\r\\n'
+            for key, value in _storage_env().items()
+        )
         script.write_text(
-            "@echo off\r\n"
-            f'cd /d "{ROOT}"\r\n'
-            f'start "" /min "{sys.executable}" -m astra_pc daemon{extra}\r\n',
+            "@echo off\\r\\n"
+            + env_lines
+            + f'if not exist "{ROOT / "astra_pc"}" exit /b 72\\r\\n'
+            + f'cd /d "{ROOT}"\\r\\n'
+            + f'start "" /min "{sys.executable}" -m astra_pc daemon{extra}\\r\\n',
             encoding="utf-8",
         )
         print("Startup script installed:", script)
@@ -1140,7 +1212,12 @@ def enable_ydotool_service() -> bool:
 
 
 DROIDCAM_DEFAULT_PORT = 4747
-DROIDCAM_STATE_PATH = Path.home() / ".local" / "share" / "astra-pc" / "droidcam.json"
+DROIDCAM_STATE_PATH = Path(
+    os.getenv(
+        "ASTRA_DATA_DIR",
+        str(Path.home() / ".local" / "share" / "astra-pc"),
+    )
+).expanduser() / "droidcam.json"
 
 
 def parse_droidcam_endpoint(value: str | None) -> tuple[str, int] | None:
