@@ -11,7 +11,7 @@ import cv2
 from astra_pc.paths import data_dir
 
 
-TUTORIAL_VERSION = 4
+TUTORIAL_VERSION = 5
 HAND_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -170,21 +170,22 @@ def _steps(include_drag: bool) -> list[TutorialStep]:
             lambda hands, out: out.swipe == "right",
         ),
         TutorialStep(
-            "9/12 - Zoom in",
-            "Mostre DUAS palmas abertas e afaste as maos.",
-            lambda hands, out: out.zoom_steps > 0,
-            hint="As duas maos precisam estar abertas para evitar disparos acidentais.",
+            "9/12 - Entrar no zoom",
+            "Levante so o indicador. Junte polegar + indicador, segure um instante e abra.",
+            lambda hands, out: out.label in {"transform-ready", "transform"},
+            hint="E a pinça natural de foto: nao precisa abrir a palma.",
         ),
         TutorialStep(
-            "10/12 - Zoom out",
-            "Com duas palmas abertas, aproxime as maos.",
-            lambda hands, out: out.zoom_steps < 0,
+            "10/12 - Zoom",
+            "No modo de pinça, abra polegar+indicador para aproximar e feche para afastar.",
+            lambda hands, out: out.zoom_steps != 0,
+            hint="O zoom e global do Astra, nao depende do aplicativo.",
         ),
         TutorialStep(
             "11/12 - Rotacao",
-            "Com duas palmas abertas, gire a linha entre as maos.",
+            "Ainda na pinça, gire a linha entre polegar e indicador.",
             lambda hands, out: out.rotate_steps != 0,
-            hint="A Astra escolhe zoom OU rotacao, nunca os dois ao mesmo tempo.",
+            hint="A rotacao age no viewport/tela, independente do app.",
         ),
     ]
     if include_drag:
@@ -222,7 +223,7 @@ def run_gesture_tutorial(
     steps = _steps(engine.feature_enabled("drag"))
 
     print("\n============================================================")
-    print(" ASTRA // CALIBRACAO DE GESTOS V4")
+    print(" ASTRA // CALIBRACAO DE GESTOS V5")
     print("============================================================")
     print("O tutorial valida direcao, estabilidade e conflitos de cada gesto.")
     print("Nenhuma acao real de mouse/teclado e enviada durante a calibracao.")
