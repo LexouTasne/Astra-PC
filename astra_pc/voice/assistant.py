@@ -173,7 +173,7 @@ class AstraVoiceAssistant:
         silence_ms: int = 480,
         pre_roll_ms: int = 300,
         start_speech_ms: int = 60,
-        min_utterance_ms: int = 240,
+        min_utterance_ms: int = 180,
         max_utterance_s: float = 18.0,
         vad_mode: int = 2,
         adaptive_retry: bool = True,
