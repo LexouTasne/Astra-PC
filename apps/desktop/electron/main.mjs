@@ -222,6 +222,15 @@ ipcMain.handle('astra:choose-image', async () => {
   }
 })
 
+ipcMain.handle('astra:dictate', async () => {
+  try {
+    const text = await collectAstra(['listen-once', '--timeout', '15'], 30000)
+    return { ok: true, text: String(text || '').trim() }
+  } catch (error) {
+    return { ok: false, error: friendlyError(error) }
+  }
+})
+
 ipcMain.handle('astra:run', async (_event, payload) => {
   const action = String(payload?.command || '')
   const base = actionMap[action]
