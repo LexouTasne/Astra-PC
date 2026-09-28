@@ -461,6 +461,50 @@ def _run_home(args, config) -> None:
             continue
 
 
+def _ollama_reachable(host: str = "http://127.0.0.1:11434") -> bool:
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(host.rstrip("/") + "/api/tags", timeout=0.8) as response:
+            return response.status == 200
+    except Exception:
+        return False
+
+
+def _ensure_runtime_ollama(config) -> bool:
+    import os
+    import shutil
+    import time
+
+    ai = config.data.get("ai", {})
+    host = str(ai.get("host", "http://127.0.0.1:11434"))
+    if _ollama_reachable(host):
+        return True
+
+    binary = shutil.which("ollama")
+    if not binary:
+        return False
+
+    # Avoid duplicate servers when another process is already starting it.
+    try:
+        subprocess.Popen(
+            [binary, "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env={**os.environ},
+        )
+    except Exception:
+        return False
+
+    for _ in range(24):
+        if _ollama_reachable(host):
+            return True
+        time.sleep(0.2)
+    return False
+
+
 def _run_ask(args, config) -> None:
     from .core.ipc import daemon_request
 
@@ -478,8 +522,21 @@ def _run_ask(args, config) -> None:
     except Exception:
         pass
 
-    brain, _ = _brain(config)
-    print(brain.ask(args.prompt))
+    if not _ensure_runtime_ollama(config):
+        raise SystemExit(
+            "Astra AI está offline. Não consegui iniciar o Ollama automaticamente."
+        )
+
+    try:
+        brain, _ = _brain(config)
+        print(brain.ask(args.prompt))
+    except Exception as exc:
+        message = str(exc).strip()
+        if "Ollama is not reachable" in message or "Connection refused" in message:
+            raise SystemExit(
+                "Astra AI está offline. Abra a tela Sistema e tente reparar o modelo local."
+            ) from None
+        raise SystemExit(f"Astra não conseguiu responder: {message}") from None
 
 
 def _run_see(args, config) -> None:
