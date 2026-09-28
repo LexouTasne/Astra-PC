@@ -7,12 +7,14 @@ from pathlib import Path
 
 from pynput import keyboard, mouse
 
+from astra_pc.paths import data_dir
+
 
 class ActionRecorder:
     """Record local mouse/keyboard activity for explicit 'learn this' sessions."""
 
     def __init__(self, storage: str | Path | None = None):
-        self.storage = Path(storage or (Path.home() / ".local" / "share" / "astra-pc" / "macros")).expanduser()
+        self.storage = Path(storage or (data_dir() / "macros")).expanduser()
         self.storage.mkdir(parents=True, exist_ok=True)
         self.events: list[dict] = []
         self._started = 0.0
