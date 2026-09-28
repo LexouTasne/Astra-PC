@@ -10,7 +10,9 @@
     "max_hands": 2,
     "min_detection_confidence": 0.65,
     "min_tracking_confidence": 0.6,
-    "model_complexity": 1
+    "model_complexity": 1,
+    "landmark_smoothing": 0.72,
+    "landmark_snap_distance": 0.1
   },
   "pointer": {
     "enabled": false,
