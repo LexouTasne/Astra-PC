@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import threading
 import time
@@ -350,7 +351,7 @@ class AstraDaemon:
             return False
 
     def _voice_request(self, text: str) -> str:
-        result = self.handle({"type": "ask", "text": text})
+        result = self.handle({"type": "ask", "text": text, "voice": True})
         return str(result.get("message") or result.get("error") or "")
 
     def _warm_text(self) -> None:
@@ -562,6 +563,7 @@ class AstraDaemon:
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         kind = str(request.get("type", "ask"))
+        voice_mode = bool(request.get("voice", False))
 
         if kind == "ping":
             return {"ok": True, "version": "0.8", "status": "ready"}
@@ -816,7 +818,8 @@ class AstraDaemon:
             )
         )
         cacheable = (
-            not planning_needed
+            not voice_mode
+            and not planning_needed
             and not context_sensitive
             and not any(
                 word in lowered
@@ -843,14 +846,16 @@ class AstraDaemon:
             if cached is not None:
                 return {"ok": True, "message": cached, "cached": True}
 
-        # GUI/chat uses the stronger 2B brain with recent conversation,
-        # real skill manifest and relevant memory. The 0.6B model is reserved
-        # for the low-latency voice path.
+        # Voice and GUI/chat now share the same daemon conversation state.
+        # Voice keeps the shorter spoken-generation budget, but receives the
+        # exact same recent chat, memory, files and desktop context.
         if not planning_needed:
             memories = self._semantic_context(text)
-            answer = self.brain.ask(
-                text,
-                extra_context=self._assistant_context(memories),
+            context = self._assistant_context(memories)
+            answer = (
+                self.brain.ask_voice(text, extra_context=context)
+                if voice_mode
+                else self.brain.ask(text, extra_context=context)
             )
             if cacheable and answer:
                 self.cache.put(cache_key, answer)
@@ -863,6 +868,23 @@ class AstraDaemon:
             }
 
         planner_text = text
+
+        # Resolve app pronouns deterministically from the most recent app action.
+        # Example: "fecha o Discord" -> "é Discord" -> "fecha esse aplicativo".
+        last_app = self.memory.get("last_app_name", None)
+        if last_app and re.search(
+            r"\b(?:abre|abra|abrir|feche|fecha|fechar|encerre|encerra|encerrar)\b",
+            lowered,
+        ):
+            app_ref = re.compile(
+                r"\b(?:esse|este|o)\s+(?:aplicativo|app|programa)\b|"
+                r"\b(?:ele|dele)\b",
+                re.I,
+            )
+            if app_ref.search(planner_text):
+                planner_text = app_ref.sub(str(last_app), planner_text)
+                print(f"[context] app reference -> {last_app}")
+
         if not followup_plan and not AstraPlanner.extract_path(text):
             q = lowered
             if any(
@@ -904,10 +926,19 @@ class AstraDaemon:
         self.memory.add("request", {"text": text, "plan": plan})
 
         if plan.get("type") == "skill":
+            skill_name = str(plan.get("skill", ""))
+            action_name = str(plan.get("action", ""))
+            skill_args = dict(plan.get("args", {}))
+
+            if skill_name == "apps" and action_name in {"open_app", "close_app"}:
+                app_name = str(skill_args.get("name", "")).strip(" .,;:!?")
+                if app_name:
+                    self.memory.set("last_app_name", app_name)
+
             result = self.skills.execute(
-                str(plan.get("skill", "")),
-                str(plan.get("action", "")),
-                dict(plan.get("args", {})),
+                skill_name,
+                action_name,
+                skill_args,
                 confirmed=bool(request.get("confirmed", False)),
             )
             reply = {
@@ -947,11 +978,13 @@ class AstraDaemon:
             )
             return reply
 
+        context = self._assistant_context(memories)
         answer = str(
             plan.get("answer")
-            or self.brain.ask(
-                text,
-                extra_context=self._assistant_context(memories),
+            or (
+                self.brain.ask_voice(text, extra_context=context)
+                if voice_mode
+                else self.brain.ask(text, extra_context=context)
             )
         )
         self._record_chat(text, answer)
