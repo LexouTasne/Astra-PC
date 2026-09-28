@@ -2655,14 +2655,14 @@ def main() -> int:
     ))
 
     if system == "Linux" and session.lower() == "wayland":
+        if command_exists("ydotool"):
+            ydotool_ok, ydotool_detail = ydotool_cli_health()
+        else:
+            ydotool_ok, ydotool_detail = False, "ydotool missing"
         checks.append(Check(
             "Wayland input backend",
-            command_exists("ydotool"),
-            (
-                "ydotool found; " + ydotool_cli_health()[1]
-                if command_exists("ydotool")
-                else "ydotool missing"
-            ),
+            ydotool_ok,
+            ydotool_detail,
             False,
         ))
 
