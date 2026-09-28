@@ -65,10 +65,12 @@
   },
   "voice": {
     "engine": "fast",
-    "whisper_model": "base",
+    "whisper_model": "small",
     "language": "pt",
     "wake_word": "astra",
-    "silence_ms": 330,
+    "silence_ms": 260,
+    "pre_roll_ms": 200,
+    "adaptive_retry": true,
     "target_response_ms": 7000,
     "conversation_window": 9,
     "dedicated_wakeword": {
