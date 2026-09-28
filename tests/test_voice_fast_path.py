@@ -57,3 +57,13 @@ def test_spoken_time_1300_uses_singular():
 def test_spoken_time_special_cases():
     assert CommandRouter._format_time(0, 0) == "Agora é meia-noite."
     assert CommandRouter._format_time(12, 30) == "Agora é meio-dia e meia."
+
+
+def test_instant_identity_replies_do_not_need_model():
+    router = CommandRouter()
+    assert router.execute("qual seu nome?").message == "Meu nome é Astra."
+    assert "Richard Mateus" in router.execute("quem te criou?").message
+
+
+def test_instant_presence_reply():
+    assert CommandRouter().execute("Astra, tá aí?").message == "Tô aqui."
