@@ -558,6 +558,64 @@ class AstraDaemon:
         except Exception:
             return []
 
+    def _execute_skill_plan(
+        self,
+        text: str,
+        plan: dict[str, Any],
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        skill_name = str(plan.get("skill", ""))
+        action_name = str(plan.get("action", ""))
+        skill_args = dict(plan.get("args", {}))
+
+        if skill_name == "apps" and action_name in {"open_app", "close_app"}:
+            app_name = str(skill_args.get("name", "")).strip(" .,;:!?")
+            if app_name:
+                self.memory.set("last_app_name", app_name)
+
+        result = self.skills.execute(
+            skill_name,
+            action_name,
+            skill_args,
+            confirmed=bool(request.get("confirmed", False)),
+        )
+        reply = {
+            "ok": result.ok,
+            "message": result.message,
+            "data": result.data,
+            "plan": plan,
+        }
+        if result.ok and skill_name == "files":
+            data = result.data or {}
+            used_path = (
+                data.get("path")
+                or skill_args.get("path")
+                or skill_args.get("root")
+            )
+            if used_path:
+                self.memory.set("last_files_path", str(used_path))
+            if action_name == "list_dir":
+                entries = data.get("entries") if isinstance(data, dict) else None
+                if isinstance(entries, list):
+                    self.memory.set(
+                        "last_files_listing",
+                        {
+                            "path": str(data.get("path") or used_path or ""),
+                            "display_path": str(data.get("display_path") or ""),
+                            "entries": entries[:250],
+                            "total": int(data.get("total", len(entries))),
+                        },
+                    )
+
+        self._record_chat(text, result.message)
+        self._background(
+            self.semantic.remember,
+            f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
+            kind="action",
+            metadata={"ok": result.ok, "profile": self.context.current.profile},
+        )
+        return reply
+
     def _handle_connection(self, conn: socket.socket) -> None:
         with conn:
             file = conn.makefile("rwb")
@@ -800,6 +858,15 @@ class AstraDaemon:
                 "plan": {"type": "answer", "path": "system-local-math"},
             }
 
+        instant_answer = CommandRouter._instant_reply(text)
+        if instant_answer is not None:
+            self._record_chat(text, instant_answer)
+            return {
+                "ok": True,
+                "message": instant_answer,
+                "plan": {"type": "answer", "path": "instant-local"},
+            }
+
         gesture_answer = apply_gesture_control(self.gesture_control, text)
         if gesture_answer is not None:
             self._record_chat(text, gesture_answer)
@@ -840,7 +907,14 @@ class AstraDaemon:
 
         last_listing = self.memory.get("last_files_listing", None)
         followup_plan = self.planner.file_followup_plan(text, last_listing)
-        planning_needed = bool(followup_plan) or self.planner.needs_planning(text)
+        direct_plan = followup_plan or self.planner._fast_plan(
+            text,
+            self.context.current,
+        )
+        if direct_plan and direct_plan.get("type") == "skill":
+            return self._execute_skill_plan(text, direct_plan, request)
+
+        planning_needed = self.planner.needs_planning(text)
         context_sensitive = (
             len(text.split()) <= 7
             or any(
@@ -961,57 +1035,7 @@ class AstraDaemon:
         self.memory.add("request", {"text": text, "plan": plan})
 
         if plan.get("type") == "skill":
-            skill_name = str(plan.get("skill", ""))
-            action_name = str(plan.get("action", ""))
-            skill_args = dict(plan.get("args", {}))
-
-            if skill_name == "apps" and action_name in {"open_app", "close_app"}:
-                app_name = str(skill_args.get("name", "")).strip(" .,;:!?")
-                if app_name:
-                    self.memory.set("last_app_name", app_name)
-
-            result = self.skills.execute(
-                skill_name,
-                action_name,
-                skill_args,
-                confirmed=bool(request.get("confirmed", False)),
-            )
-            reply = {
-                "ok": result.ok,
-                "message": result.message,
-                "data": result.data,
-                "plan": plan,
-            }
-            if result.ok and str(plan.get("skill", "")) == "files":
-                args = dict(plan.get("args", {}))
-                data = result.data or {}
-                used_path = (
-                    data.get("path")
-                    or args.get("path")
-                    or args.get("root")
-                )
-                if used_path:
-                    self.memory.set("last_files_path", str(used_path))
-                if str(plan.get("action", "")) == "list_dir":
-                    entries = data.get("entries") if isinstance(data, dict) else None
-                    if isinstance(entries, list):
-                        self.memory.set(
-                            "last_files_listing",
-                            {
-                                "path": str(data.get("path") or used_path or ""),
-                                "display_path": str(data.get("display_path") or ""),
-                                "entries": entries[:250],
-                                "total": int(data.get("total", len(entries))),
-                            },
-                        )
-            self._record_chat(text, result.message)
-            self._background(
-                self.semantic.remember,
-                f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
-                kind="action",
-                metadata={"ok": result.ok, "profile": self.context.current.profile},
-            )
-            return reply
+            return self._execute_skill_plan(text, plan, request)
 
         context = self._assistant_context(memories)
         answer = str(
