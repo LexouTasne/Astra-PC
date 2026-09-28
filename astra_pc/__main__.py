@@ -67,6 +67,41 @@ def _run_setup(args, config) -> None:
         cmd.append("--camera-only")
     elif args.setup_command == "full":
         pass
+    elif args.setup_command == "location":
+        destination = Path(args.path).expanduser().resolve()
+        if sys.platform == "win32":
+            script = installer.parent / "install.ps1"
+            ps = "powershell"
+            cmd = [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(script),
+                "-InstallDir",
+                str(destination),
+            ]
+            if args.portable_data:
+                cmd.append("-PortableData")
+            if args.yes:
+                cmd.append("-Yes")
+            raise SystemExit(subprocess.call(cmd, cwd=str(installer.parent)))
+        script = installer.parent / "install.sh"
+        cmd = ["bash", str(script), "--dest", str(destination)]
+        if args.portable_data:
+            cmd.append("--portable-data")
+        if args.runtime_dir:
+            cmd.extend(["--runtime-dir", str(Path(args.runtime_dir).expanduser())])
+        if args.data_dir:
+            cmd.extend(["--data-dir", str(Path(args.data_dir).expanduser())])
+        if args.yes:
+            cmd.append("--yes")
+        try:
+            raise SystemExit(subprocess.call(cmd, cwd=str(installer.parent)))
+        except KeyboardInterrupt:
+            print("\nMudança de local cancelada.")
+            raise SystemExit(130)
     else:
         raise SystemExit("setup inválido")
 
@@ -133,6 +168,7 @@ def _run_home(args, config) -> None:
     print("5 - Awareness / status")
     print("6 - Configurar/reparar câmera")
     print("7 - Rodar instalador completo")
+    print("8 - Instalar/migrar Astra para outra pasta/disco")
     print("0 - Sair")
 
     if not sys.stdin.isatty():
@@ -160,13 +196,31 @@ def _run_home(args, config) -> None:
             "5": ["awareness"],
             "6": ["setup", "camera"],
             "7": ["setup", "full"],
+            "8": ["setup", "location"],
         }
         if choice in {"0", "q", "quit", "sair"}:
             return
         command = commands.get(choice)
         if not command:
-            print("Escolha 0-7.")
+            print("Escolha 0-8.")
             continue
+        if choice == "8":
+            try:
+                target = input(
+                    "Nova pasta do Astra (ex: /mnt/SSD/Astra-PC ou /run/media/USB/Astra-PC): "
+                ).strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                continue
+            if not target:
+                print("Nenhum destino informado.")
+                continue
+            portable = input(
+                "Guardar memória/cache junto com o Astra nesse disco? [y/N] "
+            ).strip().lower() in {"y", "yes", "s", "sim"}
+            command = ["setup", "location", target]
+            if portable:
+                command.append("--portable-data")
         try:
             subprocess.call([sys.executable, "-m", "astra_pc", *command])
         except KeyboardInterrupt:
@@ -408,7 +462,8 @@ def _run_learn(args, config) -> None:
 def _run_replay(args, config) -> None:
     from pathlib import Path
     from .automation.replay import ActionReplayer
-    base = Path.home() / ".local" / "share" / "astra-pc" / "macros"
+    from .paths import data_dir
+    base = data_dir() / "macros"
     path = Path(args.path_or_name).expanduser()
     if not path.exists():
         path = base / (args.path_or_name.lower().replace(" ", "-") + ".json")
@@ -679,6 +734,16 @@ def build_parser() -> argparse.ArgumentParser:
     setup_full = setup_sub.add_parser("full", help="run the complete guided installer")
     setup_full.add_argument("--yes", action="store_true")
     setup_full.add_argument("--allow-layering", action="store_true")
+
+    setup_location = setup_sub.add_parser(
+        "location",
+        help="install/migrate Astra to another folder, disk or USB drive",
+    )
+    setup_location.add_argument("path")
+    setup_location.add_argument("--portable-data", action="store_true")
+    setup_location.add_argument("--runtime-dir", default=None)
+    setup_location.add_argument("--data-dir", default=None)
+    setup_location.add_argument("--yes", action="store_true")
 
     daemon = sub.add_parser("daemon", help="run the resident Astra core")
     daemon.add_argument("--voice", action="store_true", help="keep Astra listening in the daemon")
