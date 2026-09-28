@@ -15,7 +15,17 @@ def create_input_backend() -> InputBackend:
     if system == "linux" and wayland:
         try:
             return YdotoolBackend()
-        except RuntimeError:
-            return PynputBackend()
+        except RuntimeError as exc:
+            if os.getenv("ASTRA_ALLOW_PYNPUT_WAYLAND_FALLBACK") == "1":
+                print(
+                    "[input] ydotool unavailable; using explicitly enabled "
+                    f"pynput Wayland fallback: {exc}"
+                )
+                return PynputBackend()
+            raise RuntimeError(
+                "Wayland input is not ready. Astra gestures require a healthy "
+                f"ydotool/ydotoold backend on Wayland. Detail: {exc}. "
+                "Run: astra setup gestures"
+            ) from exc
 
     return PynputBackend()
