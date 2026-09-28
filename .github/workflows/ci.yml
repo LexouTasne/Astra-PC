@@ -66,6 +66,29 @@ jobs:
           PY
 
 
+  linux-natural-voice:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Piper neural TTS
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[tts-natural]"
+      - name: Validate Piper Python API
+        run: |
+          python - <<'PY'
+          from piper import PiperVoice, SynthesisConfig
+          from astra_pc.voice.piper_tts import DEFAULT_PIPER_VOICE
+          assert DEFAULT_PIPER_VOICE.startswith("pt_BR-")
+          assert PiperVoice is not None
+          assert SynthesisConfig is not None
+          print("Piper neural TTS API OK")
+          PY
+
+
   windows:
     runs-on: windows-latest
     steps:
