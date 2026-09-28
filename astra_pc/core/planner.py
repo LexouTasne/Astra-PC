@@ -12,9 +12,44 @@ from astra_pc.skills.manager import SkillManager
 class AstraPlanner:
     """Deterministic routes first, local model only when necessary."""
 
+    ACTIONISH = re.compile(
+        r"^\s*(?:por\s+favor\s+)?(?:"
+        r"abra|abre|abrir|feche|fecha|fechar|clique|clica|clicar|"
+        r"digite|digita|escreva|escreve|copie|copia|cole|cola|"
+        r"mova|move|renomeie|renomear|apague|apagar|delete|deletar|"
+        r"execute|executa|rodar|rode|inicie|iniciar|pare|pausar|"
+        r"pause|play|toque|volume|mute|desmute|maximize|minimize|"
+        r"troque|mude|salve|crie|criar|git\b|pytest\b"
+        r")",
+        re.I,
+    )
+
     def __init__(self, brain: AstraBrain, skills: SkillManager):
         self.brain = brain
         self.skills = skills
+
+    @classmethod
+    def needs_planning(cls, text: str) -> bool:
+        q = " ".join(text.lower().strip().split())
+        if cls.ACTIONISH.search(q):
+            return True
+        return any(
+            phrase in q
+            for phrase in (
+                "status do pc",
+                "status do computador",
+                "status do sistema",
+                "processos pesados",
+                "top processos",
+                "o que está pesando",
+                "o que esta pesando",
+                "ler clipboard",
+                "área de transferência",
+                "area de transferencia",
+                "rodar rotina",
+                "executar rotina",
+            )
+        )
 
     def plan(
         self,
