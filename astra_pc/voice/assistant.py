@@ -338,6 +338,17 @@ class AstraVoiceAssistant:
         if quick.handled and quick.message not in {"pause_gestures", "resume_gestures"}:
             answer = quick.message
             path = "command"
+        elif self.request_handler is not None:
+            # Resident voice must use the daemon for *every* non-instant turn.
+            # That keeps voice, chat, files, actions and references on one shared
+            # conversation state instead of maintaining a separate "voice brain".
+            try:
+                answer = self.request_handler(request)
+                path = "daemon-context"
+            except Exception as exc:
+                print(f"[voice] daemon context failed, local fallback: {exc}")
+                answer = self.brain.ask_voice(self._short_prompt(request))
+                path = "text-fallback-2b"
         elif self._needs_screen(request):
             shot = capture_screen()
             try:
@@ -346,21 +357,8 @@ class AstraVoiceAssistant:
                 shot.unlink(missing_ok=True)
             path = "vision"
         else:
-            # PC actions go through the daemon/tools. Ordinary conversation stays
-            # local and streams immediately from the hot 0.6B text model.
-            from astra_pc.core.planner import AstraPlanner
-
-            if self.request_handler is not None and AstraPlanner.needs_planning(request):
-                try:
-                    answer = self.request_handler(request)
-                    path = "daemon-action"
-                except Exception as exc:
-                    print(f"[voice] daemon action failed, local fallback: {exc}")
-                    answer = self.brain.ask_voice(self._short_prompt(request))
-                    path = "text-fallback-2b"
-            else:
-                answer, already_spoken = self._stream_conversation(request)
-                path = "text-stream-2b"
+            answer, already_spoken = self._stream_conversation(request)
+            path = "text-stream-2b"
 
         answer = (answer or "").strip()
         if not answer:
