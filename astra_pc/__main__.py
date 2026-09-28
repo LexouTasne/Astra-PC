@@ -785,6 +785,84 @@ def _run_voice(args, config) -> None:
                 print(f"[voice] could not restore resident listener: {exc}")
 
 
+def _run_listen_once(args, config) -> None:
+    import queue as queue_mod
+    from .core.ipc import daemon_request
+    from .voice.fast_whisper import FastWhisperVoiceEngine
+    from .voice.piper_tts import load_voice_state
+
+    voice_cfg = config.data.get("voice", {})
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+    restore_resident_voice = False
+
+    try:
+        status = daemon_request(
+            {"type": "voice.status"},
+            host=host,
+            port=port,
+            timeout=0.8,
+        )
+        if status.get("active"):
+            stopped = daemon_request(
+                {"type": "voice.stop"},
+                host=host,
+                port=port,
+                timeout=3.0,
+            )
+            restore_resident_voice = bool(stopped.get("ok"))
+            if restore_resident_voice:
+                __import__("time").sleep(0.15)
+    except Exception:
+        pass
+
+    voice_state = load_voice_state()
+    input_device = voice_state.get("input_device_name") or None
+    if not input_device and voice_state.get("input_device_index") is not None:
+        input_device = int(voice_state["input_device_index"])
+
+    result_q: queue_mod.Queue[str] = queue_mod.Queue(maxsize=1)
+    engine = FastWhisperVoiceEngine(
+        lambda text: result_q.put_nowait(text) if not result_q.full() else None,
+        model_size=(
+            voice_state.get("whisper_model")
+            or voice_cfg.get("whisper_model", "small")
+        ),
+        language=voice_state.get("language") or voice_cfg.get("language", "pt"),
+        input_device=input_device,
+        silence_ms=int(voice_state.get("silence_ms", voice_cfg.get("silence_ms", 480))),
+        pre_roll_ms=int(voice_state.get("pre_roll_ms", voice_cfg.get("pre_roll_ms", 300))),
+        start_speech_ms=int(voice_state.get("start_speech_ms", voice_cfg.get("start_speech_ms", 60))),
+        min_utterance_ms=int(voice_state.get("min_utterance_ms", voice_cfg.get("min_utterance_ms", 240))),
+        max_utterance_s=min(
+            float(args.timeout),
+            float(voice_state.get("max_utterance_s", voice_cfg.get("max_utterance_s", 18.0))),
+        ),
+        vad_mode=int(voice_state.get("vad_mode", voice_cfg.get("vad_mode", 2))),
+        adaptive_retry=bool(voice_state.get("adaptive_retry", True)),
+    )
+    engine.start()
+    try:
+        try:
+            text = result_q.get(timeout=max(2.0, float(args.timeout)))
+        except queue_mod.Empty:
+            raise SystemExit("Não ouvi uma frase completa. Tente novamente.")
+        print(text)
+    finally:
+        engine.stop()
+        if restore_resident_voice:
+            try:
+                daemon_request(
+                    {"type": "voice.start"},
+                    host=host,
+                    port=port,
+                    timeout=3.0,
+                )
+            except Exception:
+                pass
+
+
 def _run_daemon(args, config) -> None:
     from .core.daemon import AstraDaemon
     AstraDaemon(config).run(
@@ -1094,6 +1172,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("chat", help="interactive local Astra chat")
 
+    listen_once = sub.add_parser("listen-once", help=argparse.SUPPRESS)
+    listen_once.add_argument("--timeout", type=float, default=15.0)
+
     voice = sub.add_parser("voice", help="wake-word local voice assistant")
     voice.add_argument("--voice-model", type=Path, default=None, help="Vosk model path for fallback engine")
     voice.add_argument("--wake-word", default="astra")
@@ -1278,6 +1359,7 @@ def main() -> None:
         "screen": _run_screen,
         "video": _run_video,
         "chat": _run_chat,
+        "listen-once": _run_listen_once,
         "voice": _run_voice,
         "benchmark": _run_benchmark,
         "awareness": _run_awareness,
