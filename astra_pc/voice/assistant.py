@@ -22,6 +22,8 @@ class FastSpeaker:
         self._q: queue.Queue[str] = queue.Queue(maxsize=8)
         self.piper_model = Path(piper_model).expanduser() if piper_model else None
         self._stop = threading.Event()
+        self._speaking = threading.Event()
+        self._last_finished = 0.0
         self._neural = None
         if self.piper_model and self.piper_model.exists():
             try:
@@ -32,6 +34,11 @@ class FastSpeaker:
                 print(f"[tts] Piper unavailable, using system fallback: {exc}")
         self._thread = threading.Thread(target=self._run, name="astra-tts", daemon=True)
         self._thread.start()
+
+    def is_busy(self, grace_ms: int = 300) -> bool:
+        if self._speaking.is_set():
+            return True
+        return (time.monotonic() - self._last_finished) * 1000.0 < grace_ms
 
     def say(self, text: str) -> None:
         text = text.strip()
@@ -80,45 +87,50 @@ class FastSpeaker:
             if not text:
                 continue
 
-            if self._neural is not None:
-                try:
-                    self._neural.say(text)
+            self._speaking.set()
+            try:
+                if self._neural is not None:
+                    try:
+                        self._neural.say(text)
+                        continue
+                    except Exception as exc:
+                        print(f"[tts] neural synthesis failed: {exc}")
+
+                if shutil.which("spd-say"):
+                    subprocess.run(
+                        ["spd-say", "-w", text],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
                     continue
-                except Exception as exc:
-                    print(f"[tts] neural synthesis failed: {exc}")
 
-            if shutil.which("spd-say"):
-                subprocess.run(
-                    ["spd-say", "-w", text],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-                continue
-
-            if __import__("os").name == "nt":
-                safe = text.replace("'", "''")
-                ps = (
-                    "Add-Type -AssemblyName System.Speech; "
-                    "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
-                    f"$s.Speak('{safe}')"
-                )
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command", ps],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                )
-                continue
-
-            if engine is None:
-                try:
-                    import pyttsx3
-                    engine = pyttsx3.init()
-                except Exception:
+                if __import__("os").name == "nt":
+                    safe = text.replace("'", "''")
+                    ps = (
+                        "Add-Type -AssemblyName System.Speech; "
+                        "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                        f"$s.Speak('{safe}')"
+                    )
+                    subprocess.run(
+                        ["powershell", "-NoProfile", "-Command", ps],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        check=False,
+                    )
                     continue
-            engine.say(text)
-            engine.runAndWait()
+
+                if engine is None:
+                    try:
+                        import pyttsx3
+                        engine = pyttsx3.init()
+                    except Exception:
+                        continue
+                engine.say(text)
+                engine.runAndWait()
+            finally:
+                self._speaking.clear()
+                self._last_finished = time.monotonic()
 
 
 class AstraVoiceAssistant:
@@ -137,6 +149,10 @@ class AstraVoiceAssistant:
         wakeword_model: str | Path | None = None,
         wakeword_threshold: float = 0.55,
         piper_model: str | Path | None = None,
+        input_device: int | str | None = None,
+        silence_ms: int = 260,
+        pre_roll_ms: int = 200,
+        adaptive_retry: bool = True,
     ):
         self.brain = brain
         self.model_path = model_path
@@ -166,11 +182,13 @@ class AstraVoiceAssistant:
                 self._on_text,
                 model_size=whisper_model,
                 language=language,
-                silence_ms=330,
-                pre_roll_ms=240,
+                silence_ms=silence_ms,
+                pre_roll_ms=pre_roll_ms,
                 raw_frame_callback=(
                     self._wake_detector.process_pcm if self._wake_detector else None
                 ),
+                input_device=input_device,
+                adaptive_retry=adaptive_retry,
             )
         else:
             if model_path is None:
@@ -235,6 +253,17 @@ class AstraVoiceAssistant:
         pos = normalized.find(self.wake_word)
         now = time.monotonic()
 
+        # Without hardware AEC, desktop speakers can be re-captured by the mic.
+        # Ignore ASR while Astra is speaking (plus a tiny tail) unless the user
+        # explicitly addresses Astra with a stop/cancel phrase.
+        if self.speaker and self.speaker.is_busy():
+            stop_words = ("para", "pare", "cala", "cancelar", "stop", "silêncio", "silencio")
+            if pos >= 0 and any(word in normalized for word in stop_words):
+                self.speaker.cancel()
+                self._conversation_until = 0.0
+                print("[barge-in] speech cancelled")
+            return
+
         if pos >= 0:
             request = text[pos + len(self.wake_word):].strip(" ,:;-")
             self._conversation_until = now + self.conversation_window
@@ -268,6 +297,7 @@ class AstraVoiceAssistant:
     def _answer(self, request: str, heard_at: float) -> None:
         started = time.perf_counter()
         print("You>", request)
+        already_spoken = False
 
         quick = self.router.execute(request)
         if quick.handled and quick.message not in {"pause_gestures", "resume_gestures"}:
@@ -280,17 +310,27 @@ class AstraVoiceAssistant:
             finally:
                 shot.unlink(missing_ok=True)
             path = "vision"
-        elif self.request_handler is not None:
-            try:
-                answer = self.request_handler(request)
-                path = "daemon"
-            except Exception as exc:
-                print(f"[voice] daemon request delayed/failed, direct fallback: {exc}")
-                answer = self.brain.ask(self._short_prompt(request))
-                path = "text-fallback"
         else:
-            answer = self.brain.ask(self._short_prompt(request))
-            path = "text"
+            # PC actions go through the daemon/tools. Ordinary conversation stays
+            # local and streams immediately from the hot 0.6B text model.
+            from astra_pc.core.planner import AstraPlanner
+
+            if self.request_handler is not None and AstraPlanner.needs_planning(request):
+                try:
+                    answer = self.request_handler(request)
+                    path = "daemon-action"
+                except Exception as exc:
+                    print(f"[voice] daemon action failed, local fallback: {exc}")
+                    answer = self.brain.ask_fast(self._short_prompt(request))
+                    path = "text-fallback"
+            else:
+                answer, already_spoken = self._stream_conversation(request)
+                path = "text-stream"
+
+        answer = (answer or "").strip()
+        if not answer:
+            answer = "Não consegui gerar a resposta. Tenta de novo."
+            path += "-empty"
 
         finished = time.perf_counter()
         model_ms = (finished - started) * 1000.0
@@ -298,7 +338,49 @@ class AstraVoiceAssistant:
         print(f"Astra> {answer}")
         print(f"[latency] path={path} model={model_ms:.0f}ms after_asr={total_ms:.0f}ms")
         self._conversation_until = time.monotonic() + self.conversation_window
-        self._speak(answer)
+        if not already_spoken:
+            self._speak(answer)
+
+    def _stream_conversation(self, request: str) -> tuple[str, bool]:
+        full = ""
+        speech_buffer = ""
+        spoke = False
+        prompt = self._short_prompt(request)
+
+        try:
+            for piece in self.brain.ask_fast_stream(prompt):
+                full += piece
+                speech_buffer += piece
+
+                # Start TTS as soon as one natural phrase is complete rather than
+                # waiting for the full model answer.
+                if self.speaker and self._speech_chunk_ready(speech_buffer):
+                    chunk = speech_buffer.strip()
+                    if chunk:
+                        self.speaker.say(chunk)
+                        spoke = True
+                    speech_buffer = ""
+
+            if self.speaker and speech_buffer.strip():
+                self.speaker.say(speech_buffer.strip())
+                spoke = True
+        except Exception as exc:
+            print(f"[voice] streaming model fallback: {exc}")
+            full = self.brain.ask_fast(prompt)
+            spoke = False
+
+        return full.strip(), spoke
+
+    @staticmethod
+    def _speech_chunk_ready(text: str) -> bool:
+        stripped = text.strip()
+        if len(stripped) < 24:
+            return False
+        if stripped[-1:] in ".!?;:":
+            return True
+        # Prevent a very long first sentence from delaying speech too much.
+        return len(stripped) >= 110 and stripped.endswith((" ", ","))
+
 
     @staticmethod
     def _needs_screen(request: str) -> bool:
@@ -318,7 +400,8 @@ class AstraVoiceAssistant:
     @staticmethod
     def _short_prompt(request: str) -> str:
         return (
-            "Responda em português de forma direta e curta, idealmente em até 3 frases. "
+            "Responda SOMENTE em português do Brasil, de forma natural, direta e curta. "
+            "Para voz, use no máximo 3 frases e não explique seu raciocínio. Pedido: "
             + request
         )
 
