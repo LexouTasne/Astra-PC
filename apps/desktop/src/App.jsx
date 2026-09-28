@@ -50,6 +50,7 @@ const EMPTY_STATUS = {
   camera: { available: false, label: '—' },
   voice: { configured: false, microphone: '—', asr: '—', tts: '—' },
   mesh: { enabled: true, online: false },
+  ai: { online: false },
   model: '—',
   platform: '—'
 }
@@ -78,7 +79,7 @@ function AstraMark() {
   )
 }
 
-function Sidebar({ page, setPage, collapsed, setCollapsed }) {
+function Sidebar({ page, setPage, collapsed, setCollapsed, status }) {
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-top drag-region">
@@ -110,8 +111,13 @@ function Sidebar({ page, setPage, collapsed, setCollapsed }) {
 
       <div className="sidebar-foot">
         <div className="mini-status">
-          <StatusDot online />
-          {!collapsed && <div><strong>Local-first</strong><span>Sem cloud obrigatório</span></div>}
+          <StatusDot online={!!status?.ai?.online} pending={!!status?.daemon?.starting} />
+          {!collapsed && (
+            <div>
+              <strong>{status?.ai?.online ? 'IA local pronta' : 'IA local offline'}</strong>
+              <span>{status?.ai?.online ? 'Ollama conectado' : 'Tentando iniciar'}</span>
+            </div>
+          )}
         </div>
         {!collapsed && <div className="build-label">ASTRA 0.9 · DESKTOP</div>}
       </div>
@@ -178,6 +184,7 @@ function RightRail({ status, onRefresh, visible, setVisible }) {
 
       <div className="rail-section">
         <span className="section-label">DISPOSITIVOS</span>
+        <StatRow icon={Cpu} label="IA local" value={status.ai?.online ? status.model || 'Online' : 'Offline'} online={!!status.ai?.online} />
         <StatRow icon={Camera} label="Câmera" value={status.camera?.label || '—'} online={!!status.camera?.available} />
         <StatRow icon={Mic2} label="Microfone" value={status.voice?.microphone || '—'} online={!!status.voice?.configured} />
         <StatRow icon={Wifi} label="Mesh" value={status.mesh?.online ? 'Online' : 'Offline'} online={!!status.mesh?.online} />
@@ -197,23 +204,27 @@ function RightRail({ status, onRefresh, visible, setVisible }) {
   )
 }
 
-function EmptyChat() {
+function EmptyChat({ onPrompt, aiOnline }) {
   return (
     <div className="empty-chat">
       <div className="hero-mark"><AstraMark /></div>
-      <Pill tone="accent"><Sparkles size={12} /> ASTRA DESKTOP</Pill>
+      <Pill><Sparkles size={12} /> ASTRA</Pill>
       <h2>O que você quer fazer?</h2>
-      <p>Converse, controle o PC, configure voz, teste gestos ou conecte outro dispositivo.</p>
+      <p>
+        {aiOnline
+          ? 'Converse com a Astra ou peça uma ação no seu PC.'
+          : 'A IA local está iniciando. Você já pode tentar enviar uma mensagem.'}
+      </p>
       <div className="suggestions">
-        <button>O que está aberto no meu PC?</button>
-        <button>Fecha o Discord</button>
-        <button>Como está o sistema?</button>
+        <button onClick={() => onPrompt('O que está aberto no meu PC?')}>O que está aberto no meu PC?</button>
+        <button onClick={() => onPrompt('Fecha o Discord')}>Fecha o Discord</button>
+        <button onClick={() => onPrompt('Como está o sistema?')}>Como está o sistema?</button>
       </div>
     </div>
   )
 }
 
-function ChatPage({ ask }) {
+function ChatPage({ ask, status }) {
   const [messages, setMessages] = useState([])
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
@@ -223,24 +234,26 @@ function ChatPage({ ask }) {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, busy])
 
-  const submit = async () => {
-    const text = value.trim()
+  const submit = async (override = null) => {
+    const text = String(override ?? value).trim()
     if (!text || busy) return
-    setValue('')
+    if (override === null) setValue('')
     setMessages(prev => [...prev, { role: 'user', text }])
     setBusy(true)
     const result = await ask(text)
     setBusy(false)
     setMessages(prev => [...prev, {
       role: 'assistant',
-      text: result.ok ? result.answer : `Erro: ${result.error || 'falha desconhecida'}`
+      text: result.ok
+        ? result.answer
+        : (result.error || 'Astra local está indisponível. Tente novamente em alguns segundos.')
     }])
   }
 
   return (
     <div className="chat-page">
       <div className="chat-scroll">
-        {messages.length === 0 ? <EmptyChat /> : (
+        {messages.length === 0 ? <EmptyChat onPrompt={submit} aiOnline={!!status?.ai?.online} /> : (
           <div className="messages">
             {messages.map((message, index) => (
               <div key={index} className={`message ${message.role}`}>
@@ -404,7 +417,7 @@ function SystemPage({ status, refresh, run }) {
       <div className="system-grid">
         {[
           ['Daemon', status.daemon?.online ? 'Online' : status.daemon?.starting ? 'Iniciando' : 'Offline', Power, status.daemon?.online],
-          ['Modelo', status.model || '—', Cpu, true],
+          ['IA local', status.ai?.online ? status.model || 'Online' : 'Offline', Cpu, status.ai?.online],
           ['Câmera', status.camera?.label || '—', Camera, status.camera?.available],
           ['Mesh', status.mesh?.online ? 'Online' : 'Offline', Wifi, status.mesh?.online],
           ['ASR', status.voice?.asr || '—', Headphones, status.voice?.configured],
@@ -552,7 +565,7 @@ export default function App() {
   const [title, subtitle] = pageMeta(page)
 
   const content = useMemo(() => ({
-    chat: <ChatPage ask={ask} />,
+    chat: <ChatPage ask={ask} status={status} />,
     voice: <VoicePage run={run} processes={processes} status={status} />,
     gestures: <GesturesPage run={run} processes={processes} />,
     mesh: <MeshPage run={run} processes={processes} status={status} />,
@@ -564,7 +577,7 @@ export default function App() {
     <div className="app-shell">
       <div className="ambient ambient-a" />
       <div className="ambient ambient-b" />
-      <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} />
+      <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} status={status} />
       <main className="main-shell">
         <Titlebar title={title} subtitle={subtitle} />
         <div className="workspace">
