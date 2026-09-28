@@ -66,7 +66,7 @@ def _run_setup(args, config) -> None:
     if args.setup_command == "camera":
         cmd.append("--camera-only")
     elif args.setup_command == "full":
-        pass
+        cmd.append("--full")
     elif args.setup_command == "location":
         destination = Path(args.path).expanduser().resolve()
         if sys.platform == "win32":
