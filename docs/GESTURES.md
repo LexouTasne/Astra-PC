@@ -1,4 +1,4 @@
-# Astra gestures v2
+# Astra gestures v3
 
 Astra's gesture system is a deterministic local controller. The LLM does not decide whether a hand movement is a click, scroll or pause gesture.
 
@@ -40,11 +40,13 @@ astra setup gestures
 | Move the two-finger pose downward | Scroll down |
 | Thumb + middle pinch | Right click |
 | Three fingers raised + horizontal motion | Swipe left/right |
-| Two open palms move apart/together | Zoom in/out |
-| Two open palms rotate around each other | Rotate action |
+| Thumb + index quick pinch/release | Left click |
+| Thumb + index pinch, hold briefly, then open | Enter Astra transform mode |
+| In transform mode, open/close thumb + index | Global Astra zoom |
+| In transform mode, twist thumb-index line | Screen rotation |
 | One open palm held briefly | Pause/resume gesture control |
 
-Two-hand transforms require **two open hands**, which prevents an accidental second hand entering the camera from stealing pointer/click control.
+Zoom and rotation no longer require two open palms. A quick thumb-index pinch is still a click; holding the pinch briefly and opening it enters transform mode. This keeps the familiar photo pinch gesture without confusing it with normal clicks.
 
 The open-palm pause gesture requires a short hold. Simply showing an open hand for a moment should not toggle the system.
 
@@ -79,9 +81,9 @@ Tutorial v4 validates the system one gesture at a time:
 6. right click;
 7. swipe left;
 8. swipe right;
-9. zoom in;
-10. zoom out;
-11. rotation;
+9. enter thumb-index transform mode;
+10. global pinch zoom;
+11. thumb-index rotation;
 12. open-palm pause.
 
 If drag is enabled, an extra drag calibration step is inserted.
@@ -183,3 +185,29 @@ Astra releases held mouse state when:
 - a live control configuration changes.
 
 This prevents a stale drag/button-down from remaining active after a camera or control-state transition.
+
+
+## Astra Viewport
+
+Gesture zoom no longer sends Ctrl+plus/Ctrl+minus to the focused application. Astra routes zoom through a system-wide viewport backend. On KDE/Wayland the backend enables KWin's workspace Zoom effect and drives the global Meta+= / Meta+- / Meta+0 controls, so the zoom works on desktop content even when the focused application has no built-in zoom.
+
+Rotation is system-level as well. On KDE it targets the primary output with kscreen-doctor and uses deliberate thumb-index twists to avoid accidental display rotations.
+
+## Direct mouse and keyboard control
+
+The resident daemon exposes a dedicated input skill. Examples:
+
+```text
+Astra, mova o mouse pra 800, 400.
+Astra, clique.
+Astra, clique direito.
+Astra, digite teste de teclado.
+Astra, scroll pra baixo.
+Astra, pressione Ctrl C.
+Astra, aumenta o zoom.
+Astra, reseta o zoom.
+Astra, gira a tela para a direita.
+Astra, reseta a rotação.
+```
+
+Clear local commands use deterministic fast paths and do not require an LLM planning call.
