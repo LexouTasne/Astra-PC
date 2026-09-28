@@ -614,7 +614,7 @@ class AstraDaemon:
         # Ordinary conversation should not pay the desktop-planner cost.
         # This keeps voice/chat latency low and avoids an extra model call.
         if not self.planner.needs_planning(text):
-            answer = self.brain.ask(text)
+            answer = self.brain.ask_fast(text)
             if cacheable and answer:
                 self.cache.put(cache_key, answer)
             self._background(self._remember_conversation, text, answer)
