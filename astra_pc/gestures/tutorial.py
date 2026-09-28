@@ -11,7 +11,7 @@ import cv2
 from astra_pc.paths import data_dir
 
 
-TUTORIAL_VERSION = 2
+TUTORIAL_VERSION = 3
 HAND_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -139,41 +139,35 @@ def run_gesture_tutorial(
 ) -> bool:
     steps = [
         TutorialStep(
-            "1/7 - Mostre uma mao",
+            "1/6 - Mostre uma mao",
             "Deixe a mao inteira visivel e bem iluminada na camera.",
             lambda hands, out: len(hands) >= 1,
             hold_seconds=0.8,
         ),
         TutorialStep(
-            "2/7 - Ponteiro",
-            "Levante somente o indicador e mova ele devagar. O cursor deve acompanhar.",
+            "2/6 - Indicador",
+            "Levante somente o indicador. O tutorial reconhece a pose, mas NAO move seu mouse.",
             lambda hands, out: out.pointer is not None and out.label == "pointer",
-            hold_seconds=1.2,
+            hold_seconds=1.0,
         ),
         TutorialStep(
-            "3/7 - Clique",
-            "Encoste polegar + indicador e solte. Isso e o clique esquerdo.",
-            lambda hands, out: out.label in {"pinch", "click"},
+            "3/6 - Clique seguro",
+            "Encoste polegar + indicador e SOLTE. O clique real sera atomico, sem segurar o botao.",
+            lambda hands, out: out.left_click or out.label == "click",
         ),
         TutorialStep(
-            "4/7 - Arrastar",
-            "Polegar + indicador: segure a pinca por um instante e mova a mao.",
-            lambda hands, out: out.label == "drag",
-            hold_seconds=0.55,
-        ),
-        TutorialStep(
-            "5/7 - Scroll",
+            "4/6 - Scroll",
             "Levante indicador + medio, abaixe os outros e mova os dois para cima/baixo.",
             lambda hands, out: out.label == "scroll",
             hold_seconds=0.8,
         ),
         TutorialStep(
-            "6/7 - Clique direito",
+            "5/6 - Clique direito",
             "Encoste polegar + dedo medio sem encostar o indicador.",
             lambda hands, out: out.right_click or out.label == "right-click",
         ),
         TutorialStep(
-            "7/7 - Pausar",
+            "6/6 - Pausar",
             "Abra a palma inteira uma vez. Repita depois para voltar ao modo ativo.",
             lambda hands, out: out.toggle_pause,
         ),
@@ -183,8 +177,8 @@ def run_gesture_tutorial(
     print(" ASTRA // TUTORIAL DE GESTOS")
     print("============================================================")
     print("A camera vai validar cada gesto antes do modo normal.")
-    print("Durante o tutorial, apenas o movimento do ponteiro e enviado ao sistema.")
-    print("Cliques/scroll ficam em modo treino para nao apertar nada sem querer.")
+    print("Durante o tutorial, NENHUMA acao de mouse e enviada ao sistema.")
+    print("Ele apenas mostra na camera o que a Astra reconheceu.")
     print()
 
     window = "Astra - Tutorial de Gestos"
@@ -209,17 +203,6 @@ def run_gesture_tutorial(
                 hands = tracker.process(frame)
                 out = engine.update(hands)
                 last_label = out.label
-
-                # Only pointer movement is live in tutorial so the user can
-                # verify that the OS input backend actually works.
-                if (
-                    index == 1
-                    and out.pointer is not None
-                    and backend is not None
-                    and map_pointer is not None
-                ):
-                    x, y = map_pointer(out.pointer, screen_w, screen_h)
-                    backend.move(x, y)
 
                 matched = bool(step.predicate(hands, out))
                 now = time.monotonic()
@@ -287,10 +270,11 @@ def run_gesture_tutorial(
             cv2.rectangle(frame, (0, 0), (frame.shape[1], frame.shape[0]), (15, 15, 15), -1)
             lines = [
                 "Tutorial concluido!",
-                "Avancados:",
-                "- 2 maos afastando/aproximando = zoom",
-                "- girar 2 maos = rotacao",
-                "- 3 dedos + movimento lateral = swipe",
+                "Modo seguro concluido!",
+                "- clique, scroll e clique direito ficam ativos",
+                "- air-mouse fica DESLIGADO por padrao",
+                "- drag fica DESLIGADO por padrao",
+                "Opcional: --air-mouse e --drag (experimentais)",
                 "O modo normal vai iniciar agora.",
             ]
             y = 54
