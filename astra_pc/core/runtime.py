@@ -80,7 +80,6 @@ class AstraRuntime:
             gesture_cfg.get("drag_enabled", False) or self.drag
         )
         gestures = GestureEngine(gesture_cfg)
-        self._sync_gesture_control(gestures, gesture_cfg, force=True)
 
         monitors = get_monitors()
         if monitors:
@@ -123,6 +122,7 @@ class AstraRuntime:
             gestures.set_paused(False)
             self._smooth_xy = None
 
+        self._sync_gesture_control(gestures, gesture_cfg, force=True)
         self._start_voice_if_requested(gestures)
 
         print("Astra v0.8 gesture engine online.")
