@@ -363,13 +363,6 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); newSession()
   }
 })
-document.addEventListener('click', event => {
-  const view = event.target.closest?.('[data-view]')
-  if (view) setView(view.dataset.view)
-  const action = event.target.closest?.('[data-action]')
-  if (action && !action.closest('.suggestions')) runAction(action.dataset.action)
-})
-
 bindDynamic()
 renderRecents()
 renderMessages([])
