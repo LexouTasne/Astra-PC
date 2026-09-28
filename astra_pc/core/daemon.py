@@ -129,6 +129,8 @@ class AstraDaemon:
         self._voice_lock = threading.RLock()
         self.mesh_server = None
         self.mesh_sensor_state: dict[str, dict[str, Any]] = {}
+        self._chat_history: list[tuple[str, str]] = []
+        self._chat_lock = threading.RLock()
 
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
@@ -410,6 +412,57 @@ class AstraDaemon:
         except Exception:
             pass
 
+    def _record_chat(self, user_text: str, answer: str) -> None:
+        if not user_text or not answer:
+            return
+        with self._chat_lock:
+            self._chat_history.append((user_text, answer))
+            if len(self._chat_history) > 12:
+                self._chat_history = self._chat_history[-12:]
+
+    def _assistant_context(
+        self,
+        memories: list[dict[str, Any]] | None = None,
+    ) -> str:
+        current = self.context.current
+        skills = self.skills.describe()
+        with self._chat_lock:
+            recent = list(self._chat_history[-6:])
+
+        parts = [
+            f"Perfil atual: {current.profile}",
+            f"Janela ativa: {current.active_window or 'desconhecida'}",
+            f"Diretório atual do desktop: {current.cwd or 'desconhecido'}",
+            "Skills disponíveis: "
+            + "; ".join(
+                f"{item.get('name')}: {item.get('description')}"
+                for item in skills
+            ),
+        ]
+        if recent:
+            parts.append(
+                "Conversa recente:\n"
+                + "\n".join(
+                    f"Usuário: {user}\nAstra: {answer}"
+                    for user, answer in recent
+                )
+            )
+        if memories:
+            parts.append(
+                "Memórias relevantes:\n"
+                + json.dumps(memories[:4], ensure_ascii=False)[:3500]
+            )
+        last_path = self.memory.get("last_files_path", None)
+        if last_path:
+            parts.append(f"Último caminho de arquivos usado: {last_path}")
+        return "\n\n".join(parts)
+
+    def _semantic_context(self, text: str) -> list[dict[str, Any]]:
+        try:
+            return self.semantic.search(text, limit=4)
+        except Exception:
+            return []
+
     def _handle_connection(self, conn: socket.socket) -> None:
         with conn:
             file = conn.makefile("rwb")
@@ -632,20 +685,47 @@ class AstraDaemon:
             if cached is not None:
                 return {"ok": True, "message": cached, "cached": True}
 
-        # Ordinary conversation should not pay the desktop-planner cost.
-        # This keeps voice/chat latency low and avoids an extra model call.
+        # GUI/chat uses the stronger 2B brain with recent conversation,
+        # real skill manifest and relevant memory. The 0.6B model is reserved
+        # for the low-latency voice path.
         if not self.planner.needs_planning(text):
-            answer = self.brain.ask_fast(text)
+            memories = self._semantic_context(text)
+            answer = self.brain.ask(
+                text,
+                extra_context=self._assistant_context(memories),
+            )
             if cacheable and answer:
                 self.cache.put(cache_key, answer)
+            self._record_chat(text, answer)
             self._background(self._remember_conversation, text, answer)
             return {
                 "ok": True,
                 "message": answer,
-                "plan": {"type": "answer", "path": "direct"},
+                "plan": {"type": "answer", "path": "2b-contextual"},
             }
 
-        memories = self.semantic.search(text, limit=5)
+        planner_text = text
+        if not AstraPlanner.extract_path(text):
+            q = lowered
+            if any(
+                phrase in q
+                for phrase in (
+                    "tem dentro",
+                    "contém dentro",
+                    "contem dentro",
+                    "nessa pasta",
+                    "dessa pasta",
+                    "nesse diretório",
+                    "nesse diretorio",
+                    "lá dentro",
+                    "la dentro",
+                )
+            ):
+                last_path = self.memory.get("last_files_path", None)
+                if last_path:
+                    planner_text = f'{text} "{last_path}"'
+
+        memories = self._semantic_context(text)
         reference = self.reference.resolve(
             text,
             active_window=self.context.current.active_window,
@@ -657,7 +737,7 @@ class AstraDaemon:
             browser_dom = self.browser.snapshot(limit=45)
 
         plan = self.planner.plan(
-            text,
+            planner_text,
             self.context.current,
             self._accessibility_cache,
             memories=memories,
@@ -679,6 +759,12 @@ class AstraDaemon:
                 "data": result.data,
                 "plan": plan,
             }
+            if result.ok and str(plan.get("skill", "")) == "files":
+                args = dict(plan.get("args", {}))
+                used_path = args.get("path") or args.get("root")
+                if used_path:
+                    self.memory.set("last_files_path", str(used_path))
+            self._record_chat(text, result.message)
             self._background(
                 self.semantic.remember,
                 f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
@@ -687,7 +773,14 @@ class AstraDaemon:
             )
             return reply
 
-        answer = str(plan.get("answer") or self.brain.ask(text))
+        answer = str(
+            plan.get("answer")
+            or self.brain.ask(
+                text,
+                extra_context=self._assistant_context(memories),
+            )
+        )
+        self._record_chat(text, answer)
         self._background(self._remember_conversation, text, answer)
         if cacheable and answer:
             self.cache.put(cache_key, answer)
