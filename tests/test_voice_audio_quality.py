@@ -66,3 +66,18 @@ def test_real_app_command_is_not_rejected():
         -0.58,
         0.02,
     )
+
+
+def test_transcript_normalization_repairs_common_astra_terms():
+    assert FastWhisperVoiceEngine._normalize_transcript("asta abre o discorde") == "Astra abre o Discord"
+    assert FastWhisperVoiceEngine._normalize_transcript("abre o git hub") == "abre o GitHub"
+
+
+def test_integer_ratio_resampling_averages_source_groups():
+    engine = object.__new__(FastWhisperVoiceEngine)
+    engine.capture_rate = 48000
+    engine.sample_rate = 16000
+    import numpy as np
+    src = np.array([0, 300, 600, 900, 1200, 1500], dtype=np.int16)
+    out = np.frombuffer(engine._to_target_rate(src.tobytes()), dtype=np.int16)
+    assert out.tolist() == [300, 1200]
