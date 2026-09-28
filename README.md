@@ -977,3 +977,31 @@ is answered deterministically without calling Qwen.
 Ordinary conversation goes directly to the fast text model. The desktop planner is only used when the request actually looks like a PC action. Semantic memory writes are moved off the response path so they do not delay spoken answers.
 
 The voice client uses the resident daemon when healthy, but a daemon timeout no longer crashes the voice session.
+
+
+## Gesture tutorial and repair
+
+Gesture control now has a first-run interactive tutorial.
+
+```bash
+astra setup gestures
+astra gestures
+```
+
+The first `astra gestures` run opens the camera tutorial before enabling real desktop actions. Astra validates hand tracking, pointer pose, pinch/click, drag, scroll, right-click and open-palm pause/resume.
+
+Replay it:
+
+```bash
+astra gestures --tutorial
+```
+
+Live preview:
+
+```bash
+astra gestures --show-camera
+```
+
+On Wayland, Astra validates the ydotoold socket instead of silently falling back to a backend that may not work. KDE Wayland multi-monitor geometry can also be read through `kscreen-doctor`.
+
+See `docs/GESTURES.md` for the complete control map and troubleshooting guide.
