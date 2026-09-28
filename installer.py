@@ -6,6 +6,7 @@ import concurrent.futures
 import ipaddress
 import json
 import glob
+import html
 import importlib.util
 import os
 import platform
@@ -875,7 +876,16 @@ def install_autostart(with_voice: bool = True) -> bool:
         ]
         if with_voice:
             args_xml.append("--voice")
-        arg_lines = "\n".join(f"      <string>{x}</string>" for x in args_xml)
+        arg_lines = "\n".join(
+            f"      <string>{html.escape(str(x))}</string>"
+            for x in args_xml
+        )
+        env_lines = "\n".join(
+            f"    <key>{html.escape(key)}</key><string>{html.escape(value)}</string>"
+            for key, value in _storage_env().items()
+        )
+        root_xml = html.escape(str(ROOT))
+        state_path_xml = html.escape(str(ROOT / "astra_pc"))
         log_dir = Path.home() / "Library" / "Logs" / "Astra-PC"
         log_dir.mkdir(parents=True, exist_ok=True)
         plist.write_text(
@@ -887,11 +897,18 @@ def install_autostart(with_voice: bool = True) -> bool:
             "  <key>ProgramArguments</key><array>\n"
             f"{arg_lines}\n"
             "  </array>\n"
-            f"  <key>WorkingDirectory</key><string>{ROOT}</string>\n"
+            f"  <key>WorkingDirectory</key><string>{root_xml}</string>\n"
+            "  <key>EnvironmentVariables</key><dict>\n"
+            f"{env_lines}\n"
+            "  </dict>\n"
             "  <key>RunAtLoad</key><true/>\n"
-            "  <key>KeepAlive</key><true/>\n"
-            f"  <key>StandardOutPath</key><string>{log_dir / 'astra.log'}</string>\n"
-            f"  <key>StandardErrorPath</key><string>{log_dir / 'astra.err.log'}</string>\n"
+            "  <key>KeepAlive</key><dict>\n"
+            "    <key>PathState</key><dict>\n"
+            f"      <key>{state_path_xml}</key><true/>\n"
+            "    </dict>\n"
+            "  </dict>\n"
+            f"  <key>StandardOutPath</key><string>{html.escape(str(log_dir / 'astra.log'))}</string>\n"
+            f"  <key>StandardErrorPath</key><string>{html.escape(str(log_dir / 'astra.err.log'))}</string>\n"
             "</dict></plist>\n",
             encoding="utf-8",
         )
