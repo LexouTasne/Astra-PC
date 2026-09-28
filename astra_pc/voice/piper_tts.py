@@ -33,7 +33,7 @@ def load_voice_state() -> dict:
             value["silence_ms"] = 480
             value["pre_roll_ms"] = 300
             value["start_speech_ms"] = 60
-            value["min_utterance_ms"] = 240
+            value["min_utterance_ms"] = 180
             value["max_utterance_s"] = 18.0
             value["vad_mode"] = 2
             value["adaptive_retry"] = True
