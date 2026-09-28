@@ -39,11 +39,32 @@ class AstraDaemon:
         timeout = int(ai.get("timeout", 180))
         keep = ai.get("keep_alive", -1)
 
-        self.text_client = OllamaClient(ai.get("text_model", "qwen3:0.6b"), host, timeout, keep)
-        self.vision_client = OllamaClient(ai.get("vision_model", "qwen3-vl:2b-instruct"), host, timeout, keep)
+        self.text_client = OllamaClient(
+            ai.get("text_model", "qwen3-vl:2b-instruct"),
+            host,
+            timeout,
+            keep,
+        )
+        self.fast_client = OllamaClient(
+            ai.get("fast_model", "qwen3:0.6b"),
+            host,
+            timeout,
+            "10m",
+        )
+        self.vision_client = OllamaClient(
+            ai.get("vision_model", "qwen3-vl:2b-instruct"),
+            host,
+            timeout,
+            keep,
+        )
         strong_name = str(ai.get("strong_model", "")).strip()
         self.strong_client = OllamaClient(strong_name, host, timeout, "5m") if strong_name else None
-        self.brain = AstraBrain(self.text_client, self.vision_client, self.strong_client)
+        self.brain = AstraBrain(
+            self.text_client,
+            self.vision_client,
+            self.strong_client,
+            fast_client=self.fast_client,
+        )
 
         daemon_cfg = config.data.get("daemon", {})
         self.host = daemon_cfg.get("host", "127.0.0.1")
