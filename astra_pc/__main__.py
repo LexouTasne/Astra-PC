@@ -805,15 +805,18 @@ def _run_listen_once(args, config) -> None:
             timeout=0.8,
         )
         if status.get("active"):
-            stopped = daemon_request(
-                {"type": "voice.stop"},
+            result = daemon_request(
+                {
+                    "type": "voice.dictate_once",
+                    "timeout": float(args.timeout),
+                },
                 host=host,
                 port=port,
-                timeout=3.0,
+                timeout=max(3.0, float(args.timeout) + 3.0),
             )
-            restore_resident_voice = bool(stopped.get("ok"))
-            if restore_resident_voice:
-                __import__("time").sleep(0.15)
+            if result.get("ok") and str(result.get("text", "")).strip():
+                print(str(result["text"]).strip())
+                return
     except Exception:
         pass
 
