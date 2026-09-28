@@ -112,7 +112,8 @@ class AstraDaemon:
     def run(self, voice: bool = False, no_speak: bool = False) -> None:
         print(f"Astra 0.8 daemon starting on {self.host}:{self.port}")
         threading.Thread(target=self._warm_text, daemon=True).start()
-        threading.Thread(target=self._warm_vision, daemon=True).start()
+        # Vision is loaded lazily only when a screen/image request arrives.
+        # Keeping Qwen-VL cold avoids competing with the 0.6B voice model.
         threading.Thread(target=self._context_loop, daemon=True).start()
         self._start_mesh()
 
