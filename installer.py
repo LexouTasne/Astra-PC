@@ -1315,9 +1315,14 @@ def configure_voice_capture(
         input_device_index=chosen.get("index"),
         whisper_model=target_asr,
         language="pt",
-        silence_ms=260,
-        pre_roll_ms=200,
+        silence_ms=480,
+        pre_roll_ms=300,
+        start_speech_ms=60,
+        min_utterance_ms=240,
+        max_utterance_s=18.0,
+        vad_mode=2,
         adaptive_retry=True,
+        audio_profile_version=2,
     )
     label = chosen.get("name") or "system default"
     print("Astra microphone:", label)
@@ -1392,10 +1397,11 @@ def install_natural_voice(
         engine="piper",
         voice_id=voice_id,
         model_path=str(model_path),
-        length_scale=0.90,
-        noise_scale=0.60,
-        noise_w_scale=0.80,
+        length_scale=0.96,
+        noise_scale=0.62,
+        noise_w_scale=0.76,
         volume=1.0,
+        audio_profile_version=2,
     )
     print("Natural voice configured:", voice_id)
     print("Voice state:", state_path)
@@ -1405,7 +1411,7 @@ def install_natural_voice(
 def install_voice() -> bool:
     print("\n[FAST VOICE] Low-latency offline voice stack:")
     print("  faster-whisper -> accurate local transcription")
-    print("  WebRTC VAD     -> detects speech/silence in ~30 ms frames")
+    print("  WebRTC VAD     -> adaptive endpointing without cutting short pauses")
     print("  sounddevice    -> microphone capture")
     print("  pyttsx3/system TTS -> local spoken replies")
     print("  Vosk remains available as a lightweight fallback")
