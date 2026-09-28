@@ -1137,6 +1137,175 @@ PIPER_PTBR_VOICES = (
 )
 
 
+def voice_state_file() -> Path:
+    return astra_data_root() / "voice.json"
+
+
+def read_voice_state() -> dict:
+    path = voice_state_file()
+    if not path.exists():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
+
+
+def update_voice_state(**values) -> Path:
+    state = read_voice_state()
+    state.update(values)
+    state["updated_at"] = time.time()
+    path = voice_state_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return path
+
+
+def _microphone_score(name: str, index: int, default_index: int | None) -> int:
+    q = name.lower()
+    score = 0
+    if default_index is not None and index == default_index:
+        score += 3
+    for token in ("microphone", "mic", "mono", "headset", "usb", "gm7"):
+        if token in q:
+            score += 4
+    for token in (
+        "monitor",
+        "output",
+        "loopback",
+        "virtual",
+        "webrtc",
+        "brave",
+        "chrome",
+        "browser",
+        "droidcam",
+    ):
+        if token in q:
+            score -= 8
+    return score
+
+
+def configure_voice_capture(
+    assume_yes: bool = False,
+    selected_microphone: str | None = None,
+    asr_model: str | None = None,
+) -> bool:
+    try:
+        import sounddevice as sd
+    except Exception as exc:
+        print("Microphone configuration unavailable:", exc)
+        return False
+
+    try:
+        devices = sd.query_devices()
+        default_index = None
+        try:
+            default_index = int(sd.default.device[0])
+        except Exception:
+            pass
+
+        inputs = []
+        for idx, device in enumerate(devices):
+            if int(device.get("max_input_channels", 0)) <= 0:
+                continue
+            inputs.append({
+                "index": idx,
+                "name": str(device.get("name", f"input-{idx}")),
+                "channels": int(device.get("max_input_channels", 0)),
+                "rate": int(float(device.get("default_samplerate", 16000))),
+            })
+    except Exception as exc:
+        print("Could not enumerate microphone devices:", exc)
+        return False
+
+    if not inputs:
+        print("No microphone input devices were found.")
+        return False
+
+    chosen = None
+    if selected_microphone:
+        needle = selected_microphone.lower().strip()
+        for item in inputs:
+            if needle == str(item["index"]) or needle in item["name"].lower():
+                chosen = item
+                break
+        if chosen is None:
+            print("Requested microphone was not found:", selected_microphone)
+
+    recommended = max(
+        inputs,
+        key=lambda item: _microphone_score(
+            item["name"],
+            int(item["index"]),
+            default_index,
+        ),
+    )
+
+    if chosen is None:
+        if assume_yes or not sys.stdin.isatty():
+            chosen = recommended
+        else:
+            print("\n[MICROPHONE] Choose Astra's main input:")
+            for pos, item in enumerate(inputs, 1):
+                tag = "  <- recommended" if item is recommended else ""
+                print(
+                    f"  {pos} - {item['name']} "
+                    f"(index {item['index']}, {item['channels']}ch){tag}"
+                )
+            print("  0 - keep system default")
+            try:
+                raw = input(f"Microphone [{inputs.index(recommended)+1}]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                raw = ""
+            if not raw:
+                chosen = recommended
+            elif raw == "0":
+                chosen = {
+                    "index": None,
+                    "name": "",
+                    "channels": 1,
+                    "rate": 16000,
+                }
+            else:
+                try:
+                    chosen = inputs[int(raw) - 1]
+                except (ValueError, IndexError):
+                    print("Invalid microphone choice; using recommended input.")
+                    chosen = recommended
+
+    target_asr = asr_model or "small"
+    if not assume_yes and sys.stdin.isatty() and asr_model is None:
+        print("\n[ASR QUALITY]")
+        print("  1 - small  (recommended: much better pt-BR accuracy, still fast)")
+        print("  2 - base   (lighter/faster, less accurate)")
+        try:
+            raw = input("Recognition model [1]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raw = ""
+        target_asr = "base" if raw == "2" else "small"
+
+    path = update_voice_state(
+        input_device_name=str(chosen.get("name") or ""),
+        input_device_index=chosen.get("index"),
+        whisper_model=target_asr,
+        language="pt",
+        silence_ms=260,
+        pre_roll_ms=200,
+        adaptive_retry=True,
+    )
+    label = chosen.get("name") or "system default"
+    print("Astra microphone:", label)
+    print("ASR model:", target_asr)
+    print("Voice state:", path)
+    return True
+
+
 def install_natural_voice(
     assume_yes: bool = False,
     selected_voice: str | None = None,
@@ -1198,20 +1367,14 @@ def install_natural_voice(
     else:
         print("Piper voice already installed:", model_path)
 
-    state = {
-        "engine": "piper",
-        "voice_id": voice_id,
-        "model_path": str(model_path),
-        "length_scale": 0.94,
-        "noise_scale": 0.62,
-        "noise_w_scale": 0.82,
-        "updated_at": time.time(),
-    }
-    state_path = astra_data_root() / "voice.json"
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2),
-        encoding="utf-8",
+    state_path = update_voice_state(
+        engine="piper",
+        voice_id=voice_id,
+        model_path=str(model_path),
+        length_scale=0.90,
+        noise_scale=0.60,
+        noise_w_scale=0.80,
+        volume=1.0,
     )
     print("Natural voice configured:", voice_id)
     print("Voice state:", state_path)
@@ -2288,6 +2451,17 @@ def main() -> int:
         default=None,
         help="Piper pt-BR voice to install",
     )
+    parser.add_argument(
+        "--microphone",
+        default=None,
+        help="microphone index or name substring",
+    )
+    parser.add_argument(
+        "--asr-model",
+        choices=["base", "small"],
+        default=None,
+        help="faster-whisper recognition model",
+    )
     parser.add_argument("--droidcam", default=None, help="preferred DroidCam endpoint, e.g. 192.168.1.50:4747")
     parser.add_argument("--camera-scan-timeout", type=float, default=10.0, help="max automatic DroidCam LAN discovery time")
     parser.add_argument("--start", action="store_true", help="start Astra after installation")
@@ -2357,6 +2531,11 @@ def main() -> int:
         print("\n[VOICE-ONLY MODE]")
         if not install_voice():
             return 5
+        configure_voice_capture(
+            args.yes,
+            selected_microphone=args.microphone,
+            asr_model=args.asr_model,
+        )
         if not install_natural_voice(args.yes, args.tts_voice):
             return 6
         print("\nVoice setup complete.")
@@ -2441,6 +2620,11 @@ def main() -> int:
     if not args.no_voice:
         if ask("\nInstall ultra-low-latency offline voice support?", True, args.yes):
             if install_voice():
+                configure_voice_capture(
+                    args.yes,
+                    selected_microphone=args.microphone,
+                    asr_model=args.asr_model,
+                )
                 if ask(
                     "\nInstall a more natural local pt-BR neural voice (Piper)?",
                     True,
