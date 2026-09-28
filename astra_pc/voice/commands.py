@@ -79,8 +79,12 @@ class CommandRouter:
             return None
 
         now = datetime.now().astimezone()
-        hour = now.hour
-        minute = now.minute
+        return cls._format_time(now.hour, now.minute)
+
+    @classmethod
+    def _format_time(cls, hour: int, minute: int) -> str:
+        hour = int(hour) % 24
+        minute = int(minute) % 60
 
         if hour == 0:
             if minute == 0:
