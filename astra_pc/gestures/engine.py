@@ -46,6 +46,7 @@ class GestureEngine:
         self._dragging = False
         self._paused = False
         self._last_pause_toggle = 0.0
+        self._palm_latched = False
         self._last_scroll_y: float | None = None
         self._right_latched = False
         self._two_hand_distance: float | None = None
@@ -87,13 +88,20 @@ class GestureEngine:
         pinky_up = _finger_up(hand, 20, 18)
 
         open_palm = index_up and middle_up and ring_up and pinky_up
-        if open_palm:
+        if open_palm and not self._palm_latched:
             cooldown = float(self.cfg["pause_cooldown_ms"]) / 1000.0
             if now - self._last_pause_toggle >= cooldown:
+                self._palm_latched = True
                 self._paused = not self._paused
                 self._last_pause_toggle = now
                 self._reset_transient()
-                return GestureOutput(toggle_pause=True, left_down=False, label="pause")
+                return GestureOutput(
+                    toggle_pause=True,
+                    left_down=False,
+                    label="paused" if self._paused else "resumed",
+                )
+        elif not open_palm:
+            self._palm_latched = False
 
         if self._paused:
             return GestureOutput(label="paused")
