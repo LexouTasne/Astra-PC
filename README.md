@@ -826,3 +826,31 @@ astra
 ```
 
 opens Astra's lightweight launcher/status menu. It does **not** start gesture tracking blindly.
+
+
+### Fast DroidCam discovery
+
+Astra no longer waits blindly for a virtual camera.
+
+```bash
+astra setup camera
+```
+
+The guided setup now:
+
+1. tries a previously saved DroidCam endpoint first;
+2. checks known LAN neighbours;
+3. scans the local private subnet in parallel on port `4747`;
+4. stops automatic discovery after **10 seconds maximum**;
+5. if nothing is found, offers a manual `IP:port` prompt;
+6. starts `droidcam-cli` directly with the detected v4l2loopback device;
+7. verifies real OpenCV frames before declaring success;
+8. saves the working endpoint for the next run.
+
+If you already know the phone address, skip discovery completely:
+
+```bash
+astra setup camera --droidcam 192.168.1.50:4747
+```
+
+Change the address to the one shown by DroidCam on your phone.
