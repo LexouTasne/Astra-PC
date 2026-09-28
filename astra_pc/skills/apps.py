@@ -11,7 +11,8 @@ from .base import Skill, SkillResult
 
 class AppsSkill(Skill):
     name = "apps"
-    description = "Open common applications and URLs."
+    description = "Open/close common applications and URLs."
+    safe_actions = ("open_app", "open_url", "close_app")
 
     APP_ALIASES = {
         "browser": ["firefox", "google-chrome", "chromium", "brave-browser"],
@@ -34,12 +35,15 @@ class AppsSkill(Skill):
             webbrowser.open(url)
             return SkillResult(True, f"Opened {url}")
 
-        if action != "open_app":
+        if action not in {"open_app", "close_app"}:
             return SkillResult(False, f"Unknown apps action: {action}")
 
         name = str(args.get("name", "")).lower().strip()
         if not name:
             return SkillResult(False, "Missing app name.")
+
+        if action == "close_app":
+            return self._close_app(name)
 
         if platform.system() == "Windows":
             try:
@@ -60,3 +64,35 @@ class AppsSkill(Skill):
                 return SkillResult(True, f"Opened {name}")
 
         return SkillResult(False, f"Application not found: {name}")
+
+
+    def _close_app(self, name: str) -> SkillResult:
+        candidates = self.APP_ALIASES.get(name, [name])
+        system = platform.system()
+
+        if system == "Windows":
+            for candidate in candidates:
+                image = candidate if candidate.lower().endswith(".exe") else candidate + ".exe"
+                p = subprocess.run(
+                    ["taskkill", "/IM", image],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if p.returncode == 0:
+                    return SkillResult(True, f"Fechei {name}.")
+            return SkillResult(False, f"Não encontrei {name} em execução.")
+
+        if system in {"Linux", "Darwin"}:
+            for candidate in candidates:
+                p = subprocess.run(
+                    ["pkill", "-x", candidate],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if p.returncode == 0:
+                    return SkillResult(True, f"Fechei {name}.")
+            return SkillResult(False, f"Não encontrei {name} em execução.")
+
+        return SkillResult(False, "Fechar aplicativos não é suportado neste sistema.")
