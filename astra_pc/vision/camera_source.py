@@ -20,9 +20,12 @@ class LatestFrameCapture:
     def __init__(self, cap: cv2.VideoCapture):
         self._cap = cap
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
         self._stop = threading.Event()
         self._frame = None
         self._ok = False
+        self._version = 0
+        self._last_read_version = -1
         self._thread = threading.Thread(
             target=self._reader,
             name="astra-camera-latest",
@@ -36,14 +39,23 @@ class LatestFrameCapture:
             if not ok or frame is None:
                 time.sleep(0.002)
                 continue
-            with self._lock:
+            with self._condition:
                 self._frame = frame
                 self._ok = True
+                self._version += 1
+                self._condition.notify_all()
 
     def read(self):
-        with self._lock:
-            if not self._ok or self._frame is None:
+        with self._condition:
+            if self._version == self._last_read_version and not self._stop.is_set():
+                self._condition.wait(timeout=0.025)
+            if (
+                not self._ok
+                or self._frame is None
+                or self._version == self._last_read_version
+            ):
                 return False, None
+            self._last_read_version = self._version
             return True, self._frame
 
     def isOpened(self) -> bool:
@@ -51,6 +63,8 @@ class LatestFrameCapture:
 
     def release(self) -> None:
         self._stop.set()
+        with self._condition:
+            self._condition.notify_all()
         try:
             self._cap.release()
         finally:
