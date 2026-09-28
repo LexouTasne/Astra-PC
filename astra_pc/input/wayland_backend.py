@@ -193,8 +193,20 @@ class YdotoolBackend(InputBackend):
         self._queue_command("click", "0x40" if down else "0x80")
         self._left_down = down
 
+    def left_click(self) -> None:
+        # Atomic left click: down+up in one ydotool command. This avoids a
+        # persistent drag state when tracking is lost between separate events.
+        self._queue_command("click", "0xC0")
+        self._left_down = False
+
     def right_click(self) -> None:
         self._queue_command("click", "0xC1")
+
+    def failsafe_release(self) -> None:
+        # Bypass the async queue so emergency release is not stuck behind stale
+        # pointer events. Sending left-up is harmless even if nothing is held.
+        self._execute(("click", "0x80"))
+        self._left_down = False
 
     def scroll(self, amount: int) -> None:
         if amount:
