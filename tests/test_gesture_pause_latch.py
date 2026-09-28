@@ -4,6 +4,7 @@ from astra_pc.vision.types import Hand, Point
 
 CFG = {
     "pause_cooldown_ms": 0,
+    "pause_hold_ms": 0,
     "right_pinch_threshold": 0.04,
     "click_release_threshold": 0.07,
     "pinch_threshold": 0.045,
