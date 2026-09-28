@@ -1119,6 +1119,105 @@ def install_awareness_extras() -> bool:
     return browser_ok and wake_deps_ok and wake_pkg_ok
 
 
+def astra_data_root() -> Path:
+    override = os.getenv("ASTRA_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
+    if platform.system() == "Windows":
+        return Path(os.getenv("LOCALAPPDATA", Path.home())) / "Astra-PC" / "data"
+    if platform.system() == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "Astra-PC"
+    return Path.home() / ".local" / "share" / "astra-pc"
+
+
+PIPER_PTBR_VOICES = (
+    "pt_BR-faber-medium",
+    "pt_BR-cadu-medium",
+    "pt_BR-jeff-medium",
+)
+
+
+def install_natural_voice(
+    assume_yes: bool = False,
+    selected_voice: str | None = None,
+) -> bool:
+    print("\n[NATURAL VOICE]")
+    print("  Piper neural TTS -> local pt-BR voice, no cloud/API key")
+    print("  Model stays loaded while Astra voice is running for low latency.")
+
+    if not uv_install_into(
+        sys.executable,
+        "-e",
+        f"{ROOT}[tts-natural]",
+    ):
+        print("Could not install Piper neural TTS.")
+        return False
+
+    voice_id = selected_voice
+    if voice_id not in PIPER_PTBR_VOICES:
+        if assume_yes or not sys.stdin.isatty():
+            voice_id = PIPER_PTBR_VOICES[0]
+        else:
+            print("\nChoose a Brazilian Portuguese voice:")
+            for idx, name in enumerate(PIPER_PTBR_VOICES, 1):
+                print(f"  {idx} - {name}")
+            print("  0 - Keep system/robotic fallback only")
+            try:
+                choice = input("Voice [1]: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return False
+            if not choice:
+                choice = "1"
+            if choice == "0":
+                return True
+            try:
+                voice_id = PIPER_PTBR_VOICES[int(choice) - 1]
+            except (ValueError, IndexError):
+                print("Invalid voice choice.")
+                return False
+
+    voices_dir = astra_data_root() / "voices"
+    voices_dir.mkdir(parents=True, exist_ok=True)
+    model_path = voices_dir / f"{voice_id}.onnx"
+    config_path = voices_dir / f"{voice_id}.onnx.json"
+
+    if not model_path.exists() or not config_path.exists():
+        print(f"Downloading Piper voice: {voice_id}")
+        result = run([
+            str(sys.executable),
+            "-m",
+            "piper.download_voices",
+            "--data-dir",
+            str(voices_dir),
+            voice_id,
+        ])
+        if result.returncode != 0:
+            print("Piper voice download failed.")
+            return False
+    else:
+        print("Piper voice already installed:", model_path)
+
+    state = {
+        "engine": "piper",
+        "voice_id": voice_id,
+        "model_path": str(model_path),
+        "length_scale": 0.94,
+        "noise_scale": 0.62,
+        "noise_w_scale": 0.82,
+        "updated_at": time.time(),
+    }
+    state_path = astra_data_root() / "voice.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    print("Natural voice configured:", voice_id)
+    print("Voice state:", state_path)
+    return True
+
+
 def install_voice() -> bool:
     print("\n[FAST VOICE] Low-latency offline voice stack:")
     print("  faster-whisper -> accurate local transcription")
@@ -2182,6 +2281,13 @@ def main() -> int:
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     parser.add_argument("--camera-only", action="store_true", help="repair/test only camera and DroidCam setup")
+    parser.add_argument("--voice-only", action="store_true", help="repair/install only voice + natural TTS setup")
+    parser.add_argument(
+        "--tts-voice",
+        choices=list(PIPER_PTBR_VOICES),
+        default=None,
+        help="Piper pt-BR voice to install",
+    )
     parser.add_argument("--droidcam", default=None, help="preferred DroidCam endpoint, e.g. 192.168.1.50:4747")
     parser.add_argument("--camera-scan-timeout", type=float, default=10.0, help="max automatic DroidCam LAN discovery time")
     parser.add_argument("--start", action="store_true", help="start Astra after installation")
@@ -2245,6 +2351,15 @@ def main() -> int:
     summary(checks)
 
     if args.diagnose_only:
+        return 0
+
+    if args.voice_only:
+        print("\n[VOICE-ONLY MODE]")
+        if not install_voice():
+            return 5
+        if not install_natural_voice(args.yes, args.tts_voice):
+            return 6
+        print("\nVoice setup complete.")
         return 0
 
     if args.camera_only:
@@ -2325,7 +2440,13 @@ def main() -> int:
 
     if not args.no_voice:
         if ask("\nInstall ultra-low-latency offline voice support?", True, args.yes):
-            install_voice()
+            if install_voice():
+                if ask(
+                    "\nInstall a more natural local pt-BR neural voice (Piper)?",
+                    True,
+                    args.yes,
+                ):
+                    install_natural_voice(args.yes, args.tts_voice)
 
     if ask("\nInstall structural accessibility support for more reliable UI control?", True, args.yes):
         install_accessibility_support()
@@ -2392,6 +2513,10 @@ def main() -> int:
     print("Desktop session:", session)
     print("ydotool:", "yes" if command_exists("ydotool") else "no")
     print("Fast voice:", "yes" if importlib.util.find_spec("faster_whisper") else "no")
+    print(
+        "Natural Piper voice:",
+        "yes" if (astra_data_root() / "voice.json").exists() else "system fallback",
+    )
     print("Vosk fallback:", "yes" if importlib.util.find_spec("vosk") else "no")
     print("Ollama:", "yes" if command_exists("ollama") else "no")
     print("Ollama API:", "yes" if ollama_api_available() else "no")
