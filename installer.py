@@ -1446,6 +1446,45 @@ def ensure_droidcam_executable() -> None:
     run(["sudo", "chmod", "0755", *[str(p) for p in broken]])
 
 
+def detect_loopback_video_device() -> Path | None:
+    if platform.system() != "Linux":
+        return None
+    sys_root = Path("/sys/class/video4linux")
+    if not sys_root.exists():
+        return None
+
+    preferred: list[Path] = []
+    fallback: list[Path] = []
+    for entry in sorted(sys_root.glob("video*")):
+        device = Path("/dev") / entry.name
+        if not device.exists():
+            continue
+        try:
+            name = (entry / "name").read_text(
+                encoding="utf-8",
+                errors="ignore",
+            ).strip().lower()
+        except Exception:
+            name = ""
+
+        if any(token in name for token in ("droidcam", "v4l2loopback", "virtual")):
+            preferred.append(device)
+        else:
+            fallback.append(device)
+
+    if preferred:
+        return preferred[0]
+
+    # If the loopback module is loaded but the kernel name is generic, prefer
+    # the only video device rather than guessing among multiple physical ones.
+    if kernel_module_loaded("v4l2loopback") or kernel_module_loaded("v4l2loopback_dc"):
+        all_devices = preferred + fallback
+        if len(all_devices) == 1:
+            return all_devices[0]
+
+    return None
+
+
 def droidcam_cli_binary() -> Path | None:
     for candidate in (
         shutil.which("droidcam-cli"),
@@ -1464,13 +1503,30 @@ def start_droidcam_cli(
     cli = droidcam_cli_binary()
     if cli is None:
         return None
+
+    cmd = [str(cli), "-nocontrols"]
+    loopback = detect_loopback_video_device()
+    if loopback is not None:
+        cmd.append(f"-dev={loopback}")
+        print("DroidCam virtual video device:", loopback)
+    cmd.extend([host, str(port)])
+
     try:
-        return subprocess.Popen(
-            [str(cli), host, str(port)],
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
+        time.sleep(0.25)
+        if process.poll() is not None:
+            print(
+                "droidcam-cli exited immediately. The endpoint or virtual "
+                "camera device may be unavailable."
+            )
+            return None
+        return process
     except Exception as exc:
         print("Could not start droidcam-cli:", exc)
         return None
