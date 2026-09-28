@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import platform
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,9 +10,63 @@ from pathlib import Path
 import cv2
 
 
+class LatestFrameCapture:
+    """Continuously consume camera frames and expose only the newest one.
+
+    Gesture recognition should react to *now*, not process a FIFO of stale
+    camera frames when MediaPipe briefly takes longer than the camera period.
+    """
+
+    def __init__(self, cap: cv2.VideoCapture):
+        self._cap = cap
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._frame = None
+        self._ok = False
+        self._thread = threading.Thread(
+            target=self._reader,
+            name="astra-camera-latest",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def _reader(self) -> None:
+        while not self._stop.is_set():
+            ok, frame = self._cap.read()
+            if not ok or frame is None:
+                time.sleep(0.002)
+                continue
+            with self._lock:
+                self._frame = frame
+                self._ok = True
+
+    def read(self):
+        with self._lock:
+            if not self._ok or self._frame is None:
+                return False, None
+            return True, self._frame
+
+    def isOpened(self) -> bool:
+        return bool(self._cap.isOpened())
+
+    def release(self) -> None:
+        self._stop.set()
+        try:
+            self._cap.release()
+        finally:
+            if self._thread.is_alive():
+                self._thread.join(timeout=0.5)
+
+    def set(self, prop, value):
+        return self._cap.set(prop, value)
+
+    def get(self, prop):
+        return self._cap.get(prop)
+
+
 @dataclass(slots=True)
 class OpenedCamera:
-    cap: cv2.VideoCapture
+    cap: LatestFrameCapture
     index: int
     source: str
 
@@ -27,7 +82,6 @@ def candidate_cameras(preferred: int = 0, limit: int = 16) -> list[tuple[int, st
     else:
         candidates = [(i, i) for i in range(limit)]
 
-    # Try the configured/preferred camera first, but never duplicate it.
     candidates.sort(key=lambda item: (item[0] != preferred, item[0]))
     return candidates
 
@@ -36,9 +90,9 @@ def open_first_camera(
     preferred: int = 0,
     width: int = 640,
     height: int = 360,
-    fps: int = 30,
+    fps: int = 60,
     limit: int = 16,
-    warmup_reads: int = 8,
+    warmup_reads: int = 5,
 ) -> OpenedCamera | None:
     previous_level = None
     try:
@@ -63,6 +117,16 @@ def open_first_camera(
                     cap.release()
                     continue
 
+                # MJPG commonly unlocks 60 FPS at 640x360 on USB webcams while
+                # keeping USB bandwidth and CPU conversion low. Unsupported
+                # cameras simply ignore the request.
+                try:
+                    cap.set(
+                        cv2.CAP_PROP_FOURCC,
+                        cv2.VideoWriter_fourcc(*"MJPG"),
+                    )
+                except Exception:
+                    pass
                 cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(width))
                 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(height))
                 cap.set(cv2.CAP_PROP_FPS, int(fps))
@@ -74,10 +138,22 @@ def open_first_camera(
                     if ok and frame is not None and getattr(frame, "size", 0):
                         good = True
                         break
-                    time.sleep(0.03)
+                    time.sleep(0.015)
 
                 if good:
-                    return OpenedCamera(cap=cap, index=index, source=str(source))
+                    latest = LatestFrameCapture(cap)
+                    deadline = time.monotonic() + 0.6
+                    while time.monotonic() < deadline:
+                        ok, fresh = latest.read()
+                        if ok and fresh is not None:
+                            return OpenedCamera(
+                                cap=latest,
+                                index=index,
+                                source=str(source),
+                            )
+                        time.sleep(0.005)
+                    latest.release()
+                    continue
 
                 cap.release()
             except Exception:
