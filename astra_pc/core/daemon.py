@@ -286,13 +286,37 @@ class AstraDaemon:
                     silence_ms=int(
                         voice_state.get(
                             "silence_ms",
-                            voice_cfg.get("silence_ms", 260),
+                            voice_cfg.get("silence_ms", 480),
                         )
                     ),
                     pre_roll_ms=int(
                         voice_state.get(
                             "pre_roll_ms",
-                            voice_cfg.get("pre_roll_ms", 200),
+                            voice_cfg.get("pre_roll_ms", 300),
+                        )
+                    ),
+                    start_speech_ms=int(
+                        voice_state.get(
+                            "start_speech_ms",
+                            voice_cfg.get("start_speech_ms", 60),
+                        )
+                    ),
+                    min_utterance_ms=int(
+                        voice_state.get(
+                            "min_utterance_ms",
+                            voice_cfg.get("min_utterance_ms", 240),
+                        )
+                    ),
+                    max_utterance_s=float(
+                        voice_state.get(
+                            "max_utterance_s",
+                            voice_cfg.get("max_utterance_s", 18.0),
+                        )
+                    ),
+                    vad_mode=int(
+                        voice_state.get(
+                            "vad_mode",
+                            voice_cfg.get("vad_mode", 2),
                         )
                     ),
                     adaptive_retry=bool(
