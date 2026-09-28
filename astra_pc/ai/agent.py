@@ -78,6 +78,27 @@ class AstraBrain:
             think=False,
         )
 
+    def ask_voice(self, text: str, extra_context: str | None = None) -> str:
+        """Primary 2B path tuned for short spoken replies."""
+        return self.text_client.chat(
+            text,
+            system=self._system(extra_context),
+            num_ctx=4096,
+            num_predict=160,
+            temperature=0.10,
+            think=False,
+        )
+
+    def ask_voice_stream(self, text: str, extra_context: str | None = None):
+        yield from self.text_client.chat_stream(
+            text,
+            system=self._system(extra_context),
+            num_ctx=4096,
+            num_predict=160,
+            temperature=0.10,
+            think=False,
+        )
+
     def ask_fast(self, text: str, extra_context: str | None = None) -> str:
         """Fast path reserved for voice/lightweight conversational replies."""
         return self.fast_client.chat(
