@@ -196,6 +196,17 @@ def _run_desktop(args, config) -> None:
         deps_marker.parent.mkdir(parents=True, exist_ok=True)
         deps_marker.write_text(package_hash, encoding="utf-8")
 
+    # The desktop app should feel self-contained: wake its local services
+    # before rendering so the first chat message does not fail with a traceback.
+    if sys.platform.startswith("linux") and shutil.which("systemctl"):
+        subprocess.run(
+            ["systemctl", "--user", "start", "astra-pc.service"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    _ensure_runtime_ollama(config)
+
     env = os.environ.copy()
     env["ASTRA_ROOT"] = str(root)
     env["ASTRA_PYTHON"] = sys.executable
@@ -289,6 +300,9 @@ def _run_desktop_status(args, config) -> None:
             "online": daemon_online and bool(mesh_cfg.get("enabled", True)),
         },
         "model": ai.get("text_model", "qwen3:0.6b"),
+        "ai": {
+            "online": _ollama_reachable(str(ai.get("host", "http://127.0.0.1:11434"))),
+        },
         "platform": f"{platform.system()} · {platform.machine()}",
     }
     print(json.dumps(payload, ensure_ascii=False))
