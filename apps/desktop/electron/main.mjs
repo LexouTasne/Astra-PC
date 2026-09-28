@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { spawn } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
+import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -76,6 +77,50 @@ function spawnAstra(args, { id = crypto.randomUUID(), interactive = false } = {}
     child.stdin?.end()
   }
   return { id, child }
+}
+
+function daemonRequest(payload, timeoutMs = 15000) {
+  return new Promise((resolve, reject) => {
+    const host = process.env.ASTRA_DAEMON_HOST || '127.0.0.1'
+    const port = Number(process.env.ASTRA_DAEMON_PORT || 8765)
+    const socket = net.createConnection({ host, port })
+    let buffer = ''
+    let settled = false
+
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      try { socket.destroy() } catch {}
+      if (error) reject(error)
+      else resolve(value)
+    }
+
+    const timer = setTimeout(() => {
+      finish(new Error('Astra daemon timeout'))
+    }, timeoutMs)
+
+    socket.setNoDelay(true)
+    socket.setEncoding('utf8')
+    socket.on('connect', () => {
+      socket.write(JSON.stringify(payload) + '\n')
+    })
+    socket.on('data', chunk => {
+      buffer += chunk
+      const nl = buffer.indexOf('\n')
+      if (nl < 0) return
+      const line = buffer.slice(0, nl).trim()
+      try {
+        finish(null, JSON.parse(line))
+      } catch (error) {
+        finish(error)
+      }
+    })
+    socket.on('error', error => finish(error))
+    socket.on('end', () => {
+      if (!settled) finish(new Error('Astra daemon disconnected'))
+    })
+  })
 }
 
 function collectAstra(args, timeoutMs = 15000) {
@@ -177,14 +222,21 @@ ipcMain.handle('astra:ask', async (_event, payload) => {
   if (!text && !imagePath) return { ok: false, error: 'Mensagem vazia.' }
 
   const prompt = text || 'Analise esta imagem e descreva o que é importante.'
-  const args = ['ask', prompt]
-  if (imagePath) args.push('--image', imagePath)
-
   try {
-    const answer = await collectAstra(args, imagePath ? 90000 : 45000)
-    return { ok: true, answer }
-  } catch (error) {
-    return { ok: false, error: friendlyError(error) }
+    const request = { type: 'ask', text: prompt }
+    if (imagePath) request.image = imagePath
+    const result = await daemonRequest(request, imagePath ? 90000 : 30000)
+    if (result?.ok) return { ok: true, answer: String(result.message || '') }
+    throw new Error(result?.error || 'Astra daemon não respondeu.')
+  } catch (directError) {
+    const args = ['ask', prompt]
+    if (imagePath) args.push('--image', imagePath)
+    try {
+      const answer = await collectAstra(args, imagePath ? 90000 : 45000)
+      return { ok: true, answer }
+    } catch (error) {
+      return { ok: false, error: friendlyError(error || directError) }
+    }
   }
 })
 
@@ -224,18 +276,28 @@ ipcMain.handle('astra:choose-image', async () => {
 
 ipcMain.handle('astra:dictate', async () => {
   try {
-    const raw = await collectAstra(['listen-once', '--timeout', '15'], 30000)
-    const lines = String(raw || '')
-      .split(/\r?\n/)
-      .map(line => line.trim())
-      .filter(Boolean)
-    const text = lines.at(-1) || ''
-    if (!text || text.startsWith('[asr]')) {
-      return { ok: false, error: 'Não consegui entender a fala.' }
+    const result = await daemonRequest(
+      { type: 'voice.dictate_once', timeout: 15 },
+      19000
+    )
+    const text = String(result?.text || '').trim()
+    if (result?.ok && text) return { ok: true, text }
+    throw new Error(result?.error || 'Resident voice unavailable')
+  } catch (directError) {
+    try {
+      const raw = await collectAstra(['listen-once', '--timeout', '15'], 30000)
+      const lines = String(raw || '')
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .filter(Boolean)
+      const text = lines.at(-1) || ''
+      if (!text || text.startsWith('[asr]')) {
+        return { ok: false, error: 'Não consegui entender a fala.' }
+      }
+      return { ok: true, text }
+    } catch (error) {
+      return { ok: false, error: friendlyError(error || directError) }
     }
-    return { ok: true, text }
-  } catch (error) {
-    return { ok: false, error: friendlyError(error) }
   }
 })
 
