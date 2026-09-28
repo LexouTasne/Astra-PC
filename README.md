@@ -932,3 +932,48 @@ install.sh --dest /disk/Astra-PC \
 ```
 
 If a removable drive is absent, the `astra` launcher prints a clear mount/drive error instead of a Python traceback, and Linux systemd will not start the service while the application path is missing.
+
+
+## Natural local voice
+
+Astra can use a local Piper neural voice instead of the robotic system TTS fallback.
+
+Configure it with:
+
+```bash
+astra setup voice
+```
+
+Available pt-BR choices currently exposed by the installer:
+
+```text
+pt_BR-faber-medium
+pt_BR-cadu-medium
+pt_BR-jeff-medium
+```
+
+Direct setup:
+
+```bash
+astra setup voice --voice pt_BR-faber-medium
+```
+
+The voice model is stored under Astra's configurable data directory, so portable-data installs keep it with the selected Astra data location.
+
+Piper is loaded once and reused while voice mode is active. Audio is streamed to the output device instead of invoking a new TTS process for every reply.
+
+Astra still keeps the system TTS path as a fallback if Piper is unavailable.
+
+### Fast voice path
+
+Simple arithmetic such as:
+
+```text
+Astra, quanto é um mais um?
+```
+
+is answered deterministically without calling Qwen.
+
+Ordinary conversation goes directly to the fast text model. The desktop planner is only used when the request actually looks like a PC action. Semantic memory writes are moved off the response path so they do not delay spoken answers.
+
+The voice client uses the resident daemon when healthy, but a daemon timeout no longer crashes the voice session.
