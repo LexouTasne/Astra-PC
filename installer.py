@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import ipaddress
+import json
 import glob
 import importlib.util
 import os
@@ -1136,6 +1139,343 @@ def enable_ydotool_service() -> bool:
     return False
 
 
+DROIDCAM_DEFAULT_PORT = 4747
+DROIDCAM_STATE_PATH = Path.home() / ".local" / "share" / "astra-pc" / "droidcam.json"
+
+
+def parse_droidcam_endpoint(value: str | None) -> tuple[str, int] | None:
+    if not value:
+        return None
+    text = value.strip()
+    for prefix in ("http://", "https://"):
+        if text.startswith(prefix):
+            text = text[len(prefix):]
+    text = text.split("/", 1)[0].strip()
+    if not text:
+        return None
+
+    host = text
+    port = DROIDCAM_DEFAULT_PORT
+    if text.count(":") == 1:
+        maybe_host, maybe_port = text.rsplit(":", 1)
+        if maybe_port.isdigit():
+            host = maybe_host.strip()
+            port = int(maybe_port)
+
+    if not host or not (1 <= port <= 65535):
+        return None
+    return host, port
+
+
+def load_saved_droidcam_endpoint() -> tuple[str, int] | None:
+    try:
+        data = json.loads(DROIDCAM_STATE_PATH.read_text(encoding="utf-8"))
+        return parse_droidcam_endpoint(
+            f"{data.get('host', '')}:{int(data.get('port', DROIDCAM_DEFAULT_PORT))}"
+        )
+    except Exception:
+        return None
+
+
+def save_droidcam_endpoint(host: str, port: int) -> None:
+    DROIDCAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DROIDCAM_STATE_PATH.write_text(
+        json.dumps(
+            {"host": host, "port": int(port), "updated_at": time.time()},
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def probe_tcp_endpoint(host: str, port: int, timeout: float = 0.18) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+def _linux_neighbor_hosts() -> list[str]:
+    if platform.system() != "Linux" or not command_exists("ip"):
+        return []
+    try:
+        p = subprocess.run(
+            ["ip", "-4", "neigh", "show"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except Exception:
+        return []
+
+    out: list[str] = []
+    for line in p.stdout.splitlines():
+        host = line.split(" ", 1)[0].strip()
+        try:
+            addr = ipaddress.IPv4Address(host)
+        except ValueError:
+            continue
+        if addr.is_private and not addr.is_loopback:
+            out.append(host)
+    return out
+
+
+def _local_ipv4_networks() -> list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Network]]:
+    found: list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Network]] = []
+
+    if platform.system() == "Linux" and command_exists("ip"):
+        try:
+            p = subprocess.run(
+                ["ip", "-j", "-4", "addr", "show", "up"],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            for iface in json.loads(p.stdout or "[]"):
+                if iface.get("ifname") == "lo":
+                    continue
+                for info in iface.get("addr_info", []):
+                    if info.get("family") != "inet":
+                        continue
+                    local = info.get("local")
+                    prefix = info.get("prefixlen")
+                    if local is None or prefix is None:
+                        continue
+                    try:
+                        addr = ipaddress.IPv4Address(local)
+                        network = ipaddress.IPv4Network(
+                            f"{local}/{int(prefix)}",
+                            strict=False,
+                        )
+                    except (ValueError, TypeError):
+                        continue
+                    if addr.is_private:
+                        found.append((addr, network))
+        except Exception:
+            pass
+
+    # Generic fallback: enough for the majority of home/hotspot networks.
+    if not found:
+        candidates: list[str] = []
+        try:
+            candidates.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+        except Exception:
+            pass
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.connect(("1.1.1.1", 80))
+            candidates.append(str(probe.getsockname()[0]))
+            probe.close()
+        except Exception:
+            pass
+        for raw in candidates:
+            try:
+                addr = ipaddress.IPv4Address(raw)
+            except ValueError:
+                continue
+            if addr.is_private and not addr.is_loopback:
+                found.append(
+                    (addr, ipaddress.IPv4Network(f"{raw}/24", strict=False))
+                )
+
+    unique: list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Network]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in found:
+        key = (str(item[0]), str(item[1]))
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
+def _droidcam_scan_hosts(max_hosts: int = 1022) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def add(raw: str) -> None:
+        if raw in seen:
+            return
+        try:
+            addr = ipaddress.IPv4Address(raw)
+        except ValueError:
+            return
+        if not addr.is_private or addr.is_loopback:
+            return
+        seen.add(raw)
+        ordered.append(raw)
+
+    for host in _linux_neighbor_hosts():
+        add(host)
+
+    for local, network in _local_ipv4_networks():
+        # Large enterprise/private nets are bounded to the local /24 first,
+        # while /24-/22 home networks can be scanned in full.
+        scan_net = network
+        if network.prefixlen < 22:
+            scan_net = ipaddress.IPv4Network(f"{local}/24", strict=False)
+        count = 0
+        for addr in scan_net.hosts():
+            if addr == local:
+                continue
+            add(str(addr))
+            count += 1
+            if count >= max_hosts:
+                break
+
+    return ordered
+
+
+def discover_droidcam_fast(
+    preferred: str | None = None,
+    timeout_seconds: float = 10.0,
+) -> tuple[str, int] | None:
+    """Find a DroidCam-like endpoint quickly, prioritizing known addresses."""
+    priority: list[tuple[str, int]] = []
+    parsed = parse_droidcam_endpoint(preferred)
+    if parsed:
+        priority.append(parsed)
+
+    saved = load_saved_droidcam_endpoint()
+    if saved and saved not in priority:
+        priority.append(saved)
+
+    # Known/saved endpoints should resolve nearly instantly.
+    for host, port in priority:
+        print(f"Testing DroidCam endpoint {host}:{port}...")
+        if probe_tcp_endpoint(host, port, timeout=0.35):
+            print(f"DroidCam endpoint reachable: {host}:{port}")
+            return host, port
+
+    hosts = _droidcam_scan_hosts()
+    if not hosts:
+        return None
+
+    print(
+        f"Searching local network for DroidCam on port {DROIDCAM_DEFAULT_PORT} "
+        f"(max {int(timeout_seconds)}s)..."
+    )
+    deadline = time.monotonic() + max(1.0, timeout_seconds)
+    workers = min(128, max(16, len(hosts)))
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    futures = {
+        executor.submit(
+            probe_tcp_endpoint,
+            host,
+            DROIDCAM_DEFAULT_PORT,
+            0.22,
+        ): host
+        for host in hosts
+    }
+    try:
+        while futures and time.monotonic() < deadline:
+            remaining = max(0.01, deadline - time.monotonic())
+            done, _ = concurrent.futures.wait(
+                futures,
+                timeout=min(0.25, remaining),
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            if not done:
+                continue
+            for future in done:
+                host = futures.pop(future)
+                try:
+                    if future.result():
+                        print(f"Found candidate: {host}:{DROIDCAM_DEFAULT_PORT}")
+                        for pending in futures:
+                            pending.cancel()
+                        return host, DROIDCAM_DEFAULT_PORT
+                except Exception:
+                    pass
+    finally:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return None
+
+
+def manual_droidcam_menu() -> tuple[str, int] | None | str:
+    """Return endpoint, 'retry', or None."""
+    while True:
+        print("\nDroidCam was not found automatically.")
+        print("1 - Enter IP:port manually")
+        print("2 - Search the network again")
+        print("3 - Wait for DroidCam video without network discovery")
+        print("0 - Cancel")
+        try:
+            choice = input("Choice: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None
+
+        if choice == "1":
+            raw = input(
+                f"IP:port (example 192.168.1.50:{DROIDCAM_DEFAULT_PORT}): "
+            ).strip()
+            endpoint = parse_droidcam_endpoint(raw)
+            if endpoint is None:
+                print("Invalid address.")
+                continue
+            return endpoint
+        if choice == "2":
+            return "retry"
+        if choice == "3":
+            return ("", 0)
+        if choice in {"0", "q", "quit"}:
+            return None
+        print("Choose 0, 1, 2 or 3.")
+
+
+def ensure_droidcam_executable() -> None:
+    if platform.system() != "Linux":
+        return
+    candidates = [
+        Path("/usr/local/bin/droidcam"),
+        Path("/usr/local/bin/droidcam-cli"),
+        Path("/usr/bin/droidcam"),
+        Path("/usr/bin/droidcam-cli"),
+    ]
+    broken = [p for p in candidates if p.exists() and not os.access(p, os.X_OK)]
+    if not broken:
+        return
+    print("Repairing DroidCam executable permissions...")
+    run(["sudo", "chmod", "0755", *[str(p) for p in broken]])
+
+
+def droidcam_cli_binary() -> Path | None:
+    for candidate in (
+        shutil.which("droidcam-cli"),
+        "/usr/local/bin/droidcam-cli",
+        "/usr/bin/droidcam-cli",
+    ):
+        if candidate and Path(candidate).exists():
+            return Path(candidate)
+    return None
+
+
+def start_droidcam_cli(
+    host: str,
+    port: int,
+) -> subprocess.Popen | None:
+    cli = droidcam_cli_binary()
+    if cli is None:
+        return None
+    try:
+        return subprocess.Popen(
+            [str(cli), host, str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        print("Could not start droidcam-cli:", exc)
+        return None
+
+
 def kernel_module_loaded(name: str) -> bool:
     try:
         modules = Path("/proc/modules").read_text(encoding="utf-8", errors="ignore")
@@ -1265,49 +1605,104 @@ def ensure_v4l2loopback(
 
 def launch_droidcam_and_wait(
     assume_yes: bool,
-    timeout: int = 75,
+    timeout: int = 30,
+    preferred_endpoint: str | None = None,
+    discovery_timeout: float = 10.0,
 ) -> list[tuple[int, int, int]]:
+    ensure_droidcam_executable()
     binary = droidcam_binary()
     if binary is None:
         return []
 
-    if os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"):
-        if ask("Open DroidCam now so you can connect the phone?", True, assume_yes):
-            try:
-                subprocess.Popen(
-                    [str(binary)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-                print("DroidCam launched:", binary)
-            except Exception as exc:
-                print("Could not launch DroidCam automatically:", exc)
+    endpoint: tuple[str, int] | None = None
+
+    # If an endpoint was supplied or saved, it wins immediately. Otherwise do
+    # a bounded, parallel LAN search before falling back to manual input.
+    while endpoint is None:
+        endpoint = discover_droidcam_fast(
+            preferred=preferred_endpoint,
+            timeout_seconds=discovery_timeout,
+        )
+        preferred_endpoint = None
+        if endpoint is not None:
+            break
+
+        if assume_yes:
+            print(
+                "DroidCam was not found within the discovery window. "
+                "Run 'astra setup camera' without --yes to enter IP:port manually."
+            )
+            break
+
+        selected = manual_droidcam_menu()
+        if selected == "retry":
+            continue
+        if selected is None:
+            return []
+        if selected == ("", 0):
+            break
+        endpoint = selected
+        host, port = endpoint
+        if not probe_tcp_endpoint(host, port, timeout=0.6):
+            print(f"Nothing answered at {host}:{port}.")
+            if not ask("Try this address anyway?", False, False):
+                endpoint = None
+                continue
+        break
+
+    if endpoint and endpoint != ("", 0):
+        host, port = endpoint
+        print(f"Connecting DroidCam CLI to {host}:{port}...")
+        cli_process = start_droidcam_cli(host, port)
+        if cli_process is not None:
+            save_droidcam_endpoint(host, port)
+        else:
+            cli_process = None
+    else:
+        cli_process = None
+        if os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"):
+            if ask("Open DroidCam GUI now?", True, assume_yes):
+                try:
+                    subprocess.Popen(
+                        [str(binary)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+                    print("DroidCam launched:", binary)
+                except Exception as exc:
+                    print("Could not launch DroidCam automatically:", exc)
 
     print("\nOn your phone:")
-    print("  1. Open the DroidCam app.")
-    print("  2. Connect it to this PC using Wi-Fi/USB.")
-    print("  3. Make sure video is visible in DroidCam.")
-    print("Astra will look for the video device after that.")
+    print("  1. Open DroidCam.")
+    print("  2. Make sure the phone and PC are reachable on the same LAN/USB link.")
+    if endpoint and endpoint != ("", 0):
+        print(f"  3. Astra is using {endpoint[0]}:{endpoint[1]}.")
+    else:
+        print("  3. Connect the phone from the DroidCam desktop client.")
 
-    if not ask("Wait for DroidCam video and test it now?", True, assume_yes):
+    if not ask("Wait for real camera frames now?", True, assume_yes):
         return []
 
-    deadline = time.monotonic() + max(10, timeout)
+    deadline = time.monotonic() + max(5, timeout)
     last_note = 0.0
-    while time.monotonic() < deadline:
-        cameras = probe_cameras_opencv(limit=24)
-        if cameras:
-            print("\n[DROIDCAM] Working camera detected:")
-            for idx, w, h in cameras:
-                print(f"  camera {idx}: {w}x{h}")
-            return cameras
-        now = time.monotonic()
-        if now - last_note >= 10:
-            remaining = max(0, int(deadline - now))
-            print(f"Waiting for camera frames... ({remaining}s remaining)")
-            last_note = now
-        time.sleep(1.0)
+    try:
+        while time.monotonic() < deadline:
+            cameras = probe_cameras_opencv(limit=24)
+            if cameras:
+                print("\n[DROIDCAM] Working camera detected:")
+                for idx, w, h in cameras:
+                    print(f"  camera {idx}: {w}x{h}")
+                return cameras
+            now = time.monotonic()
+            if now - last_note >= 5:
+                remaining = max(0, int(deadline - now))
+                print(f"Waiting for camera frames... ({remaining}s)")
+                last_note = now
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nCamera setup cancelled by user.")
+        return []
 
     print("No camera frames arrived before the timeout.")
     return []
@@ -1428,7 +1823,13 @@ def install_linux_build_tools(pm: str | None, allow_layering: bool = False) -> b
     return False
 
 
-def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: bool = False) -> bool:
+def install_droidcam_linux(
+    pm: str | None,
+    assume_yes: bool,
+    allow_layering: bool = False,
+    preferred_endpoint: str | None = None,
+    discovery_timeout: float = 10.0,
+) -> bool:
     print("\n[DROIDCAM] Phone-as-webcam fallback for Linux.")
     print("The client is resolved from Dev47Apps' official Linux page at install time.")
 
@@ -1445,7 +1846,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
             print("\nReboot the PC, then run: astra setup camera")
             return True
         if driver_ready:
-            launch_droidcam_and_wait(assume_yes)
+            launch_droidcam_and_wait(assume_yes, preferred_endpoint=preferred_endpoint, discovery_timeout=discovery_timeout)
             return True
 
     try:
@@ -1509,7 +1910,7 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
             return True
 
         if driver_ready:
-            launch_droidcam_and_wait(assume_yes)
+            launch_droidcam_and_wait(assume_yes, preferred_endpoint=preferred_endpoint, discovery_timeout=discovery_timeout)
             return True
 
         if not video_installer.exists():
@@ -1542,11 +1943,17 @@ def install_droidcam_linux(pm: str | None, assume_yes: bool, allow_layering: boo
                 print("On Bazzite/Fedora Atomic, reboot after package layering and run installer.py again.")
             return True
 
-        launch_droidcam_and_wait(assume_yes)
+        launch_droidcam_and_wait(assume_yes, preferred_endpoint=preferred_endpoint, discovery_timeout=discovery_timeout)
         return True
 
 
-def maybe_install_droidcam(pm: str | None, assume_yes: bool, allow_layering: bool = False) -> None:
+def maybe_install_droidcam(
+    pm: str | None,
+    assume_yes: bool,
+    allow_layering: bool = False,
+    preferred_endpoint: str | None = None,
+    discovery_timeout: float = 10.0,
+) -> None:
     print("\n[CAMERA FALLBACK]")
     print("No working camera was detected.")
     print("Astra's gesture engine requires a webcam-like video source.")
@@ -1557,9 +1964,13 @@ def maybe_install_droidcam(pm: str | None, assume_yes: bool, allow_layering: boo
 
     if platform.system() == "Windows":
         if install_droidcam_windows():
-            launch_droidcam_and_wait(assume_yes)
+            launch_droidcam_and_wait(
+                assume_yes,
+                preferred_endpoint=preferred_endpoint,
+                discovery_timeout=discovery_timeout,
+            )
     elif platform.system() == "Linux":
-        install_droidcam_linux(pm, assume_yes, allow_layering)
+        install_droidcam_linux(pm, assume_yes, allow_layering, preferred_endpoint, discovery_timeout)
     else:
         print("Automatic DroidCam installation is currently implemented for Windows/Linux.")
 
@@ -1585,6 +1996,8 @@ def main() -> int:
     parser.add_argument("--autostart", action="store_true", help="enable resident Astra daemon at login")
     parser.add_argument("--diagnose-only", action="store_true", help="inspect hardware without installing")
     parser.add_argument("--camera-only", action="store_true", help="repair/test only camera and DroidCam setup")
+    parser.add_argument("--droidcam", default=None, help="preferred DroidCam endpoint, e.g. 192.168.1.50:4747")
+    parser.add_argument("--camera-scan-timeout", type=float, default=10.0, help="max automatic DroidCam LAN discovery time")
     parser.add_argument("--start", action="store_true", help="start Astra after installation")
     parser.add_argument("--full", action="store_true", help="install all Astra features, autostart and start now")
     parser.add_argument("--allow-layering", action="store_true", help="allow rpm-ostree package layering on immutable Linux")
@@ -1657,7 +2070,7 @@ def main() -> int:
                 print(f"  camera {idx}: {w}x{h}")
             return 0
 
-        maybe_install_droidcam(pm, args.yes, args.allow_layering)
+        maybe_install_droidcam(pm, args.yes, args.allow_layering, args.droidcam, args.camera_scan_timeout)
         cameras = probe_cameras_opencv()
         if cameras:
             print("\nCamera repair successful:")
