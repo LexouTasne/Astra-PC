@@ -105,6 +105,7 @@ class AstraDaemon:
         self._stop = threading.Event()
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
+        self._voice_lock = threading.RLock()
         self.mesh_server = None
         self.mesh_sensor_state: dict[str, dict[str, Any]] = {}
 
@@ -116,35 +117,7 @@ class AstraDaemon:
         self._start_mesh()
 
         if voice:
-            from astra_pc.voice.assistant import AstraVoiceAssistant
-            voice_cfg = self.config.data.get("voice", {})
-            from astra_pc.voice.piper_tts import resolve_piper_model
-            piper_model = resolve_piper_model(voice_cfg.get("piper_model") or None)
-            self.voice_assistant = AstraVoiceAssistant(
-                self.brain,
-                None,
-                wake_word=voice_cfg.get("wake_word", "astra"),
-                speak=not no_speak,
-                engine=voice_cfg.get("engine", "fast"),
-                whisper_model=voice_cfg.get("whisper_model", "base"),
-                language=voice_cfg.get("language", "pt"),
-                request_handler=self._voice_request,
-                conversation_window=float(voice_cfg.get("conversation_window", 9.0)),
-                wakeword_model=(
-                    voice_cfg.get("dedicated_wakeword", {}).get("model_path")
-                    if voice_cfg.get("dedicated_wakeword", {}).get("enabled")
-                    else None
-                ),
-                wakeword_threshold=float(
-                    voice_cfg.get("dedicated_wakeword", {}).get("threshold", 0.55)
-                ),
-                piper_model=piper_model,
-            )
-            threading.Thread(
-                target=self.voice_assistant.run,
-                name="astra-resident-voice",
-                daemon=True,
-            ).start()
+            self._start_voice_assistant(no_speak=no_speak)
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
             server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -173,11 +146,7 @@ class AstraDaemon:
                 self.mesh_server.stop()
             except Exception:
                 pass
-        if self.voice_assistant:
-            try:
-                self.voice_assistant.stop()
-            except Exception:
-                pass
+        self._stop_voice_assistant()
 
     def _start_mesh(self) -> None:
         mesh_cfg = self.config.data.get("mesh", {})
@@ -232,6 +201,67 @@ class AstraDaemon:
                 )
             except Exception:
                 pass
+
+    def _start_voice_assistant(self, no_speak: bool = False) -> bool:
+        with self._voice_lock:
+            if self.voice_assistant is not None:
+                return True
+            try:
+                from astra_pc.voice.assistant import AstraVoiceAssistant
+                from astra_pc.voice.piper_tts import resolve_piper_model
+
+                voice_cfg = self.config.data.get("voice", {})
+                piper_model = resolve_piper_model(
+                    voice_cfg.get("piper_model") or None
+                )
+                assistant = AstraVoiceAssistant(
+                    self.brain,
+                    None,
+                    wake_word=voice_cfg.get("wake_word", "astra"),
+                    speak=not no_speak,
+                    engine=voice_cfg.get("engine", "fast"),
+                    whisper_model=voice_cfg.get("whisper_model", "base"),
+                    language=voice_cfg.get("language", "pt"),
+                    request_handler=self._voice_request,
+                    conversation_window=float(
+                        voice_cfg.get("conversation_window", 9.0)
+                    ),
+                    wakeword_model=(
+                        voice_cfg.get("dedicated_wakeword", {}).get("model_path")
+                        if voice_cfg.get("dedicated_wakeword", {}).get("enabled")
+                        else None
+                    ),
+                    wakeword_threshold=float(
+                        voice_cfg.get("dedicated_wakeword", {}).get(
+                            "threshold", 0.55
+                        )
+                    ),
+                    piper_model=piper_model,
+                )
+                self.voice_assistant = assistant
+                threading.Thread(
+                    target=assistant.run,
+                    name="astra-resident-voice",
+                    daemon=True,
+                ).start()
+                return True
+            except Exception as exc:
+                self.voice_assistant = None
+                print(f"[voice] resident start failed: {exc}")
+                return False
+
+    def _stop_voice_assistant(self) -> bool:
+        with self._voice_lock:
+            assistant = self.voice_assistant
+            self.voice_assistant = None
+        if assistant is None:
+            return True
+        try:
+            assistant.stop()
+            return True
+        except Exception as exc:
+            print(f"[voice] resident stop failed: {exc}")
+            return False
 
     def _voice_request(self, text: str) -> str:
         result = self.handle({"type": "ask", "text": text})
@@ -342,6 +372,22 @@ class AstraDaemon:
 
         if kind == "ping":
             return {"ok": True, "version": "0.8", "status": "ready"}
+
+        if kind == "voice.status":
+            return {
+                "ok": True,
+                "active": self.voice_assistant is not None,
+            }
+
+        if kind == "voice.start":
+            started = self._start_voice_assistant(
+                no_speak=bool(request.get("no_speak", False))
+            )
+            return {"ok": started, "active": self.voice_assistant is not None}
+
+        if kind == "voice.stop":
+            stopped = self._stop_voice_assistant()
+            return {"ok": stopped, "active": self.voice_assistant is not None}
 
         if kind == "stop":
             self.stop()
