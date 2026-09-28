@@ -210,11 +210,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Validate Electron desktop syntax
+      - name: Validate Electron main/preload syntax
         run: |
-          node --check apps/desktop/main.mjs
-          node --check apps/desktop/preload.mjs
-          node --check apps/desktop/app.js
+          node --check apps/desktop/electron/main.mjs
+          node --check apps/desktop/electron/preload.mjs
       - name: Validate desktop package metadata
         run: |
-          node -e "const p=require('./apps/desktop/package.json'); if(p.productName!=='Astra'||!p.dependencies.electron) process.exit(1)"
+          node - <<'NODE'
+          const p = require('./apps/desktop/package.json')
+          const all = { ...(p.dependencies || {}), ...(p.devDependencies || {}) }
+          if (p.productName !== 'Astra' || !all.electron || !all.react || !all.vite) process.exit(1)
+          NODE
+      - name: Install and build renderer
+        working-directory: apps/desktop
+        run: |
+          npm install --no-audit --no-fund --package-lock=false
+          npm run build
