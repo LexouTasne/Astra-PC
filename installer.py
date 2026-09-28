@@ -587,8 +587,8 @@ def ensure_astra_models() -> bool:
         return False
 
     models = [
-        ("qwen3:0.6b", "fast text/voice brain", "~523 MB"),
-        ("qwen3-vl:2b-instruct", "vision/screen/video brain", "~1.9 GB"),
+        ("qwen3:0.6b", "ultra-fast voice/fallback brain", "~523 MB"),
+        ("qwen3-vl:2b-instruct", "primary Astra brain + vision/screen/video", "~1.9 GB"),
         ("qwen3-embedding:0.6b", "semantic memory embeddings", "~639 MB"),
     ]
 
