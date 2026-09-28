@@ -415,6 +415,29 @@ def _run_voice(args, config) -> None:
     except Exception:
         request_handler = None
 
+    restore_resident_voice = False
+    if request_handler is not None:
+        try:
+            status = daemon_request(
+                {"type": "voice.status"},
+                host=host,
+                port=port,
+                timeout=1.0,
+            )
+            if status.get("active"):
+                stopped = daemon_request(
+                    {"type": "voice.stop"},
+                    host=host,
+                    port=port,
+                    timeout=3.0,
+                )
+                restore_resident_voice = bool(stopped.get("ok"))
+                if restore_resident_voice:
+                    print("[voice] resident microphone handed to foreground session")
+                    __import__("time").sleep(0.2)
+        except Exception:
+            restore_resident_voice = False
+
     if request_handler is None and not client.available():
         raise SystemExit(
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
@@ -437,7 +460,20 @@ def _run_voice(args, config) -> None:
         wakeword_threshold=args.wakeword_threshold,
         piper_model=piper_model,
     )
-    assistant.run()
+    try:
+        assistant.run()
+    finally:
+        if restore_resident_voice:
+            try:
+                daemon_request(
+                    {"type": "voice.start", "no_speak": args.no_speak},
+                    host=host,
+                    port=port,
+                    timeout=3.0,
+                )
+                print("[voice] resident microphone restored")
+            except Exception as exc:
+                print(f"[voice] could not restore resident listener: {exc}")
 
 
 def _run_daemon(args, config) -> None:
