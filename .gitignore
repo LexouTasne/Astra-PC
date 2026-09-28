@@ -9,3 +9,7 @@ models/
 *.log
 .vscode/
 .idea/
+
+# Astra Desktop local Electron runtime
+apps/desktop/node_modules/
+apps/desktop/release/
