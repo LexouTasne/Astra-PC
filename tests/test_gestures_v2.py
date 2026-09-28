@@ -1,3 +1,5 @@
+import threading
+
 from astra_pc.gestures.control import (
     GestureControlState,
     apply_gesture_control,
@@ -68,16 +70,15 @@ def test_scroll_emits_both_directions():
     assert down.label == "scroll-down"
 
 
-def test_ydotool_negative_wheel_uses_option_separator():
+def test_ydotool_negative_wheel_is_preserved_by_coalescer():
     backend = object.__new__(YdotoolBackend)
-    calls = []
-    backend._queue_command = lambda *args: calls.append(args)
+    backend._pending_wheel = 0
+    backend._wheel_lock = threading.Lock()
+    backend._wake = threading.Event()
 
     backend.scroll(-3)
 
-    assert calls == [
-        ("mousemove", "--wheel", "--", "0", "-3")
-    ]
+    assert backend._take_wheel() == -3
 
 
 def test_gesture_control_parser_is_specific():
