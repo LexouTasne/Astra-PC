@@ -25,6 +25,7 @@ from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
 from astra_pc.core.routine_suggestions import RoutineSuggestionEngine
 from astra_pc.core.semantic_memory import SemanticMemory
+from astra_pc.gestures.control import GestureControlState, apply_gesture_control
 from astra_pc.perception.fusion import PerceptionFusion
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.perception.reference import ReferenceResolver
@@ -105,6 +106,7 @@ class AstraDaemon:
         self.routines = RoutineManager(self.memory, self.skills)
         self.routine_suggestions = RoutineSuggestionEngine(self.memory)
         self.planner = AstraPlanner(self.brain, self.skills)
+        self.gesture_control = GestureControlState()
         self.prediction = PredictionEngine(self.memory)
         self.reference = ReferenceResolver()
         self.fusion = PerceptionFusion(self.brain)
@@ -795,6 +797,20 @@ class AstraDaemon:
                 "ok": True,
                 "message": math_answer,
                 "plan": {"type": "answer", "path": "system-local-math"},
+            }
+
+        gesture_answer = apply_gesture_control(self.gesture_control, text)
+        if gesture_answer is not None:
+            self._record_chat(text, gesture_answer)
+            self.bus.publish(
+                "gestures.control",
+                state=self.gesture_control.snapshot(force=True),
+                source="voice" if voice_mode else "chat",
+            )
+            return {
+                "ok": True,
+                "message": gesture_answer,
+                "plan": {"type": "answer", "path": "gesture-control"},
             }
 
         profile_aliases = {
