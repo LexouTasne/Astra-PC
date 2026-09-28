@@ -781,7 +781,12 @@ class AstraDaemon:
             }
             if result.ok and str(plan.get("skill", "")) == "files":
                 args = dict(plan.get("args", {}))
-                used_path = args.get("path") or args.get("root")
+                data = result.data or {}
+                used_path = (
+                    data.get("path")
+                    or args.get("path")
+                    or args.get("root")
+                )
                 if used_path:
                     self.memory.set("last_files_path", str(used_path))
             self._record_chat(text, result.message)
