@@ -175,15 +175,26 @@ def _run_desktop(args, config) -> None:
             "Astra Desktop precisa de Node.js/npm. Instale Node.js e rode 'astra' novamente."
         )
 
+    import hashlib
+
     electron_marker = desktop / "node_modules" / "electron"
-    if not electron_marker.exists():
-        print("[Astra Desktop] Preparando a GUI na primeira abertura...")
+    package_hash = hashlib.sha256(package.read_bytes()).hexdigest()
+    deps_marker = desktop / "node_modules" / ".astra-package-hash"
+    deps_current = (
+        electron_marker.exists()
+        and deps_marker.exists()
+        and deps_marker.read_text(encoding="utf-8", errors="ignore").strip() == package_hash
+    )
+    if not deps_current:
+        print("[Astra Desktop] Preparando/atualizando a GUI...")
         result = subprocess.call(
             [npm, "install", "--no-audit", "--no-fund", "--package-lock=false"],
             cwd=str(desktop),
         )
         if result != 0:
             raise SystemExit("Falha ao instalar as dependências do Astra Desktop.")
+        deps_marker.parent.mkdir(parents=True, exist_ok=True)
+        deps_marker.write_text(package_hash, encoding="utf-8")
 
     env = os.environ.copy()
     env["ASTRA_ROOT"] = str(root)
