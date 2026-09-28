@@ -345,6 +345,7 @@ class AstraVoiceAssistant:
         full = ""
         speech_buffer = ""
         spoke = False
+        first_chunk_checked = False
         prompt = self._short_prompt(request)
 
         try:
@@ -352,24 +353,57 @@ class AstraVoiceAssistant:
                 full += piece
                 speech_buffer += piece
 
-                # Start TTS as soon as one natural phrase is complete rather than
-                # waiting for the full model answer.
                 if self.speaker and self._speech_chunk_ready(speech_buffer):
                     chunk = speech_buffer.strip()
                     if chunk:
+                        if not first_chunk_checked:
+                            first_chunk_checked = True
+                            if self._looks_english(chunk):
+                                raise RuntimeError("model escaped to English")
                         self.speaker.say(chunk)
                         spoke = True
                     speech_buffer = ""
+
+            if self._looks_english(full):
+                raise RuntimeError("model answered in English")
 
             if self.speaker and speech_buffer.strip():
                 self.speaker.say(speech_buffer.strip())
                 spoke = True
         except Exception as exc:
+            if spoke:
+                # Do not duplicate already-spoken Portuguese on a late transport
+                # error. Keep what we already have.
+                print(f"[voice] stream ended after speech began: {exc}")
+                return full.strip(), True
             print(f"[voice] streaming model fallback: {exc}")
-            full = self.brain.ask_fast(prompt)
+            repair = (
+                "Responda obrigatoriamente em português do Brasil. "
+                "Não use inglês. Responda curto e natural. Pedido original: "
+                + request
+            )
+            full = self.brain.ask_fast(repair)
             spoke = False
 
         return full.strip(), spoke
+
+    @staticmethod
+    def _looks_english(text: str) -> bool:
+        words = {
+            w.strip(".,!?;:'\"()[]{}").lower()
+            for w in text.split()
+            if w.strip()
+        }
+        english = {
+            "the", "and", "i'm", "here", "assist", "you", "your", "can",
+            "please", "what", "is", "are", "how", "would", "like", "help",
+        }
+        portuguese = {
+            "o", "a", "e", "é", "em", "que", "para", "você", "voce",
+            "como", "com", "uma", "um", "não", "nao", "posso", "sim",
+        }
+        return len(words & english) >= 2 and len(words & portuguese) == 0
+
 
     @staticmethod
     def _speech_chunk_ready(text: str) -> bool:
