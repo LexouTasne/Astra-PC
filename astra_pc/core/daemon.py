@@ -907,8 +907,24 @@ class AstraDaemon:
 
         last_listing = self.memory.get("last_files_listing", None)
         followup_plan = self.planner.file_followup_plan(text, last_listing)
+
+        fast_text = text
+        last_app = self.memory.get("last_app_name", None)
+        if last_app and re.search(
+            r"\b(?:abre|abra|abrir|feche|fecha|fechar|encerre|encerra|encerrar)\b",
+            lowered,
+        ):
+            app_ref = re.compile(
+                r"\b(?:esse|este|o)\s+(?:aplicativo|app|programa)\b|"
+                r"\b(?:ele|dele)\b",
+                re.I,
+            )
+            if app_ref.search(fast_text):
+                fast_text = app_ref.sub(str(last_app), fast_text)
+                print(f"[context] app reference -> {last_app}")
+
         direct_plan = followup_plan or self.planner._fast_plan(
-            text,
+            fast_text,
             self.context.current,
         )
         if direct_plan and direct_plan.get("type") == "skill":
@@ -977,22 +993,6 @@ class AstraDaemon:
             }
 
         planner_text = text
-
-        # Resolve app pronouns deterministically from the most recent app action.
-        # Example: "fecha o Discord" -> "é Discord" -> "fecha esse aplicativo".
-        last_app = self.memory.get("last_app_name", None)
-        if last_app and re.search(
-            r"\b(?:abre|abra|abrir|feche|fecha|fechar|encerre|encerra|encerrar)\b",
-            lowered,
-        ):
-            app_ref = re.compile(
-                r"\b(?:esse|este|o)\s+(?:aplicativo|app|programa)\b|"
-                r"\b(?:ele|dele)\b",
-                re.I,
-            )
-            if app_ref.search(planner_text):
-                planner_text = app_ref.sub(str(last_app), planner_text)
-                print(f"[context] app reference -> {last_app}")
 
         if not followup_plan and not AstraPlanner.extract_path(text):
             q = lowered
