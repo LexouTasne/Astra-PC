@@ -169,7 +169,7 @@ def _run_desktop(args, config) -> None:
     if not electron_marker.exists():
         print("[Astra Desktop] Preparando a GUI na primeira abertura...")
         result = subprocess.call(
-            [npm, "install", "--no-audit", "--no-fund"],
+            [npm, "install", "--no-audit", "--no-fund", "--package-lock=false"],
             cwd=str(desktop),
         )
         if result != 0:
