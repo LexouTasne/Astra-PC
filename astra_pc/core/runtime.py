@@ -71,7 +71,7 @@ class AstraRuntime:
         tracker = HandTracker(self.config.section("tracking"))
         gesture_cfg = dict(self.config.section("gestures"))
         gesture_cfg["drag_enabled"] = bool(
-            gesture_cfg.get("drag_enabled", False) and self.drag
+            gesture_cfg.get("drag_enabled", False) or self.drag
         )
         gestures = GestureEngine(gesture_cfg)
 
