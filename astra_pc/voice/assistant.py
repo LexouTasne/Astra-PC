@@ -334,14 +334,9 @@ class AstraVoiceAssistant:
         print("You>", request)
         already_spoken = False
 
-        quick = self.router.execute(request)
-        if quick.handled and quick.message not in {"pause_gestures", "resume_gestures"}:
-            answer = quick.message
-            path = "command"
-        elif self.request_handler is not None:
-            # Resident voice must use the daemon for *every* non-instant turn.
-            # That keeps voice, chat, files, actions and references on one shared
-            # conversation state instead of maintaining a separate "voice brain".
+        if self.request_handler is not None:
+            # Resident voice sends every useful turn through the daemon so even
+            # instant answers participate in the same shared conversation state.
             try:
                 answer = self.request_handler(request)
                 path = "daemon-context"
@@ -349,16 +344,21 @@ class AstraVoiceAssistant:
                 print(f"[voice] daemon context failed, local fallback: {exc}")
                 answer = self.brain.ask_voice(self._short_prompt(request))
                 path = "text-fallback-2b"
-        elif self._needs_screen(request):
-            shot = capture_screen()
-            try:
-                answer = self.brain.see(shot, self._short_prompt(request))
-            finally:
-                shot.unlink(missing_ok=True)
-            path = "vision"
         else:
-            answer, already_spoken = self._stream_conversation(request)
-            path = "text-stream-2b"
+            quick = self.router.execute(request)
+            if quick.handled and quick.message not in {"pause_gestures", "resume_gestures"}:
+                answer = quick.message
+                path = "command"
+            elif self._needs_screen(request):
+                shot = capture_screen()
+                try:
+                    answer = self.brain.see(shot, self._short_prompt(request))
+                finally:
+                    shot.unlink(missing_ok=True)
+                path = "vision"
+            else:
+                answer, already_spoken = self._stream_conversation(request)
+                path = "text-stream-2b"
 
         answer = (answer or "").strip()
         if not answer:
