@@ -71,17 +71,21 @@
     "whisper_model": "small",
     "language": "pt",
     "wake_word": "astra",
-    "silence_ms": 260,
-    "pre_roll_ms": 200,
+    "silence_ms": 480,
+    "pre_roll_ms": 300,
     "adaptive_retry": true,
     "target_response_ms": 7000,
-    "conversation_window": 9,
+    "conversation_window": 12,
     "dedicated_wakeword": {
       "enabled": false,
       "model_path": "",
       "threshold": 0.55
     },
-    "piper_model": ""
+    "piper_model": "",
+    "start_speech_ms": 60,
+    "min_utterance_ms": 240,
+    "max_utterance_s": 18,
+    "vad_mode": 2
   },
   "media": {
     "comfyui": {
