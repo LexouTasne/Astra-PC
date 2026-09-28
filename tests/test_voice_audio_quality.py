@@ -36,3 +36,33 @@ def test_astra_wake_word_accepts_common_dropped_r_transcription():
     match = assistant._wake_match("Asta fecha o Discord")
     assert match is not None
     assert match.group(0).lower() == "asta"
+
+
+def test_prompt_echo_is_rejected_as_hallucination():
+    engine = object.__new__(FastWhisperVoiceEngine)
+    engine.initial_prompt = "Português do Brasil. Assistente Astra."
+    assert engine._is_hallucination(
+        "O que a pessoa disser, incluindo nomes de programas, caminhos, números e comandos, sem completar frases.",
+        -0.44,
+        0.02,
+    )
+
+
+def test_common_whisper_noise_caption_is_rejected():
+    engine = object.__new__(FastWhisperVoiceEngine)
+    engine.initial_prompt = "Português do Brasil. Assistente Astra."
+    assert engine._is_hallucination(
+        "Se inscreva no canal e se inscreva no canal.",
+        -1.12,
+        0.02,
+    )
+
+
+def test_real_app_command_is_not_rejected():
+    engine = object.__new__(FastWhisperVoiceEngine)
+    engine.initial_prompt = "Português do Brasil. Assistente Astra."
+    assert not engine._is_hallucination(
+        "Fecha o Discord.",
+        -0.58,
+        0.02,
+    )
