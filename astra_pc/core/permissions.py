@@ -20,6 +20,8 @@ class PermissionLayer:
         "clipboard_read", "clipboard_write", "notify", "project_summary",
         "window_maximize", "window_minimize", "window_snap_left",
         "window_snap_right", "window_move_monitor",
+        "mouse_move", "mouse_click", "mouse_right_click", "mouse_scroll",
+        "type_text",
     }
     CONFIRM = {
         "write_file", "rename_file", "move_file", "install_package",
