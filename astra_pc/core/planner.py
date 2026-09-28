@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import difflib
 import json
 import re
+import unicodedata
 from typing import Any
 
 from astra_pc.ai.agent import AstraBrain
@@ -28,7 +30,11 @@ class AstraPlanner:
         "arquivo", "arquivos", "pasta", "diretório", "diretorio",
         "downloads", "documentos", "documents", "desktop",
         "o que tem dentro", "oque tem dentro", "o que contém", "o que contem",
-        "listar", "liste", "mostre os arquivos", "conteúdo da pasta", "conteudo da pasta",
+        "listar", "liste", "me lista", "mostre os arquivos",
+        "conteúdo da pasta", "conteudo da pasta",
+        "dentro do", "dentro da", "dentro dele", "dentro dela",
+        "lá dentro", "la dentro", "primeiro item", "primeira pasta",
+        "segundo item", "terceiro item", "item da lista",
     )
 
     def __init__(self, brain: AstraBrain, skills: SkillManager):
@@ -61,6 +67,144 @@ class AstraPlanner:
                 "executar rotina",
             )
         )
+
+    @staticmethod
+    def _reference_key(value: str) -> str:
+        normalized = unicodedata.normalize("NFKD", str(value).casefold())
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        return re.sub(r"[^a-z0-9]+", "", normalized)
+
+    @classmethod
+    def resolve_listing_reference(
+        cls,
+        text: str,
+        listing: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Resolve conversational references against the last real file listing.
+
+        This deliberately happens before the LLM planner so phrases such as
+        "o primeiro item", "dentro do bestclient" and even small typos keep
+        pointing at the concrete filesystem object returned by FilesSkill.
+        """
+        if not isinstance(listing, dict):
+            return None
+        entries = listing.get("entries")
+        if not isinstance(entries, list) or not entries:
+            return None
+
+        q = " ".join(str(text).casefold().split())
+        q_key = cls._reference_key(q)
+
+        ordinal_patterns = (
+            (0, r"\b(?:primeir[oa]|1[ºªo]?|um)\s+(?:item|arquivo|pasta|da lista)\b"),
+            (1, r"\b(?:segund[oa]|2[ºªo]?)\s+(?:item|arquivo|pasta|da lista)\b"),
+            (2, r"\b(?:terceir[oa]|3[ºªo]?)\s+(?:item|arquivo|pasta|da lista)\b"),
+            (3, r"\b(?:quart[oa]|4[ºªo]?)\s+(?:item|arquivo|pasta|da lista)\b"),
+            (4, r"\b(?:quint[oa]|5[ºªo]?)\s+(?:item|arquivo|pasta|da lista)\b"),
+        )
+        for index, pattern in ordinal_patterns:
+            if index < len(entries) and re.search(pattern, q, re.I):
+                item = entries[index]
+                return item if isinstance(item, dict) else None
+
+        # Exact/substring reference wins before fuzzy matching.
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            name_key = cls._reference_key(item.get("name", ""))
+            if len(name_key) >= 3 and name_key in q_key:
+                return item
+
+        # Pull the likely object name out of natural follow-ups.
+        candidate = q
+        match = re.search(
+            r"(?:dentro\s+(?:do|da|de|desse|dessa|dele|dela)\s+|"
+            r"(?:abre|abra|abrir|leia|ler|lista|liste|listar)\s+(?:o|a|os|as)?\s*)(.+)$",
+            q,
+            re.I,
+        )
+        if match:
+            candidate = match.group(1)
+        candidate = re.sub(
+            r"\b(?:porra|mano|cara|pasta|arquivo|diretorio|diretório|item|lista|"
+            r"ai|aí|la|lá|ne|né|pra|para|dentro|do|da|de|o|a|os|as)\b",
+            " ",
+            candidate,
+            flags=re.I,
+        )
+        candidate_key = cls._reference_key(candidate)
+        if len(candidate_key) < 3:
+            return None
+
+        best = None
+        best_score = 0.0
+        for item in entries:
+            if not isinstance(item, dict):
+                continue
+            name_key = cls._reference_key(item.get("name", ""))
+            if not name_key:
+                continue
+            score = difflib.SequenceMatcher(None, candidate_key, name_key).ratio()
+            if candidate_key in name_key or name_key in candidate_key:
+                score = max(score, 0.92)
+            if score > best_score:
+                best_score = score
+                best = item
+
+        return best if best_score >= 0.54 else None
+
+    @classmethod
+    def file_followup_plan(
+        cls,
+        text: str,
+        listing: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if cls.extract_path(text):
+            return None
+        if not isinstance(listing, dict):
+            return None
+
+        q = " ".join(text.casefold().strip().split())
+        fileish = any(word in q for word in cls.FILE_WORDS)
+        if not fileish:
+            return None
+
+        item = cls.resolve_listing_reference(text, listing)
+        target = None
+        item_type = None
+        if item:
+            target = item.get("path")
+            item_type = item.get("type")
+
+        # Pronouns like "lá dentro" refer to the directory that was just listed.
+        if not target and any(
+            phrase in q
+            for phrase in (
+                "lá dentro", "la dentro", "dentro dele", "dentro dela",
+                "nessa pasta", "nesta pasta", "nesse diretório", "nesse diretorio",
+                "me lista o que tem dentro", "me lista oque tem dentro",
+            )
+        ):
+            target = listing.get("path")
+            item_type = "folder"
+
+        if not target:
+            return None
+
+        wants_read = any(
+            phrase in q
+            for phrase in (
+                "leia", "ler arquivo", "conteúdo do arquivo", "conteudo do arquivo",
+            )
+        )
+        action = "read_file" if wants_read or item_type == "file" else "list_dir"
+        return {
+            "type": "skill",
+            "skill": "files",
+            "action": action,
+            "args": {"path": str(target)},
+            "resolved_from_context": True,
+        }
 
     def plan(
         self,
