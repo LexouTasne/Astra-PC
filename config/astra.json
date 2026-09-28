@@ -8,29 +8,34 @@
   },
   "tracking": {
     "max_hands": 2,
-    "min_detection_confidence": 0.55,
-    "min_tracking_confidence": 0.5,
-    "model_complexity": 0
+    "min_detection_confidence": 0.65,
+    "min_tracking_confidence": 0.6,
+    "model_complexity": 1
   },
   "pointer": {
     "enabled": false,
     "active_margin": 0.1,
-    "smoothing": 0.38,
-    "deadzone_px": 2
+    "smoothing": 0.3,
+    "deadzone_px": 1
   },
   "gestures": {
-    "pinch_threshold": 0.045,
-    "click_release_threshold": 0.065,
-    "right_pinch_threshold": 0.05,
+    "pinch_threshold": 0.05,
+    "click_release_threshold": 0.075,
+    "right_pinch_threshold": 0.055,
     "drag_enabled": false,
-    "drag_hold_ms": 350,
-    "pause_cooldown_ms": 900,
-    "scroll_gain": 8,
-    "scroll_deadzone": 0.007,
-    "swipe_velocity": 1.25,
-    "swipe_cooldown_ms": 700,
-    "two_hand_zoom_threshold": 0.035,
-    "two_hand_rotate_threshold_deg": 10
+    "drag_hold_ms": 420,
+    "pause_cooldown_ms": 850,
+    "scroll_gain": 45,
+    "scroll_deadzone": 0.0025,
+    "swipe_velocity": 0.6,
+    "swipe_cooldown_ms": 650,
+    "two_hand_zoom_threshold": 0.025,
+    "two_hand_rotate_threshold_deg": 7.5,
+    "pause_hold_ms": 420,
+    "scroll_smoothing": 0.45,
+    "scroll_max_step": 4,
+    "swipe_distance": 0.11,
+    "swipe_window_ms": 280
   },
   "actions": {
     "zoom_in": [
