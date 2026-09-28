@@ -73,41 +73,54 @@ class FastWhisperVoiceEngine:
         self._thread: threading.Thread | None = None
 
     def _resolve_capture_rate(self, target_rate: int) -> int:
-        """Use 16 kHz when the device accepts it, otherwise capture natively.
+        """Use target rate when possible, otherwise capture at a native rate.
 
-        Some USB/virtual microphones (including common 48 kHz-only devices)
-        reject a 16 kHz PortAudio stream. Astra captures at the device's native
-        rate and resamples each VAD frame to 16 kHz instead of crashing.
+        If a saved device disappeared or became invalid, fall back to the
+        current default input instead of letting the ASR thread crash.
         """
-        try:
-            self.sd.check_input_settings(
-                device=self.input_device,
-                channels=1,
-                dtype="int16",
-                samplerate=target_rate,
-            )
-            return target_rate
-        except Exception:
-            pass
+        candidates = [self.input_device]
+        if self.input_device is not None:
+            candidates.append(None)
 
-        try:
-            info = self.sd.query_devices(self.input_device, "input")
-            native = int(round(float(info.get("default_samplerate", 48000))))
-            self.sd.check_input_settings(
-                device=self.input_device,
-                channels=1,
-                dtype="int16",
-                samplerate=native,
-            )
-            print(
-                f"[asr] microphone does not accept {target_rate} Hz; "
-                f"capturing at {native} Hz and resampling"
-            )
-            return native
-        except Exception as exc:
-            raise RuntimeError(
-                f"Microphone '{self.input_device or 'default'}' cannot be opened: {exc}"
-            ) from exc
+        last_error = None
+        for candidate in candidates:
+            try:
+                self.sd.check_input_settings(
+                    device=candidate,
+                    channels=1,
+                    dtype="int16",
+                    samplerate=target_rate,
+                )
+                if candidate != self.input_device:
+                    print("[asr] saved microphone unavailable; using system default")
+                    self.input_device = candidate
+                return target_rate
+            except Exception as exc:
+                last_error = exc
+
+            try:
+                info = self.sd.query_devices(candidate, "input")
+                native = int(round(float(info.get("default_samplerate", 48000))))
+                self.sd.check_input_settings(
+                    device=candidate,
+                    channels=1,
+                    dtype="int16",
+                    samplerate=native,
+                )
+                if candidate != self.input_device:
+                    print("[asr] saved microphone unavailable; using system default")
+                    self.input_device = candidate
+                print(
+                    f"[asr] microphone does not accept {target_rate} Hz; "
+                    f"capturing at {native} Hz and resampling"
+                )
+                return native
+            except Exception as exc:
+                last_error = exc
+
+        raise RuntimeError(
+            f"No usable microphone input could be opened: {last_error}"
+        )
 
     def _to_target_rate(self, pcm: bytes) -> bytes:
         if self.capture_rate == self.sample_rate:
