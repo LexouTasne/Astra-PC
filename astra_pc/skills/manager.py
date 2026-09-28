@@ -12,6 +12,7 @@ from .coding import CodingSkill
 from .discovery import discover_skills
 from .files import FilesSkill
 from .git import GitSkill
+from .input_control import InputControlSkill
 from .notifications import NotificationsSkill
 from .system import SystemSkill
 from .terminal import TerminalSkill
@@ -30,6 +31,7 @@ class SkillManager:
             SystemSkill(),
             FilesSkill(),
             GitSkill(),
+            InputControlSkill(),
             ClipboardSkill(),
             NotificationsSkill(),
             TerminalSkill(),
