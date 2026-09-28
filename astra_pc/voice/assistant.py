@@ -177,13 +177,16 @@ class AstraVoiceAssistant:
     def run(self) -> None:
         print(f"Voice Astra online. Say '{self.wake_word}' followed by a request.")
         print("Fast path: VAD -> resident ASR -> 0.6B text model -> async TTS")
-        try:
-            self.brain.preload()
-            print("[warmup] text model ready")
-        except Exception as exc:
-            # Voice capture should remain usable even if model warmup fails.
-            # The request path can retry once Ollama is ready.
-            print(f"[warmup] text model skipped: {exc}")
+        if self.request_handler is None:
+            try:
+                self.brain.preload()
+                print("[warmup] text model ready")
+            except Exception as exc:
+                # Voice capture should remain usable even if model warmup fails.
+                # The request path can retry once Ollama is ready.
+                print(f"[warmup] text model skipped: {exc}")
+        else:
+            print("[warmup] resident text model already managed by daemon")
         threading.Thread(
             target=self._warm_vision,
             name="astra-vision-warmup",
