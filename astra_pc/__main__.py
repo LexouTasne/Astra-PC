@@ -537,12 +537,16 @@ def _run_ask(args, config) -> None:
     from .core.ipc import daemon_request
 
     daemon_cfg = config.data.get("daemon", {})
+    payload = {"type": "ask", "text": args.prompt}
+    if getattr(args, "image", None):
+        payload["image"] = str(Path(args.image).expanduser().resolve())
+
     try:
         result = daemon_request(
-            {"type": "ask", "text": args.prompt},
+            payload,
             host=daemon_cfg.get("host", "127.0.0.1"),
             port=int(daemon_cfg.get("port", 8765)),
-            timeout=8.0,
+            timeout=75.0 if getattr(args, "image", None) else 12.0,
         )
         if result.get("ok"):
             print(result.get("message", ""))
@@ -557,7 +561,10 @@ def _run_ask(args, config) -> None:
 
     try:
         brain, _ = _brain(config)
-        print(brain.ask(args.prompt))
+        if getattr(args, "image", None):
+            print(brain.see(Path(args.image).expanduser().resolve(), args.prompt))
+        else:
+            print(brain.ask(args.prompt))
     except Exception as exc:
         message = str(exc).strip()
         if "Ollama is not reachable" in message or "Connection refused" in message:
@@ -1066,6 +1073,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ask = sub.add_parser("ask", help="ask Astra's local Qwen brain")
     ask.add_argument("prompt")
+    ask.add_argument("--image", type=Path, default=None, help="attach an image to the chat request")
 
     see = sub.add_parser("see", help="understand an image")
     see.add_argument("image", type=Path)
