@@ -248,8 +248,8 @@ async function runAction(action) {
     'gesture-start': () => toggleLong('gestures', ['gestures', '--show-camera']),
     'gesture-tutorial': () => window.astra.run(['gestures', '--tutorial']),
     'gesture-setup': () => window.astra.run(['setup', 'gestures', '--yes']),
-    'voice-setup': () => window.astra.run(['setup', 'voice']),
-    'camera-setup': () => window.astra.run(['setup', 'camera']),
+    'voice-setup': () => window.astra.run(['setup', 'voice', '--yes']),
+    'camera-setup': () => window.astra.run(['setup', 'camera', '--yes']),
     'pair': async () => {
       setView('devices')
       const result = await window.astra.run(['mesh', 'pair-code'])
