@@ -27,7 +27,7 @@ class FastWhisperVoiceEngine:
         silence_ms: int = 480,
         pre_roll_ms: int = 300,
         start_speech_ms: int = 60,
-        min_utterance_ms: int = 240,
+        min_utterance_ms: int = 180,
         max_utterance_s: float = 18.0,
         vad_mode: int = 2,
         raw_frame_callback: Callable[[bytes], None] | None = None,
@@ -310,17 +310,17 @@ class FastWhisperVoiceEngine:
                 else:
                     silent += 1
 
-                endpoint = (
-                    silent >= self.silence_frames
-                    and voiced >= self.min_speech_frames
-                )
+                endpoint = silent >= self.silence_frames
                 forced = len(speech) >= self.max_frames
                 if endpoint or forced:
-                    # Keep a small natural tail but remove most endpoint silence.
-                    trim = max(0, silent - self.tail_frames)
-                    final_frames = speech[:-trim] if trim else speech
-                    self._enqueue_utterance(b"".join(final_frames))
+                    if voiced >= self.min_speech_frames:
+                        # Keep a small natural tail but remove most endpoint silence.
+                        trim = max(0, silent - self.tail_frames)
+                        final_frames = speech[:-trim] if trim else speech
+                        self._enqueue_utterance(b"".join(final_frames))
 
+                    # Even a too-short noise burst must return to idle instead
+                    # of holding the microphone session open until max duration.
                     active = False
                     speech = []
                     silent = 0
