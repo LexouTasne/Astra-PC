@@ -33,6 +33,10 @@ class CommandRouter:
         if math_answer is not None:
             return CommandResult(True, math_answer)
 
+        instant = self._instant_reply(cmd)
+        if instant is not None:
+            return CommandResult(True, instant)
+
         if re.search(r"\b(abra|abrir|open)\b.*\b(navegador|browser)\b", cmd):
             webbrowser.open("about:blank")
             return CommandResult(True, "Abrindo navegador.")
@@ -48,6 +52,29 @@ class CommandRouter:
             return CommandResult(True, "resume_gestures")
 
         return CommandResult(False, "Comando ainda não mapeado.")
+
+    @staticmethod
+    def _instant_reply(text: str) -> str | None:
+        q = " ".join(text.lower().strip().split()).rstrip("?.!")
+        q = re.sub(r"^(?:astra[, ]+)", "", q).strip()
+
+        if q in {"oi", "ola", "olá", "opa", "e ai", "e aí"}:
+            return "Oi."
+        if q in {
+            "qual seu nome", "qual e seu nome", "qual é seu nome",
+            "como voce se chama", "como você se chama", "seu nome",
+        }:
+            return "Meu nome é Astra."
+        if q in {
+            "quem te criou", "quem criou voce", "quem criou você",
+            "quem e seu criador", "quem é seu criador", "seu criador",
+        }:
+            return "Fui criada por Richard Mateus, também conhecido como Lex."
+        if q in {"ta ai", "tá aí", "voce ta ai", "você tá aí", "esta ai", "está aí"}:
+            return "Tô aqui."
+        if q in {"obrigado", "valeu", "vlw"}:
+            return "Tamo junto."
+        return None
 
     @staticmethod
     def _number_pt(value: int) -> str:
