@@ -81,10 +81,10 @@ class AstraPlanner:
             },
         }
         raw = self.brain.ask(
-            "Plan this desktop request. Return ONE compact JSON object only. "
-            "Use a skill only when it clearly matches an available skill. "
-            "Use relevant memory only when it actually helps. "
-            "Never invent a capability.\n"
+            "Planeje este pedido de desktop. Retorne APENAS um objeto JSON compacto. "
+            "Use uma skill somente quando ela realmente corresponder a uma skill disponível. "
+            "Use memória relevante somente quando ajudar. "
+            "Nunca invente capacidades. Se houver campo 'answer', escreva-o em português do Brasil.\n"
             + json.dumps(prompt, ensure_ascii=False)
         )
         return self._json(raw)
