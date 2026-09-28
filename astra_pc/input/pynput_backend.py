@@ -32,6 +32,10 @@ class PynputBackend(InputBackend):
         (self.mouse.press if down else self.mouse.release)(Button.left)
         self._left_down = down
 
+    def left_click(self) -> None:
+        self.mouse.click(Button.left, 1)
+        self._left_down = False
+
     def right_click(self) -> None:
         self.mouse.click(Button.right, 1)
 
