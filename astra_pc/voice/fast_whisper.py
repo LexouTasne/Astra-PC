@@ -50,11 +50,15 @@ class FastWhisperVoiceEngine:
         self.raw_frame_callback = raw_frame_callback
         self.language = language
         self.initial_prompt = initial_prompt or (
-            "Astra, assistente local em português do Brasil. "
-            "Transcreva números, contas e nomes de aplicativos com precisão."
+            "Astra é uma assistente local em português do Brasil. "
+            "O usuário costuma dar comandos como abrir ou fechar Discord, "
+            "Brave, Spotify, terminal e VS Code. Transcreva números, contas, "
+            "nomes de aplicativos e verbos de ação com precisão."
         )
         self.hotwords = hotwords or (
-            "Astra DroidCam navegador terminal volume clipboard "
+            "Astra abrir abre abra fechar feche fecha Discord DroidCam "
+            "Brave Spotify VS Code navegador terminal volume clipboard "
+            "clicar clique scroll pausar retomar "
             "um dois três quatro cinco seis sete oito nove dez"
         )
         self.input_device = input_device
