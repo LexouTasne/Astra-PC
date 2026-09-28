@@ -330,7 +330,7 @@ class AstraPlanner:
 
         m = re.search(
             r"\b(?:mova|move|mover)\s+(?:o\s+)?mouse\s+(?:para|pra)\s+"
-            r"(\d{1,5})\s*[,x ]\s*(\d{1,5})\b",
+            r"(-?\d{1,5})\s*[,x ]\s*(-?\d{1,5})\b",
             q,
         )
         if m:
@@ -397,12 +397,17 @@ class AstraPlanner:
             "alt tab": ["alt", "tab"],
             "alt+tab": ["alt", "tab"],
         }
-        if q in hotkeys:
+        hotkey_q = re.sub(
+            r"^(?:pressione|aperta|aperte|faz|faça)\s+",
+            "",
+            q,
+        ).strip()
+        if hotkey_q in hotkeys:
             return {
                 "type": "skill",
                 "skill": "input",
                 "action": "hotkey",
-                "args": {"keys": hotkeys[q]},
+                "args": {"keys": hotkeys[hotkey_q]},
             }
 
         if any(x in q for x in ("aumenta o zoom", "aumenta zoom", "zoom in", "aproxima a tela")):
