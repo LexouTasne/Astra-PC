@@ -58,7 +58,7 @@
     "text_model": "qwen3:0.6b",
     "vision_model": "qwen3-vl:2b-instruct",
     "timeout": 180,
-    "keep_alive": "-1",
+    "keep_alive": -1,
     "fast_context": 3072,
     "vision_context": 6144,
     "strong_model": "qwen3:4b"
