@@ -1225,7 +1225,36 @@ def _linux_neighbor_hosts() -> list[str]:
 def _local_ipv4_networks() -> list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Network]]:
     found: list[tuple[ipaddress.IPv4Address, ipaddress.IPv4Network]] = []
 
-    if platform.system() == "Linux" and command_exists("ip"):
+    # psutil is part of Astra core and gives us a portable view across
+    # Windows/Linux/macOS without shell parsing.
+    try:
+        import psutil
+
+        for _ifname, addresses in psutil.net_if_addrs().items():
+            for item in addresses:
+                if item.family != socket.AF_INET or not item.address:
+                    continue
+                try:
+                    addr = ipaddress.IPv4Address(item.address)
+                except ValueError:
+                    continue
+                if not addr.is_private or addr.is_loopback:
+                    continue
+                try:
+                    network = ipaddress.IPv4Network(
+                        f"{item.address}/{item.netmask or '255.255.255.0'}",
+                        strict=False,
+                    )
+                except ValueError:
+                    network = ipaddress.IPv4Network(
+                        f"{item.address}/24",
+                        strict=False,
+                    )
+                found.append((addr, network))
+    except Exception:
+        pass
+
+    if not found and platform.system() == "Linux" and command_exists("ip"):
         try:
             p = subprocess.run(
                 ["ip", "-j", "-4", "addr", "show", "up"],
@@ -1710,10 +1739,8 @@ def launch_droidcam_and_wait(
         host, port = endpoint
         print(f"Connecting DroidCam CLI to {host}:{port}...")
         cli_process = start_droidcam_cli(host, port)
-        if cli_process is not None:
-            save_droidcam_endpoint(host, port)
-        else:
-            cli_process = None
+        if cli_process is None:
+            print("DroidCam CLI could not stay connected to that endpoint.")
     else:
         cli_process = None
         if os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"):
@@ -1749,6 +1776,11 @@ def launch_droidcam_and_wait(
                 print("\n[DROIDCAM] Working camera detected:")
                 for idx, w, h in cameras:
                     print(f"  camera {idx}: {w}x{h}")
+                if endpoint and endpoint != ("", 0):
+                    save_droidcam_endpoint(endpoint[0], endpoint[1])
+                    print(
+                        f"Saved DroidCam endpoint: {endpoint[0]}:{endpoint[1]}"
+                    )
                 return cameras
             now = time.monotonic()
             if now - last_note >= 5:
@@ -1758,8 +1790,12 @@ def launch_droidcam_and_wait(
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nCamera setup cancelled by user.")
+        if cli_process is not None and cli_process.poll() is None:
+            cli_process.terminate()
         return []
 
+    if cli_process is not None and cli_process.poll() is None:
+        cli_process.terminate()
     print("No camera frames arrived before the timeout.")
     return []
 
