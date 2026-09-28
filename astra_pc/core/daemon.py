@@ -653,6 +653,18 @@ class AstraDaemon:
             stopped = self._stop_voice_assistant()
             return {"ok": stopped, "active": self.voice_assistant is not None}
 
+        if kind == "voice.dictate_once":
+            assistant = self.voice_assistant
+            if assistant is None:
+                return {"ok": False, "error": "resident_voice_not_active"}
+            try:
+                text = assistant.dictate_once(
+                    timeout=float(request.get("timeout", 15.0))
+                )
+                return {"ok": True, "text": text}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
+
         if kind == "stop":
             self.stop()
             return {"ok": True, "message": "stopping"}
