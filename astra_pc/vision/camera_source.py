@@ -237,11 +237,12 @@ def _start_droidcam_cli(
         str(cli),
         "-nocontrols",
         f"-dev={device}",
+        "-size=640x480",
         host,
         str(int(port)),
     ]
     print(
-        f"[camera] DROIDCAM_CONNECT {host}:{port} -> {device}",
+        f"[camera] DROIDCAM_CONNECT {host}:{port} -> {device} size=640x480",
         flush=True,
     )
     try:
@@ -604,6 +605,23 @@ def candidate_cameras(
     return result
 
 
+def _is_virtual_video_source(source: str | int) -> bool:
+    if platform.system() != "Linux":
+        return False
+    index = _index_for_source(source)
+    if index is None:
+        return False
+    name_path = Path(f"/sys/class/video4linux/video{index}/name")
+    try:
+        name = name_path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ).strip().lower()
+    except Exception:
+        return False
+    return any(token in name for token in ("droidcam", "v4l2loopback", "virtual"))
+
+
 def _is_local_linux_source(source: str | int) -> bool:
     if platform.system() != "Linux":
         return False
@@ -635,6 +653,7 @@ def _create_capture(source: str | int):
 def _configure_capture(
     cap,
     *,
+    source: str | int,
     width: int,
     height: int,
     fps: int,
@@ -644,8 +663,13 @@ def _configure_capture(
     except Exception:
         pass
 
-    # Local USB/V4L2 cameras commonly reach higher FPS with MJPG. Network
-    # streams ignore this harmlessly.
+    # Never renegotiate a DroidCam/v4l2loopback consumer. The droidcam-cli
+    # producer owns the pixel format and frame size; changing it from OpenCV can
+    # break the stream or force the phone to restart its encoder.
+    if _is_virtual_video_source(source):
+        return
+
+    # Physical USB cameras commonly reach higher FPS with MJPG.
     try:
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     except Exception:
@@ -678,7 +702,13 @@ def _try_open_candidate(
                 cap.release()
             return None
 
-        _configure_capture(cap, width=width, height=height, fps=fps)
+        _configure_capture(
+            cap,
+            source=source,
+            width=width,
+            height=height,
+            fps=fps,
+        )
 
         deadline = time.monotonic() + max(0.15, float(warmup_seconds))
         good_frames = 0
