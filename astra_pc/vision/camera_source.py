@@ -220,6 +220,8 @@ def _start_droidcam_cli(
     host: str,
     port: int,
     device: Path,
+    *,
+    size: str = "640x480",
 ) -> subprocess.Popen | None:
     cli = _droidcam_cli_binary()
     if cli is None:
@@ -237,12 +239,12 @@ def _start_droidcam_cli(
         str(cli),
         "-nocontrols",
         f"-dev={device}",
-        "-size=640x480",
+        f"-size={size}",
         host,
         str(int(port)),
     ]
     print(
-        f"[camera] DROIDCAM_CONNECT {host}:{port} -> {device} size=640x480",
+        f"[camera] DROIDCAM_CONNECT {host}:{port} -> {device} size={size}",
         flush=True,
     )
     try:
@@ -306,49 +308,76 @@ def _open_droidcam_via_cli(
     )
     deadline = time.monotonic() + max(0.6, float(timeout_seconds))
 
+    # Start conservative and fall back once more if the phone encoder or
+    # loopback rejects the first profile. Gesture landmarks do not benefit from
+    # high-resolution video, so stability wins here.
+    profiles = ("640x480", "320x240")
+
     for device in devices:
         if time.monotonic() >= deadline:
             break
 
-        process = _start_droidcam_cli(host, port, device)
-        if process is None:
-            continue
+        for profile in profiles:
+            if time.monotonic() >= deadline:
+                break
 
-        transferred = False
-        try:
-            while time.monotonic() < deadline and process.poll() is None:
-                opened = _try_open_candidate(
-                    str(device),
-                    width=width,
-                    height=height,
-                    fps=fps,
-                    warmup_seconds=min(
-                        0.65,
-                        max(0.18, deadline - time.monotonic()),
-                    ),
+            process = _start_droidcam_cli(
+                host,
+                port,
+                device,
+                size=profile,
+            )
+            if process is None:
+                continue
+
+            transferred = False
+            try:
+                profile_deadline = min(
+                    deadline,
+                    time.monotonic() + 1.8,
                 )
-                if opened is not None:
-                    # Transfer lifecycle ownership: when gestures stop, the CLI
-                    # connection we created is terminated too.
-                    opened.cap._owner_process = process
-                    opened.source = f"droidcam://{host}:{port}"
-                    transferred = True
-                    print(
-                        f"[camera] DROIDCAM_READY {device}",
-                        flush=True,
+                while (
+                    time.monotonic() < profile_deadline
+                    and process.poll() is None
+                ):
+                    opened = _try_open_candidate(
+                        str(device),
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        warmup_seconds=min(
+                            0.55,
+                            max(0.15, profile_deadline - time.monotonic()),
+                        ),
                     )
-                    return opened
-                time.sleep(0.10)
-        finally:
-            if not transferred and process.poll() is None:
-                try:
-                    process.terminate()
-                    process.wait(timeout=0.7)
-                except Exception:
+                    if opened is not None:
+                        opened.cap._owner_process = process
+                        opened.source = f"droidcam://{host}:{port}"
+                        transferred = True
+                        print(
+                            f"[camera] DROIDCAM_READY {device} size={profile}",
+                            flush=True,
+                        )
+                        return opened
+                    time.sleep(0.08)
+            finally:
+                if not transferred and process.poll() is None:
                     try:
-                        process.kill()
+                        process.terminate()
+                        process.wait(timeout=0.7)
                     except Exception:
-                        pass
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
+
+            print(
+                f"[camera] DROIDCAM_RETRY profile={profile} failed",
+                flush=True,
+            )
+            # Give Android a short moment to release/recreate its encoder before
+            # the next safer profile is requested.
+            time.sleep(0.30)
 
     print(
         "[camera] DROIDCAM_ERROR connected but virtual camera produced no frames",
