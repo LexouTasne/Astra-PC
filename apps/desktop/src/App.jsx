@@ -449,13 +449,56 @@ function VoicePage({ run, processes, status }) {
 
 function GesturesPage({ run, stop, processes, status }) {
   const [helpOpen, setHelpOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [starting, setStarting] = useState(false)
+  const [featureBusy, setFeatureBusy] = useState('')
+  const [gestureState, setGestureState] = useState({
+    ok: false,
+    enabled: true,
+    features: {
+      pointer: false,
+      click: true,
+      right_click: true,
+      scroll: true,
+      drag: false,
+      swipe: true,
+      zoom: true,
+      rotate: true,
+      pause: true
+    }
+  })
 
   const gestureProcess = Object.values(processes).find(
     item => item.running && item.action === 'gestures'
   )
   const active = gestureProcess?.ready ? gestureProcess : null
   const searching = gestureProcess && !gestureProcess.ready
+
+  const loadGestureState = async () => {
+    const result = await window.astra.gestureState()
+    if (result?.ok) setGestureState(result)
+  }
+
+  useEffect(() => {
+    loadGestureState()
+  }, [])
+
+  const toggleFeature = async feature => {
+    if (featureBusy) return
+    const current = Boolean(gestureState.features?.[feature])
+    setFeatureBusy(feature)
+    setGestureState(prev => ({
+      ...prev,
+      features: { ...prev.features, [feature]: !current }
+    }))
+    try {
+      const result = await window.astra.gestureSet(feature, !current)
+      if (result?.ok) setGestureState(result)
+      else await loadGestureState()
+    } finally {
+      setFeatureBusy('')
+    }
+  }
 
   const toggleGestures = async () => {
     if (starting) return
@@ -482,6 +525,18 @@ function GesturesPage({ run, stop, processes, status }) {
     }
   }
 
+  const options = [
+    ['pointer', 'Air Touch', 'Indicador move o cursor real · sem overlay do Astra'],
+    ['click', 'Clique', 'Pinça polegar + indicador'],
+    ['right_click', 'Clique direito', 'Polegar + dedo médio'],
+    ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
+    ['drag', 'Arrastar', 'Segure a pinça e mova'],
+    ['swipe', 'Swipe', 'Troca / navegação lateral'],
+    ['zoom', 'Zoom', 'Pinça longa + abrir / fechar'],
+    ['rotate', 'Rotação', 'Gire a pinça no modo transformação'],
+    ['pause', 'Pausa por palma', 'Palma aberta pausa / retoma']
+  ]
+
   return (
     <div className="gesture-simple-page">
       <div className="gesture-simple-main">
@@ -495,14 +550,18 @@ function GesturesPage({ run, stop, processes, status }) {
           </span>
           <h2>
             {active
-              ? 'Pode usar as mãos.'
+              ? gestureState.features?.pointer
+                ? 'Air Touch ativo.'
+                : 'Pode usar as mãos.'
               : searching
                 ? 'Conectando a câmera.'
                 : 'Controle o PC com gestos.'}
           </h2>
           <p>
             {active
-              ? 'Astra está vendo suas mãos. Nenhuma janela de câmera precisa ficar aberta.'
+              ? gestureState.features?.pointer
+                ? 'Mova o indicador para controlar o cursor do sistema. O Astra não desenha outro cursor na tela.'
+                : 'Astra está vendo suas mãos. Ative o Air Touch em Configurar se quiser controlar o mouse.'
               : searching
                 ? 'Busca automática por até 10 segundos. Se não encontrar, o Astra abre a entrada manual.'
                 : status.camera?.available
@@ -527,6 +586,10 @@ function GesturesPage({ run, stop, processes, status }) {
         </button>
 
         <div className="gesture-simple-links">
+          <button onClick={() => setSettingsOpen(v => !v)}>
+            <Settings2 size={14} /> {settingsOpen ? 'Fechar' : 'Configurar'}
+          </button>
+          <span />
           <button onClick={calibrate} disabled={starting}>
             <Eye size={14} /> Calibrar
           </button>
@@ -536,8 +599,41 @@ function GesturesPage({ run, stop, processes, status }) {
           </button>
         </div>
 
+        {settingsOpen && (
+          <div className="gesture-settings">
+            <div className="gesture-settings-head">
+              <div>
+                <strong>Gestos ativos</strong>
+                <span>As mudanças entram ao vivo e ficam salvas.</span>
+              </div>
+              <small>{active ? 'AO VIVO' : 'SALVO'}</small>
+            </div>
+
+            <div className="gesture-setting-list">
+              {options.map(([key, title, desc]) => {
+                const enabled = Boolean(gestureState.features?.[key])
+                return (
+                  <button
+                    key={key}
+                    className={'gesture-setting-row ' + (enabled ? 'enabled' : '')}
+                    onClick={() => toggleFeature(key)}
+                    disabled={featureBusy === key}
+                  >
+                    <div>
+                      <strong>{title}</strong>
+                      <span>{desc}</span>
+                    </div>
+                    <i className="gesture-switch"><b /></i>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {helpOpen && (
           <div className="gesture-cheatsheet">
+            <div><strong>☝️ Air Touch</strong><span>indicador controla o cursor</span></div>
             <div><strong>🤏 Pinça</strong><span>clique</span></div>
             <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
             <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
