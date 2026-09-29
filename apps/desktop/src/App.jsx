@@ -638,7 +638,6 @@ function GesturesPage({ run, stop, processes, status }) {
         {helpOpen && (
           <div className="gesture-cheatsheet">
             <div><strong>🤏 Zoom</strong><span>1 mão só · pinça → abre aproxima · fecha afasta</span></div>
-            <div><strong>🔄 Mesma pinça</strong><span>gire livremente · 1° por passo</span></div>
             <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
             <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
           </div>
