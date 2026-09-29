@@ -527,7 +527,7 @@ function GesturesPage({ run, stop, processes, status }) {
     ['right_click', 'Clique direito', 'Polegar + dedo médio'],
     ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
     ['swipe', 'Swipe', 'Navegação lateral'],
-    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha']
+    ['zoom', 'Zoom global', '1 mão · indicador levantado · pinça · abre / fecha']
   ]
 
   return (
@@ -550,7 +550,7 @@ function GesturesPage({ run, stop, processes, status }) {
           </h2>
           <p>
             {active
-              ? 'Astra está vendo suas mãos. A pinça controla o zoom global.'
+              ? 'Use só 1 mão. Indicador levantado + outros dedos fechados: encoste polegar e indicador, abra para aproximar e feche para afastar.'
               : searching
                 ? 'Busca automática por até 10 segundos. Se não encontrar, o Astra abre a entrada manual.'
                 : status.camera?.available
@@ -637,7 +637,7 @@ function GesturesPage({ run, stop, processes, status }) {
 
         {helpOpen && (
           <div className="gesture-cheatsheet">
-            <div><strong>🤏 Pinça</strong><span>abra / feche para zoom global</span></div>
+            <div><strong>🤏 Zoom</strong><span>1 mão só · pinça → abre aproxima · fecha afasta</span></div>
             <div><strong>🔄 Mesma pinça</strong><span>gire livremente · 1° por passo</span></div>
             <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
             <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
