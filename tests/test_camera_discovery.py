@@ -73,3 +73,66 @@ def test_camera_state_persists_last_working_source(tmp_path, monkeypatch):
 
     assert state["source"] == "http://phone:4747/video"
     assert "last_success_at" in state
+
+
+class DummyProcess:
+    def __init__(self):
+        self.terminated = False
+        self.killed = False
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        self.killed = True
+
+
+class DummyLatest:
+    def __init__(self):
+        self._owner_process = None
+
+
+def test_droidcam_endpoint_is_canonicalized():
+    assert camera._parse_droidcam_endpoint("192.168.1.20:4747") == ("192.168.1.20", 4747)
+    assert camera._parse_droidcam_endpoint("http://192.168.1.20:4747/video") == ("192.168.1.20", 4747)
+    assert camera._source_key("droidcam://192.168.1.20:4747") == camera._source_key(
+        "http://192.168.1.20:4747/video"
+    )
+
+
+def test_successful_droidcam_bridge_keeps_cli_alive(monkeypatch):
+    monkeypatch.setattr(camera.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(
+        camera,
+        "_droidcam_virtual_devices",
+        lambda: [camera.Path("/dev/video9")],
+    )
+    process = DummyProcess()
+    monkeypatch.setattr(camera, "_start_droidcam_cli", lambda *a, **k: process)
+
+    opened = camera.OpenedCamera(
+        cap=DummyLatest(),
+        index=9,
+        source="/dev/video9",
+    )
+    monkeypatch.setattr(camera, "_try_open_candidate", lambda *a, **k: opened)
+
+    result = camera._open_droidcam_via_cli(
+        "192.168.1.20:4747",
+        width=640,
+        height=360,
+        fps=30,
+        timeout_seconds=1.0,
+    )
+
+    assert result is opened
+    assert result.source == "droidcam://192.168.1.20:4747"
+    assert result.cap._owner_process is process
+    assert not process.terminated
+    assert not process.killed
