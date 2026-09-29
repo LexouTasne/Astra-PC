@@ -30,6 +30,8 @@ class AstraViewport:
         # in one worker so camera tracking can never be blocked by zoom I/O.
         self._zoom_pending = 0
         self._zoom_reset_requested = False
+        self._zoom_reset_done = threading.Event()
+        self._zoom_reset_done.set()
         self._zoom_wake = threading.Event()
         self._zoom_stop = threading.Event()
         self._zoom_worker = threading.Thread(
@@ -91,16 +93,11 @@ class AstraViewport:
             with self._lock:
                 self._zoom_pending = 0
                 self._zoom_reset_requested = True
+                self._zoom_reset_done.clear()
                 self._zoom_wake.set()
 
             if wait:
-                deadline = time.monotonic() + 1.2
-                while time.monotonic() < deadline:
-                    with self._lock:
-                        pending = self._zoom_reset_requested
-                    if not pending:
-                        break
-                    time.sleep(0.015)
+                self._zoom_reset_done.wait(timeout=1.4)
             return True
         except Exception as exc:
             print(f"[viewport] reset warning: {exc}", flush=True)
@@ -140,9 +137,12 @@ class AstraViewport:
 
                 try:
                     if reset:
-                        self._apply_zoom_action(0)
-                        with self._lock:
-                            self._zoom_level = 1.0
+                        try:
+                            self._apply_zoom_action(0)
+                            with self._lock:
+                                self._zoom_level = 1.0
+                        finally:
+                            self._zoom_reset_done.set()
                     else:
                         changed = self._apply_one_zoom_step(step)
                         if not changed:
