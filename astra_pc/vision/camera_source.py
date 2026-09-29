@@ -310,6 +310,7 @@ def _open_droidcam_via_cli(
         if process is None:
             continue
 
+        transferred = False
         try:
             while time.monotonic() < deadline and process.poll() is None:
                 opened = _try_open_candidate(
@@ -327,6 +328,7 @@ def _open_droidcam_via_cli(
                     # connection we created is terminated too.
                     opened.cap._owner_process = process
                     opened.source = f"droidcam://{host}:{port}"
+                    transferred = True
                     print(
                         f"[camera] DROIDCAM_READY {device}",
                         flush=True,
@@ -334,8 +336,7 @@ def _open_droidcam_via_cli(
                     return opened
                 time.sleep(0.10)
         finally:
-            # A successful return transferred ownership above.
-            if process.poll() is None:
+            if not transferred and process.poll() is None:
                 try:
                     process.terminate()
                     process.wait(timeout=0.7)
@@ -520,6 +521,9 @@ def _coerce_source(value: str | int | None):
 def _source_key(source: str | int) -> str:
     if isinstance(source, int):
         return f"index:{source}"
+    endpoint = _parse_droidcam_endpoint(source)
+    if endpoint is not None:
+        return f"droidcam:{endpoint[0]}:{endpoint[1]}"
     text = str(source)
     try:
         if text.startswith("/dev/"):
