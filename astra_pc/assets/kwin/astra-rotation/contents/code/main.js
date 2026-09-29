@@ -65,6 +65,11 @@ const AstraRotation = {
             return;
         }
 
+        if (this.angle === 0) {
+            this.clearWindow(window);
+            return;
+        }
+
         const translation = this.translationFor(window, this.angle);
         const targetTranslation = {
             value1: translation.x,
@@ -125,7 +130,9 @@ const AstraRotation = {
 
     reset() {
         this.angle = 0;
-        this.applyAll();
+        for (const window of effects.stackingOrder) {
+            this.clearWindow(window);
+        }
     },
 
     manage(window) {
