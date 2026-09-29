@@ -33,3 +33,14 @@ def test_atomic_left_click_uses_single_ydotool_event():
     backend, calls = backend_stub()
     backend.left_click()
     assert calls == [("click", "0xC0")]
+
+
+def test_relative_mouse_motion_coalesces():
+    backend, calls = backend_stub()
+    backend._relative_move = (0, 0)
+
+    backend.move_relative(4, -3)
+    backend.move_relative(2, 1)
+
+    assert calls == []
+    assert backend._take_relative_move() == (6, -2)
