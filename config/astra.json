@@ -57,7 +57,12 @@
     "reference_hand_scale": 0.2,
     "transform_hold_ms": 200,
     "pinch_zoom_ratio": 0.1,
-    "pinch_rotate_threshold_deg": 45
+    "pinch_rotate_threshold_deg": 45,
+    "click_arm_threshold": 0.095,
+    "click_arm_frames": 2,
+    "click_close_frames": 2,
+    "click_min_ms": 55,
+    "click_max_motion": 0.028
   },
   "actions": {
     "zoom_in": [
