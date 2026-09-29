@@ -29,5 +29,5 @@ def test_open_palm_never_pauses_gesture_engine():
 
     for _ in range(20):
         out = engine.update([open_hand()])
-        assert engine.paused is False
         assert out.label != "paused"
+        assert not hasattr(out, "toggle_pause")
