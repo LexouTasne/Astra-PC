@@ -41,14 +41,12 @@
     "right_pinch_threshold": 0.056,
     "drag_enabled": false,
     "drag_hold_ms": 300,
-    "pause_cooldown_ms": 600,
     "scroll_gain": 58,
     "scroll_deadzone": 0.0018,
     "swipe_velocity": 0.48,
     "swipe_cooldown_ms": 360,
     "two_hand_zoom_threshold": 0.02,
     "two_hand_rotate_threshold_deg": 6,
-    "pause_hold_ms": 300,
     "scroll_smoothing": 0.62,
     "scroll_max_step": 5,
     "swipe_distance": 0.085,
@@ -58,7 +56,6 @@
     "reference_hand_scale": 0.2,
     "transform_hold_ms": 200,
     "pinch_zoom_ratio": 0.065,
-    "pinch_rotate_threshold_deg": 65,
     "click_arm_threshold": 0.095,
     "click_arm_frames": 2,
     "click_close_frames": 2,
@@ -68,7 +65,9 @@
     "transform_start_frames": 2,
     "transform_release_frames": 3,
     "zoom_max_steps_per_frame": 3,
-    "rotation_compensate_mirror": true
+    "rotation_compensate_mirror": true,
+    "pinch_rotate_deadzone_deg": 1,
+    "rotate_max_degrees_per_frame": 12
   },
   "actions": {
     "swipe_right": [
@@ -248,6 +247,6 @@
     "zoom_step": 0.065,
     "zoom_min": 1,
     "zoom_max": 6,
-    "rotation_scope": "all"
+    "rotation_mode": "kwin-continuous"
   }
 }
