@@ -1,0 +1,17 @@
+{
+  "KPackageStructure": "KWin/Effect",
+  "KPlugin": {
+    "Authors": [
+      {
+        "Name": "Richard Mateus / Lex"
+      }
+    ],
+    "Category": "Appearance",
+    "Description": "Astra continuous compositor rotation",
+    "Id": "astra-rotation",
+    "License": "MIT",
+    "Name": "Astra Continuous Rotation"
+  },
+  "X-KDE-Ordering": 85,
+  "X-Plasma-API": "javascript"
+}
