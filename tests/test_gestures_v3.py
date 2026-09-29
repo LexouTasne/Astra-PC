@@ -16,10 +16,9 @@ CFG = {
     "transform_release_frames": 3,
     "zoom_max_steps_per_frame": 3,
     "pinch_zoom_ratio": 0.065,
-    "pinch_rotate_threshold_deg": 65.0,
+    "pinch_rotate_deadzone_deg": 1.0,
+    "rotate_max_degrees_per_frame": 12,
     "pose_confirm_frames": 1,
-    "pause_hold_ms": 300,
-    "pause_cooldown_ms": 600,
     "scroll_gain": 58.0,
     "scroll_deadzone": 0.0018,
     "scroll_smoothing": 0.62,
@@ -29,7 +28,7 @@ CFG = {
     "swipe_window_ms": 240,
     "swipe_cooldown_ms": 360,
     "two_hand_zoom_threshold": 0.02,
-    "two_hand_rotate_threshold_deg": 6.0,
+    "two_hand_rotate_deadzone_deg": 1.0,
 }
 
 
@@ -102,22 +101,22 @@ def test_twisting_same_pinch_rotates():
     engine = GestureEngine(dict(CFG))
     enter_transform(engine)
 
-    small = engine.update([pointer_hand(0.02, 35.0)])
-    assert small.rotate_steps == 0
+    one_degree = engine.update([pointer_hand(0.02, 1.2)])
+    assert one_degree.rotate_steps == 1
 
-    rotated = engine.update([pointer_hand(0.02, 75.0)])
-    assert rotated.rotate_steps == 1
-    assert rotated.label in {"rotate-right", "zoom-rotate"}
+    more = engine.update([pointer_hand(0.02, 6.2)])
+    assert 4 <= more.rotate_steps <= 6
+    assert more.label in {"rotate-right", "zoom-rotate"}
 
 
 def test_zoom_and_rotation_can_fire_independently():
     engine = GestureEngine(dict(CFG))
     enter_transform(engine)
 
-    out = engine.update([pointer_hand(0.04, 75.0)])
+    out = engine.update([pointer_hand(0.04, 7.0)])
 
     assert 1 <= out.zoom_steps <= 3
-    assert out.rotate_steps == 1
+    assert 1 <= out.rotate_steps <= 7
     assert out.label == "zoom-rotate"
 
 
@@ -181,3 +180,16 @@ def test_fast_pinch_open_can_emit_multiple_zoom_steps():
     out = engine.update([pointer_hand(0.055)])
 
     assert 1 <= out.zoom_steps <= 3
+
+
+def test_rotation_preserves_one_degree_granularity():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine)
+
+    out1 = engine.update([pointer_hand(0.02, 1.1)])
+    out2 = engine.update([pointer_hand(0.02, 2.1)])
+    out3 = engine.update([pointer_hand(0.02, 3.1)])
+
+    assert out1.rotate_steps == 1
+    assert out2.rotate_steps == 1
+    assert out3.rotate_steps == 1
