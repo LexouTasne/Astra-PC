@@ -115,8 +115,6 @@ class GestureEngine:
         self._scroll_accum = 0.0
         self._scroll_direction = 0
 
-        self._two_hand_distance: float | None = None
-
         self._swipe_history: collections.deque[tuple[float, float]] = collections.deque(maxlen=16)
         self._last_swipe_fire = 0.0
 
@@ -135,7 +133,6 @@ class GestureEngine:
             self._swipe_history.clear()
         if name == "zoom" and not value:
             self._reset_transform()
-            self._reset_two_hand()
 
     def reset_tracking(self) -> None:
         self._right_latched = False
@@ -144,7 +141,6 @@ class GestureEngine:
         self._candidate_finger_frames = 0
         self._last_swipe_fire = 0.0
         self._reset_transient()
-        self._reset_two_hand()
 
     def update(self, hands: list[Hand]) -> GestureOutput:
         if not hands:
@@ -156,16 +152,17 @@ class GestureEngine:
                 label="no-hand",
             )
 
-        if (
-            len(hands) >= 2
-            and bool(self.cfg.get("two_hand_transforms_enabled", False))
-        ):
-            out = self._update_two_hands(hands[0], hands[1])
-            if out.label != "idle":
-                return out
-            self._reset_two_hand()
-        else:
-            self._reset_two_hand()
+        # Astra gestures are intentionally single-hand only for now.
+        # A second visible hand must NEVER be interpreted as another zoom mode
+        # or allow the first tracked hand to keep an active zoom session.
+        if len(hands) != 1:
+            was_dragging = self._dragging
+            self._right_latched = False
+            self._reset_transient()
+            return GestureOutput(
+                left_down=False if was_dragging else None,
+                label="multi-hand-blocked",
+            )
 
         return self._update_one_hand(hands[0])
 
@@ -322,8 +319,7 @@ class GestureEngine:
             and not pinky_up
         )
 
-        # Legacy click remains available only when zoom/rotation are disabled.
-        # This keeps the pinch unambiguous while the transform gestures are on.
+        # Legacy click remains available only when zoom is disabled.
         if not self._pinching:
             if pointer_pose and pinch >= left_arm_threshold:
                 self._left_open_frames += 1
@@ -540,36 +536,6 @@ class GestureEngine:
             self._last_swipe_fire = now
             self._swipe_history.clear()
 
-    def _update_two_hands(self, a: Hand, b: Hand) -> GestureOutput:
-        if not (_open_palm(a) and _open_palm(b)):
-            return GestureOutput(label="idle")
-
-        ac = _center(a)
-        bc = _center(b)
-        distance = math.hypot(bc[0] - ac[0], bc[1] - ac[1])
-        out = GestureOutput(label="two-hand-ready")
-
-        if self._two_hand_distance is None:
-            self._two_hand_distance = distance
-            return out
-
-        distance_delta = distance - self._two_hand_distance
-        zoom_threshold = max(
-            0.001,
-            float(self.cfg.get("two_hand_zoom_threshold", 0.035)),
-        )
-
-        if (
-            self.feature_enabled("zoom")
-            and abs(distance_delta) >= zoom_threshold
-        ):
-            out.zoom_steps = 1 if distance_delta > 0 else -1
-            out.label = "zoom-in" if distance_delta > 0 else "zoom-out"
-            self._two_hand_distance = distance
-        else:
-            self._two_hand_distance += distance_delta * 0.08
-
-        return out
 
     def _reset_transform(self) -> None:
         self._transforming = False
@@ -584,8 +550,6 @@ class GestureEngine:
         self._scroll_accum = 0.0
         self._scroll_direction = 0
 
-    def _reset_two_hand(self) -> None:
-        self._two_hand_distance = None
 
     def _reset_transient(self) -> None:
         self._pinching = False
