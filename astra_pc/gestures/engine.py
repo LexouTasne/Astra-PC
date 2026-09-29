@@ -266,11 +266,17 @@ class GestureEngine:
             int(not value)
             for value in (middle_up, ring_up, pinky_up)
         )
-        transform_pose = index_up and folded_count >= 2
+        transform_start_pose = (
+            index_up
+            and not middle_up
+            and not ring_up
+            and not pinky_up
+        )
+        transform_live_pose = index_up and folded_count >= 2
         transform_features = self.feature_enabled("zoom")
 
         if self._transforming:
-            if transform_pose and transform_features:
+            if transform_live_pose and transform_features:
                 self._transform_miss_frames = 0
                 return self._update_pinch_transform(hand)
 
@@ -282,7 +288,7 @@ class GestureEngine:
                 return GestureOutput(label="transform-hold")
             self._reset_transform()
 
-        transform_candidate = transform_pose and transform_features
+        transform_candidate = transform_start_pose and transform_features
         if transform_candidate:
             start_threshold = _scaled_threshold(
                 hand,
