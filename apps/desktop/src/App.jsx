@@ -469,6 +469,17 @@ function GesturesPage({ run, stop, processes, status }) {
     }
   }
 
+  const calibrate = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      if (active) await stop(active.id)
+      await run('gestures-tutorial', [], { quiet: true })
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
     <div className="gesture-simple-page">
       <div className="gesture-simple-main">
@@ -500,7 +511,7 @@ function GesturesPage({ run, stop, processes, status }) {
         </button>
 
         <div className="gesture-simple-links">
-          <button onClick={() => run('gestures-tutorial', [], { quiet: true })}>
+          <button onClick={calibrate} disabled={starting}>
             <Eye size={14} /> Calibrar
           </button>
           <span />
