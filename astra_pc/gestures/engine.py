@@ -124,12 +124,6 @@ class GestureEngine:
         self._swipe_history: collections.deque[tuple[float, float]] = collections.deque(maxlen=16)
         self._last_swipe_fire = 0.0
 
-    @property
-    def paused(self) -> bool:
-        # Palm-pause was intentionally removed. Kept as a read-only
-        # compatibility property for camera/debug UI.
-        return False
-
     def feature_enabled(self, name: str) -> bool:
         return bool(self._features.get(name, True))
 
@@ -146,10 +140,6 @@ class GestureEngine:
         if name in {"zoom", "rotate"} and not value:
             self._reset_transform()
             self._reset_two_hand()
-
-    def set_paused(self, value: bool) -> None:
-        # Compatibility no-op: gesture pausing is no longer a hand gesture.
-        return
 
     def reset_tracking(self) -> None:
         self._right_latched = False
