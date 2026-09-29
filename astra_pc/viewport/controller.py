@@ -30,6 +30,16 @@ class AstraViewport:
         self._primary_output: str | None = None
         self._zoom_prepared = False
 
+        self._rotation_pending: int | None = None
+        self._rotation_wake = threading.Event()
+        self._rotation_stop = threading.Event()
+        self._rotation_worker = threading.Thread(
+            target=self._rotation_loop,
+            name="astra-viewport-rotation",
+            daemon=True,
+        )
+        self._rotation_worker.start()
+
     @property
     def zoom_level(self) -> float:
         return self._zoom_level
@@ -37,6 +47,13 @@ class AstraViewport:
     @property
     def rotation_degrees(self) -> int:
         return (self._rotation_quadrants % 4) * 90
+
+    def prepare(self) -> None:
+        """Warm compositor hooks before the first hand gesture."""
+        with self._lock:
+            self._ensure_zoom_backend()
+            if platform.system() == "Linux" and shutil.which("kscreen-doctor"):
+                self._primary_output = self._detect_primary_output()
 
     def zoom(self, steps: int) -> bool:
         if not steps or self.backend is None:
@@ -73,13 +90,19 @@ class AstraViewport:
         if not steps:
             return False
         with self._lock:
-            self._rotation_quadrants = (self._rotation_quadrants + int(steps)) % 4
-            return self._apply_rotation()
+            self._rotation_quadrants = (
+                self._rotation_quadrants + int(steps)
+            ) % 4
+            self._rotation_pending = self._rotation_quadrants
+            self._rotation_wake.set()
+            return True
 
     def reset_rotation(self) -> bool:
         with self._lock:
             self._rotation_quadrants = 0
-            return self._apply_rotation()
+            self._rotation_pending = 0
+            self._rotation_wake.set()
+            return True
 
     def reset(self) -> None:
         try:
@@ -141,7 +164,25 @@ class AstraViewport:
             except Exception:
                 pass
 
+    def _rotation_loop(self) -> None:
+        while not self._rotation_stop.is_set():
+            self._rotation_wake.wait(0.25)
+            self._rotation_wake.clear()
+            if self._rotation_stop.is_set():
+                return
+
+            with self._lock:
+                pending = self._rotation_pending
+                self._rotation_pending = None
+
+            if pending is None:
+                continue
+            self._apply_rotation_value(pending)
+
     def _apply_rotation(self) -> bool:
+        return self._apply_rotation_value(self._rotation_quadrants)
+
+    def _apply_rotation_value(self, quadrant: int) -> bool:
         if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
             return False
 
@@ -155,7 +196,7 @@ class AstraViewport:
             1: "right",
             2: "inverted",
             3: "left",
-        }[self._rotation_quadrants % 4]
+        }[int(quadrant) % 4]
         try:
             p = subprocess.run(
                 ["kscreen-doctor", f"output.{output}.rotation.{rotation}"],
@@ -167,6 +208,13 @@ class AstraViewport:
             return p.returncode == 0
         except Exception:
             return False
+
+    def close(self) -> None:
+        self._rotation_stop.set()
+        self._rotation_wake.set()
+        if self._rotation_worker.is_alive():
+            self._rotation_worker.join(timeout=1.0)
+
 
     def _detect_primary_output(self) -> str | None:
         if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
@@ -193,7 +241,9 @@ class AstraViewport:
                 current_id = m.group(1)
                 if first_id is None:
                     first_id = current_id
+                if re.search(r"\bpriority\s+1\b", line, re.I):
+                    return current_id
                 continue
-            if current_id and re.match(r"priority\s+1\b", line, re.I):
+            if current_id and re.search(r"\bpriority\s+1\b", line, re.I):
                 return current_id
         return first_id
