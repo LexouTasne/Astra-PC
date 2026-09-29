@@ -26,6 +26,10 @@ class PynputBackend(InputBackend):
     def move(self, x: int, y: int) -> None:
         self.mouse.position = (x, y)
 
+    def move_relative(self, dx: int, dy: int) -> None:
+        if dx or dy:
+            self.mouse.move(int(dx), int(dy))
+
     def left_button(self, down: bool) -> None:
         if down == self._left_down:
             return
