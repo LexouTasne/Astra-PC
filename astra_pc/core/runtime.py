@@ -357,14 +357,30 @@ class AstraRuntime:
                     pass
 
             if self.backend:
-                self.backend.failsafe_release()
-                close = getattr(self.backend, "close", None)
-                if callable(close):
-                    close()
-            tracker.close()
-            cap.release()
-            cv2.destroyAllWindows()
-            print("Astra offline.")
+                try:
+                    self.backend.failsafe_release()
+                except Exception:
+                    pass
+                try:
+                    close = getattr(self.backend, "close", None)
+                    if callable(close):
+                        close()
+                except Exception:
+                    pass
+
+            try:
+                tracker.close()
+            except Exception:
+                pass
+            try:
+                cap.release()
+            except Exception:
+                pass
+            try:
+                cv2.destroyAllWindows()
+            except Exception:
+                pass
+            print("Astra offline.", flush=True)
 
     def _sync_gesture_control(
         self,
