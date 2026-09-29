@@ -11,7 +11,7 @@ import cv2
 from astra_pc.paths import data_dir
 
 
-TUTORIAL_VERSION = 7
+TUTORIAL_VERSION = 8
 HAND_CONNECTIONS = (
     (0, 1), (1, 2), (2, 3), (3, 4),
     (0, 5), (5, 6), (6, 7), (7, 8),
@@ -122,61 +122,54 @@ def _overlay(
 def _steps(include_drag: bool = False) -> list[TutorialStep]:
     return [
         TutorialStep(
-            "1/10 - Enquadramento",
+            "1/9 - Enquadramento",
             "Mostre uma mao inteira, incluindo pulso e pontas dos dedos.",
             lambda hands, out: len(hands) >= 1,
             hold_seconds=0.8,
             hint="Mao inteira no quadro e luz vindo da frente.",
         ),
         TutorialStep(
-            "2/10 - Scroll para cima",
+            "2/9 - Scroll para cima",
             "Indicador + medio levantados. Mova a mao para CIMA.",
             lambda hands, out: out.scroll > 0 and out.label == "scroll-up",
         ),
         TutorialStep(
-            "3/10 - Scroll para baixo",
+            "3/9 - Scroll para baixo",
             "Indicador + medio levantados. Mova a mao para BAIXO.",
             lambda hands, out: out.scroll < 0 and out.label == "scroll-down",
         ),
         TutorialStep(
-            "4/10 - Clique direito",
+            "4/9 - Clique direito",
             "Encoste polegar + dedo medio, mantendo o indicador separado.",
             lambda hands, out: out.right_click or out.label == "right-click",
         ),
         TutorialStep(
-            "5/10 - Swipe esquerda",
+            "5/9 - Swipe esquerda",
             "Levante indicador + medio + anelar e mova a mao para a ESQUERDA.",
             lambda hands, out: out.swipe == "left",
         ),
         TutorialStep(
-            "6/10 - Swipe direita",
+            "6/9 - Swipe direita",
             "Mesma pose de tres dedos e mova a mao para a DIREITA.",
             lambda hands, out: out.swipe == "right",
         ),
         TutorialStep(
-            "7/10 - Pinça de zoom",
+            "7/9 - Pinça de zoom",
             "Levante so o indicador e encoste polegar + indicador.",
             lambda hands, out: out.label in {"pinch-ready", "transform-ready", "transform"},
             hint="Nao precisa segurar: a pinça entra no modo zoom imediatamente.",
         ),
         TutorialStep(
-            "8/10 - Zoom aproximar",
+            "8/9 - Zoom aproximar",
             "Faca a pinça e ABRA polegar + indicador.",
             lambda hands, out: out.zoom_steps > 0,
             hint="O zoom e global do desktop, nao do aplicativo.",
         ),
         TutorialStep(
-            "9/10 - Zoom afastar",
+            "9/9 - Zoom afastar",
             "Faca a pinça, abra um pouco e depois FECHE os dedos.",
             lambda hands, out: out.zoom_steps < 0,
-        ),
-        TutorialStep(
-            "10/10 - Rotacao",
-            "Faca a pinça e gire a linha entre polegar e indicador.",
-            lambda hands, out: out.rotate_steps != 0,
-            hint="A rotacao acompanha o angulo em graus, nao em blocos de 90.",
-        ),
-    ]
+        ),    ]
 
 
 def run_gesture_tutorial(
@@ -193,7 +186,7 @@ def run_gesture_tutorial(
     steps = _steps(engine.feature_enabled("drag"))
 
     print("\n============================================================")
-    print(" ASTRA // CALIBRACAO DE GESTOS V7")
+    print(" ASTRA // CALIBRACAO DE GESTOS V8")
     print("============================================================")
     print("O tutorial valida direcao, estabilidade e conflitos de cada gesto.")
     print("Nenhuma acao real de mouse/teclado e enviada durante a calibracao.")
