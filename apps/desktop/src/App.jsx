@@ -463,7 +463,6 @@ function GesturesPage({ run, stop, processes, status }) {
       drag: false,
       swipe: true,
       zoom: true,
-      pause: true
     }
   })
 
@@ -528,9 +527,7 @@ function GesturesPage({ run, stop, processes, status }) {
     ['right_click', 'Clique direito', 'Polegar + dedo médio'],
     ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
     ['swipe', 'Swipe', 'Navegação lateral'],
-    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha'],
-    ['rotate', 'Rotação 360°', 'Gire a mesma pinça · resolução de 1°']
-  ]
+    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha'],  ]
 
   return (
     <div className="gesture-simple-page">
@@ -829,20 +826,16 @@ export default function App() {
         const ready = current.ready || outputTail.includes('[gestures] READY')
 
         let zoomGlobal = current.zoomGlobal
-        let rotation360 = current.rotation360
-        if (eventText.includes('[viewport] ZOOM_GLOBAL GLOBAL')) zoomGlobal = 'global'
+                if (eventText.includes('[viewport] ZOOM_GLOBAL GLOBAL')) zoomGlobal = 'global'
         if (eventText.includes('[viewport] ZOOM_GLOBAL FALLBACK')) zoomGlobal = 'fallback'
         if (eventText.includes('[viewport] ZOOM_GLOBAL UNAVAILABLE')) zoomGlobal = 'unavailable'
-        if (eventText.includes('[viewport] ROTATION360 READY')) rotation360 = 'ready'
-        if (eventText.includes('[viewport] ROTATION360 UNAVAILABLE')) rotation360 = 'unavailable'
-
+                
         return {
           ...prev,
           [event.id]: {
             ...current,
             ready,
             zoomGlobal,
-            rotation360,
             outputTail
           }
         }
