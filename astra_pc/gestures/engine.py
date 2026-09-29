@@ -568,4 +568,3 @@ class GestureEngine:
         self._reset_transform()
         self._reset_scroll()
         self._swipe_history.clear()
-        self._reset_two_hand()
