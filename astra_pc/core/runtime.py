@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import signal
+import threading
 import time
 from pathlib import Path
 
@@ -75,6 +77,7 @@ class AstraRuntime:
         self._gesture_control_signature = None
         self._next_control_sync = 0.0
         self.screen_origin = (0, 0)
+        self._stop_requested = False
 
     def _open_input_backend_resilient(self, timeout: float = 6.0):
         if self.dry_run:
@@ -208,8 +211,21 @@ class AstraRuntime:
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
         had_hands = False
+
+        previous_sigterm = None
+        if threading.current_thread() is threading.main_thread():
+            try:
+                previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+                def _request_stop(_signum, _frame):
+                    self._stop_requested = True
+
+                signal.signal(signal.SIGTERM, _request_stop)
+            except Exception:
+                previous_sigterm = None
+
         try:
-            while True:
+            while not self._stop_requested:
                 started = time.perf_counter()
                 ok, frame = cap.read()
                 if not ok:
@@ -266,7 +282,13 @@ class AstraRuntime:
                     self.backend.scroll(out.scroll)
 
                 if out.zoom_steps:
-                    self.viewport.zoom(out.zoom_steps)
+                    try:
+                        self.viewport.zoom(out.zoom_steps)
+                    except Exception as exc:
+                        print(
+                            f"[viewport] ignored zoom error: {exc}",
+                            flush=True,
+                        )
 
                 if out.swipe:
                     self._dispatch_action(f"swipe_{out.swipe}")
@@ -314,12 +336,26 @@ class AstraRuntime:
         except KeyboardInterrupt:
             pass
         finally:
+            # Always return the desktop to 100% before releasing camera/input.
+            # This runs for Stop, Ctrl+C, SIGTERM, normal exit and runtime errors.
+            try:
+                self.viewport.reset_zoom(wait=True)
+            except Exception as exc:
+                print(f"[viewport] final reset warning: {exc}", flush=True)
+
             if self.voice:
                 self.voice.stop()
             try:
                 self.viewport.close()
             except Exception:
                 pass
+
+            if previous_sigterm is not None:
+                try:
+                    signal.signal(signal.SIGTERM, previous_sigterm)
+                except Exception:
+                    pass
+
             if self.backend:
                 self.backend.failsafe_release()
                 close = getattr(self.backend, "close", None)
