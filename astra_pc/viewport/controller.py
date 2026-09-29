@@ -113,6 +113,19 @@ class AstraViewport:
                     timeout=1.0,
                     check=False,
                 )
+                subprocess.run(
+                    [
+                        "kwriteconfig6",
+                        "--file", "kwinrc",
+                        "--group", "Effect-zoom",
+                        "--key", "ZoomFactor",
+                        str(1.0 + self._zoom_step),
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=1.0,
+                    check=False,
+                )
             except Exception:
                 pass
         qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
