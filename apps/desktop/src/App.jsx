@@ -527,7 +527,8 @@ function GesturesPage({ run, stop, processes, status }) {
     ['right_click', 'Clique direito', 'Polegar + dedo médio'],
     ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
     ['swipe', 'Swipe', 'Navegação lateral'],
-    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha'],  ]
+    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha']
+  ]
 
   return (
     <div className="gesture-simple-page">
@@ -826,7 +827,7 @@ export default function App() {
         const ready = current.ready || outputTail.includes('[gestures] READY')
 
         let zoomGlobal = current.zoomGlobal
-                if (eventText.includes('[viewport] ZOOM_GLOBAL GLOBAL')) zoomGlobal = 'global'
+        if (eventText.includes('[viewport] ZOOM_GLOBAL GLOBAL')) zoomGlobal = 'global'
         if (eventText.includes('[viewport] ZOOM_GLOBAL FALLBACK')) zoomGlobal = 'fallback'
         if (eventText.includes('[viewport] ZOOM_GLOBAL UNAVAILABLE')) zoomGlobal = 'unavailable'
                 
