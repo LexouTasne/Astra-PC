@@ -73,6 +73,7 @@ class AstraRuntime:
         self._gesture_system_enabled = True
         self._pointer_control_enabled = self.pointer_enabled
         self._gesture_control_signature = None
+        self._next_control_sync = 0.0
         self.screen_origin = (0, 0)
 
     def _open_input_backend_resilient(self, timeout: float = 6.0):
@@ -183,21 +184,23 @@ class AstraRuntime:
             self._smooth_xy = None
 
         self._sync_gesture_control(gestures, gesture_cfg, force=True)
+        self._next_control_sync = time.monotonic() + 0.12
+
+        # Prepare compositor-level zoom/output detection before the first hand
+        # movement so the first pinch has no setup pause.
+        try:
+            self.viewport.prepare()
+        except Exception as exc:
+            print(f"[viewport] warmup warning: {exc}", flush=True)
+
         self._start_voice_if_requested(gestures)
 
         print("[gestures] READY", flush=True)
         print("Astra gesture engine online.")
         print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
-        print("Polegar+indicador = clique | indicador+medio = scroll para cima/baixo")
-        print("Polegar+medio = clique direito | palma aberta (segure) = pausar/retomar")
-        if self._pointer_control_enabled:
-            print("Air-mouse ATIVO")
-        else:
-            print("Air-mouse OFF")
-        if gestures.feature_enabled("drag"):
-            print("Drag ATIVO")
-        else:
-            print("Drag OFF")
+        print("Pinça polegar+indicador = zoom global | gire a pinça = rotação global")
+        print("Indicador+medio = scroll | polegar+medio = clique direito")
+        print("Air Touch OFF | Drag OFF")
         print("Ctrl+C sai")
 
         target_dt = 1.0 / max(1, int(cam_cfg["target_fps"]))
@@ -212,7 +215,11 @@ class AstraRuntime:
                 if bool(cam_cfg.get("mirror", True)):
                     frame = cv2.flip(frame, 1)
 
-                self._sync_gesture_control(gestures, gesture_cfg)
+                now = time.monotonic()
+                if now >= self._next_control_sync:
+                    self._sync_gesture_control(gestures, gesture_cfg)
+                    self._next_control_sync = now + 0.12
+
                 if self._gesture_system_enabled:
                     hands = tracker.process(frame)
                 else:
@@ -309,6 +316,10 @@ class AstraRuntime:
         finally:
             if self.voice:
                 self.voice.stop()
+            try:
+                self.viewport.close()
+            except Exception:
+                pass
             if self.backend:
                 self.backend.failsafe_release()
                 close = getattr(self.backend, "close", None)
