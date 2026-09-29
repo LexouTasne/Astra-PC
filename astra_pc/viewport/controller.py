@@ -63,6 +63,14 @@ class AstraViewport:
     def continuous_rotation_ready(self) -> bool:
         return self._rotation_effect_ready
 
+    @property
+    def zoom_backend(self) -> str:
+        if self._kglobalaccel_zoom:
+            return "global"
+        if self.backend is not None:
+            return "fallback"
+        return "unavailable"
+
     def prepare(self) -> None:
         """Warm compositor hooks before the first hand gesture."""
         with self._lock:
