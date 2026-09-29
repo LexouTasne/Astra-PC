@@ -96,6 +96,7 @@ class GestureEngine:
         self._pinch_motion_max = 0.0
         self._left_armed = False
         self._left_open_frames = 0
+        self._pinch_close_frames = 0
         self._dragging = False
         self._paused = False
 
@@ -355,14 +356,22 @@ class GestureEngine:
             and not self._pinching
             and self._left_armed
         ):
-            self._pinching = True
-            self._pinch_started = now
-            self._pinch_anchor = (index.x, index.y)
-            self._pinch_motion_max = 0.0
-            self._left_armed = False
-            self._left_open_frames = 0
-            out.pointer = None
-            out.label = "pinch"
+            self._pinch_close_frames += 1
+            if self._pinch_close_frames >= max(
+                1,
+                int(self.cfg.get("click_close_frames", 2)),
+            ):
+                self._pinching = True
+                self._pinch_started = now
+                self._pinch_anchor = (index.x, index.y)
+                self._pinch_motion_max = 0.0
+                self._left_armed = False
+                self._left_open_frames = 0
+                self._pinch_close_frames = 0
+                out.pointer = None
+                out.label = "pinch"
+        elif not self._pinching:
+            self._pinch_close_frames = 0
 
         if self._pinching:
             hold_ms = (now - self._pinch_started) * 1000.0
@@ -654,6 +663,7 @@ class GestureEngine:
         self._pinch_motion_max = 0.0
         self._left_armed = False
         self._left_open_frames = 0
+        self._pinch_close_frames = 0
         self._dragging = False
         self._reset_transform()
         self._reset_scroll()
