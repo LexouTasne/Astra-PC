@@ -463,7 +463,6 @@ function GesturesPage({ run, stop, processes, status }) {
       drag: false,
       swipe: true,
       zoom: true,
-      rotate: true,
       pause: true
     }
   })
@@ -553,7 +552,7 @@ function GesturesPage({ run, stop, processes, status }) {
           </h2>
           <p>
             {active
-              ? 'Astra está vendo suas mãos. A pinça controla o zoom global e a rotação.'
+              ? 'Astra está vendo suas mãos. A pinça controla o zoom global.'
               : searching
                 ? 'Busca automática por até 10 segundos. Se não encontrar, o Astra abre a entrada manual.'
                 : status.camera?.available
@@ -573,16 +572,7 @@ function GesturesPage({ run, stop, processes, status }) {
                         : 'verificando'
                 }
               </span>
-              <span className={active.rotation360 === 'unavailable' ? 'bad' : ''}>
-                Rotação 360° · {
-                  active.rotation360 === 'ready'
-                    ? 'pronta'
-                    : active.rotation360 === 'unavailable'
-                      ? 'indisponível'
-                      : 'verificando'
-                }
-              </span>
-            </div>
+                          </div>
           )}
         </div>
 
