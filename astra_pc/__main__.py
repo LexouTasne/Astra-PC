@@ -53,7 +53,12 @@ def _brain(config):
 
 
 def _run_gestures(args, config) -> None:
+    from .core.process_guard import prepare_gesture_session, unregister_process
     from .core.runtime import AstraRuntime
+
+    guarded = not bool(getattr(args, "dry_run", False))
+    if guarded:
+        prepare_gesture_session()
 
     try:
         tutorial = None
@@ -89,6 +94,9 @@ def _run_gestures(args, config) -> None:
             print("Tente novamente com: astra gestures --tutorial")
             raise SystemExit(4)
         raise
+    finally:
+        if guarded:
+            unregister_process("gestures", os.getpid())
 
 
 def _run_setup(args, config) -> None:
