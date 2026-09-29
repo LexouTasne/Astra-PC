@@ -523,11 +523,11 @@ class AstraRuntime:
 
             result = self.router.execute(text)
             if result.message == "pause_gestures":
-                gestures.set_paused(True)
-                print("[voice] gesture control paused")
+                self.gesture_control.set_enabled(False)
+                print("[voice] gesture system disabled")
             elif result.message == "resume_gestures":
-                gestures.set_paused(False)
-                print("[voice] gesture control resumed")
+                self.gesture_control.set_enabled(True)
+                print("[voice] gesture system enabled")
             else:
                 print(f"[voice] {text} -> {result.message}")
 
