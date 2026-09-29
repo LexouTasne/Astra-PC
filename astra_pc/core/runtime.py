@@ -13,7 +13,7 @@ from astra_pc.input.factory import create_input_backend
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.voice.commands import CommandRouter
 from astra_pc.viewport.controller import AstraViewport
-from astra_pc.vision.camera_source import open_first_camera
+from astra_pc.vision.camera_source import open_camera_resilient
 
 
 class AstraRuntime:
@@ -26,6 +26,7 @@ class AstraRuntime:
         tutorial: bool | None = None,
         air_mouse: bool = False,
         drag: bool = False,
+        camera_source: str | int | None = None,
     ):
         self.config = config
         self.show_camera = show_camera
@@ -34,6 +35,7 @@ class AstraRuntime:
         self.tutorial = tutorial
         self.air_mouse = bool(air_mouse)
         self.drag = bool(drag)
+        self.camera_source = camera_source
         self.backend = None if dry_run else create_input_backend()
         self.router = CommandRouter()
         self.voice = None
@@ -62,12 +64,20 @@ class AstraRuntime:
 
     def run(self) -> None:
         cam_cfg = self.config.section("camera")
-        opened = open_first_camera(
+        configured_source = (
+            self.camera_source
+            if self.camera_source not in (None, "")
+            else cam_cfg.get("source")
+        )
+        opened = open_camera_resilient(
             preferred=int(cam_cfg.get("index", 0)),
             width=int(cam_cfg.get("width", 640)),
             height=int(cam_cfg.get("height", 360)),
             fps=int(cam_cfg.get("target_fps", 30)),
             limit=int(cam_cfg.get("probe_limit", 16)),
+            configured_source=configured_source,
+            auto_timeout=float(cam_cfg.get("auto_scan_seconds", 10.0)),
+            manual_fallback=bool(cam_cfg.get("manual_fallback", True)),
         )
         if opened is None:
             raise RuntimeError(
@@ -98,8 +108,18 @@ class AstraRuntime:
         else:
             screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
         if self.backend is not None and hasattr(self.backend, "health"):
-            ok_backend, detail = self.backend.health()
-            print(f"[input] {detail}")
+            input_deadline = time.monotonic() + float(
+                cam_cfg.get("input_recovery_seconds", 6.0)
+            )
+            ok_backend = False
+            detail = "input backend not ready"
+            while time.monotonic() < input_deadline:
+                ok_backend, detail = self.backend.health()
+                if ok_backend:
+                    break
+                print(f"[input] waiting: {detail}", flush=True)
+                time.sleep(0.35)
+            print(f"[input] {detail}", flush=True)
             if not ok_backend:
                 raise RuntimeError(f"gesture_input_unavailable: {detail}")
 
@@ -131,8 +151,9 @@ class AstraRuntime:
         self._sync_gesture_control(gestures, gesture_cfg, force=True)
         self._start_voice_if_requested(gestures)
 
-        print("Astra v0.8 gesture engine online.")
-        print("Gestos v2: estabilização, scroll bidirecional e controle por Astra")
+        print("[gestures] READY", flush=True)
+        print("Astra gesture engine online.")
+        print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
         print("Polegar+indicador = clique | indicador+medio = scroll para cima/baixo")
         print("Polegar+medio = clique direito | palma aberta (segure) = pausar/retomar")
         if self._pointer_control_enabled:
