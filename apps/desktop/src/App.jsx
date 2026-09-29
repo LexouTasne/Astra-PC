@@ -530,8 +530,7 @@ function GesturesPage({ run, stop, processes, status }) {
     ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
     ['swipe', 'Swipe', 'Navegação lateral'],
     ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha'],
-    ['rotate', 'Rotação', 'Gire a mesma pinça'],
-    ['pause', 'Pausa por palma', 'Palma aberta pausa / retoma']
+    ['rotate', 'Rotação 360°', 'Gire a mesma pinça · resolução de 1°']
   ]
 
   return (
@@ -627,10 +626,9 @@ function GesturesPage({ run, stop, processes, status }) {
         {helpOpen && (
           <div className="gesture-cheatsheet">
             <div><strong>🤏 Pinça</strong><span>abra / feche para zoom global</span></div>
-            <div><strong>🔄 Mesma pinça</strong><span>gire para rotacionar</span></div>
+            <div><strong>🔄 Mesma pinça</strong><span>gire livremente · 1° por passo</span></div>
             <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
             <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
-            <div><strong>🖐️ Palma</strong><span>pausar / retomar</span></div>
           </div>
         )}
       </div>
