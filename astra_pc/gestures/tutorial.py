@@ -176,11 +176,6 @@ def _steps(include_drag: bool = False) -> list[TutorialStep]:
             lambda hands, out: out.rotate_steps != 0,
             hint="A rotacao acompanha o angulo em graus, nao em blocos de 90.",
         ),
-        TutorialStep(
-            "11/10 - Pausar",
-            "Abra uma palma e SEGURE por meio segundo.",
-            lambda hands, out: out.toggle_pause,
-        ),
     ]
 
 
@@ -283,7 +278,6 @@ def run_gesture_tutorial(
                     print("Dica: afaste a camera, melhore a luz e mantenha pulso + dedos no quadro.")
                     return False
 
-        engine.set_paused(False)
         engine.reset_tracking()
 
         for _ in range(75):
@@ -305,7 +299,7 @@ def run_gesture_tutorial(
                 ("Gestos possuem filtros contra jitter e conflito.", 0.52, 220),
                 ("Voce pode controlar recursos falando com a Astra:", 0.52, 220),
                 ('"desativa o scroll por gestos"', 0.48, 175),
-                ('"ativa o cursor por gestos"', 0.48, 175),
+                ('"ativa o zoom por gestos"', 0.48, 175),
                 ('"desativa todos os gestos"', 0.48, 175),
                 ("O modo normal vai iniciar.", 0.52, 220),
             ]
