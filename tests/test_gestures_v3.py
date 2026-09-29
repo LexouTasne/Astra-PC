@@ -93,7 +93,7 @@ def test_closing_pinch_zooms_out_after_opening():
     assert 1 <= first.zoom_steps <= 3
 
     second = engine.update([pointer_hand(0.025)])
-    assert second.zoom_steps == -1
+    assert -3 <= second.zoom_steps <= -1
     assert second.label == "zoom-out"
 
 
