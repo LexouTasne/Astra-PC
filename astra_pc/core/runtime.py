@@ -51,7 +51,20 @@ class AstraRuntime:
         self.smoothing = float(pointer["smoothing"])
         self.deadzone = float(pointer["deadzone_px"])
         self.margin = float(pointer["active_margin"])
+        self.air_touch_gain = float(pointer.get("relative_gain", 1.15))
+        self.air_touch_deadzone = float(
+            pointer.get("relative_deadzone", 0.0028)
+        )
+        self.air_touch_accel = float(pointer.get("relative_accel", 1.8))
+        self.air_touch_max_step = int(
+            pointer.get("relative_max_step_px", 82)
+        )
+        self.air_touch_jump_threshold = float(
+            pointer.get("relative_jump_threshold", 0.11)
+        )
         self._smooth_xy: tuple[float, float] | None = None
+        self._air_touch_last: tuple[float, float] | None = None
+        self._air_touch_missing = 0
         self.actions = config.data.get("actions", {})
         self.context_mapper = GestureContextMapper(
             config.data.get("gesture_profiles", {})
@@ -207,14 +220,25 @@ class AstraRuntime:
                 if had_hands and not hands and self.backend:
                     self.backend.failsafe_release()
                     self._smooth_xy = None
+                    self._reset_air_touch()
                 had_hands = bool(hands)
 
                 out = gestures.update(hands)
                 label = out.label
 
-                if out.pointer is not None and (
-                    self._pointer_control_enabled or out.label == "drag"
+                if (
+                    out.pointer is not None
+                    and self._pointer_control_enabled
+                    and out.label == "pointer"
                 ):
+                    self._air_touch_missing = 0
+                    self._move_air_touch(out.pointer, screen_w, screen_h)
+                else:
+                    self._air_touch_missing += 1
+                    if self._air_touch_missing >= 2:
+                        self._reset_air_touch()
+
+                if out.pointer is not None and out.label == "drag":
                     x, y = self._map_pointer(out.pointer, screen_w, screen_h)
                     if self.backend:
                         self.backend.move(x, y)
@@ -329,6 +353,8 @@ class AstraRuntime:
 
         if changed and self.backend:
             self.backend.failsafe_release()
+            self._smooth_xy = None
+            self._reset_air_touch()
         if changed and (
             not enabled
             or not bool(overrides.get("pause", True))
@@ -360,6 +386,78 @@ class AstraRuntime:
             return
         if self.backend and keys:
             self.backend.hotkey(list(keys))
+
+    def _reset_air_touch(self) -> None:
+        self._air_touch_last = None
+        self._air_touch_missing = 0
+
+    def _move_air_touch(
+        self,
+        normalized: tuple[float, float],
+        w: int,
+        h: int,
+    ) -> None:
+        if self.backend is None:
+            return
+
+        x, y = normalized
+        previous = self._air_touch_last
+        self._air_touch_last = (x, y)
+
+        # First stable frame is a clutch/re-anchor point. Never teleport the
+        # system cursor when the user raises the Air Touch pose.
+        if previous is None:
+            return
+
+        dx_n = x - previous[0]
+        dy_n = y - previous[1]
+        motion = (dx_n * dx_n + dy_n * dy_n) ** 0.5
+
+        # Ignore tiny involuntary tremor but still update the anchor above so
+        # noise never accumulates into a delayed jump.
+        if motion <= self.air_touch_deadzone:
+            return
+
+        # Tracking reacquisition occasionally produces one huge landmark jump.
+        # Treat that as a fresh anchor rather than a mouse movement.
+        if motion >= self.air_touch_jump_threshold:
+            return
+
+        # Slow precision near the deadzone, faster travel for deliberate hand
+        # motion. This behaves like a touchpad rather than absolute eye/hand aim.
+        normalized_speed = min(
+            1.0,
+            max(
+                0.0,
+                (motion - self.air_touch_deadzone)
+                / max(0.001, 0.035 - self.air_touch_deadzone),
+            ),
+        )
+        gain = self.air_touch_gain * (
+            0.55 + self.air_touch_accel * normalized_speed
+        )
+
+        dx = int(round(dx_n * w * gain))
+        dy = int(round(dy_n * h * gain))
+        limit = max(8, self.air_touch_max_step)
+        dx = max(-limit, min(limit, dx))
+        dy = max(-limit, min(limit, dy))
+
+        if abs(dx) <= 1:
+            dx = 0
+        if abs(dy) <= 1:
+            dy = 0
+        if not dx and not dy:
+            return
+
+        try:
+            self.backend.move_relative(dx, dy)
+        except NotImplementedError:
+            # Compatibility fallback for third-party backends that only expose
+            # absolute motion.
+            self._smooth_xy = None
+            target_x, target_y = self._map_pointer(normalized, w, h)
+            self.backend.move(target_x, target_y)
 
     def _map_pointer(self, normalized: tuple[float, float], w: int, h: int) -> tuple[int, int]:
         x, y = normalized
