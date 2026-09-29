@@ -69,6 +69,38 @@ def test_primary_output_can_be_detected_when_priority_is_on_output_line(monkeypa
     monkeypatch.setattr("astra_pc.viewport.controller.shutil.which", lambda name: "/usr/bin/" + name)
     monkeypatch.setattr("astra_pc.viewport.controller.subprocess.run", lambda *a, **k: Result())
     try:
-        assert viewport._detect_primary_output() == "2"
+        primary, outputs = viewport._detect_outputs()
+        assert primary == "2"
+        assert outputs == ["1", "2"]
+    finally:
+        viewport.close()
+
+
+def test_rotation_scope_all_updates_every_active_output(monkeypatch):
+    backend = Backend()
+    viewport = AstraViewport(backend, {"rotation_scope": "all"})
+    calls = []
+
+    class Result:
+        returncode = 0
+
+    monkeypatch.setattr("astra_pc.viewport.controller.platform.system", lambda: "Linux")
+    monkeypatch.setattr("astra_pc.viewport.controller.shutil.which", lambda name: "/usr/bin/" + name)
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return Result()
+
+    monkeypatch.setattr("astra_pc.viewport.controller.subprocess.run", fake_run)
+    viewport._active_outputs = ["1", "2"]
+    viewport._primary_output = "1"
+
+    try:
+        assert viewport._apply_rotation_value(1)
+        assert calls[-1] == [
+            "kscreen-doctor",
+            "output.1.rotation.right",
+            "output.2.rotation.right",
+        ]
     finally:
         viewport.close()
