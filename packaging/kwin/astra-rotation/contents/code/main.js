@@ -12,14 +12,6 @@
 const AstraRotation = {
     angle: 0,
 
-    normalize(value) {
-        let out = value % 360;
-        if (out < 0) {
-            out += 360;
-        }
-        return out;
-    },
-
     virtualCenter() {
         const geo = effects.virtualScreenGeometry;
         return {
@@ -127,7 +119,7 @@ const AstraRotation = {
     },
 
     rotate(delta) {
-        this.angle = this.normalize(this.angle + delta);
+        this.angle += delta;
         this.applyAll();
     },
 
