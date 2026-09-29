@@ -24,6 +24,8 @@ Allowed actions:
 {"action":"click","x":123,"y":456,"reason":"...","expected":"what should visibly change"}
 {"action":"right_click","x":123,"y":456,"reason":"...","expected":"..."}
 {"action":"type","text":"...","reason":"...","expected":"..."}
+{"action":"key_down","key":"w","reason":"hold a key across visual steps","expected":"..."}
+{"action":"key_up","key":"w","reason":"release a held key","expected":"..."}
 {"action":"hotkey","keys":["ctrl","l"],"reason":"...","expected":"..."}
 {"action":"scroll","amount":-3,"reason":"...","expected":"..."}
 {"action":"open_url","url":"https://...","reason":"...","expected":"..."}
@@ -34,6 +36,8 @@ Use structural UI names/roles when they are available. Coordinates are screensho
 Never invent UI elements. Prefer keyboard shortcuts when clearly safer and more reliable.
 Never use terminal or shell commands. Never purchase, delete files, send messages,
 change passwords, or confirm irreversible actions.
+For continuous movement, use key_down and keep observing subsequent screenshots; use key_up
+as soon as the movement should stop. Never leave a held key pressed when returning done.
 """
 
 
@@ -48,78 +52,82 @@ class VisualDesktopAgent:
         history: list[str] = []
         previous_signature = None
 
-        for step in range(1, self.max_steps + 1):
-            screenshot = capture_screen()
-            try:
-                with Image.open(screenshot) as im:
-                    width, height = im.size
-                signature = self._signature(screenshot)
-                ui = []
-                if self.accessibility.available():
-                    try:
-                        ui = [x.as_dict() for x in self.accessibility.snapshot(limit=70)]
-                    except Exception:
-                        ui = []
+        try:
+            for step in range(1, self.max_steps + 1):
+                screenshot = capture_screen()
+                try:
+                    with Image.open(screenshot) as im:
+                        width, height = im.size
+                    signature = self._signature(screenshot)
+                    ui = []
+                    if self.accessibility.available():
+                        try:
+                            ui = [x.as_dict() for x in self.accessibility.snapshot(limit=70)]
+                        except Exception:
+                            ui = []
 
-                changed = None
-                if previous_signature is not None:
-                    changed = self._difference(previous_signature, signature)
+                    changed = None
+                    if previous_signature is not None:
+                        changed = self._difference(previous_signature, signature)
 
-                prompt = (
-                    f"Goal: {goal}\n"
-                    f"Screenshot size: {width}x{height}\n"
-                    f"Structural UI: {json.dumps(ui[:50], ensure_ascii=False)}\n"
-                    f"Verification history: {history[-6:] or ['none']}\n"
-                    f"Screen change since previous step: {changed}\n"
-                    "Choose the next single action. If the goal is already achieved, return done."
+                    prompt = (
+                        f"Goal: {goal}\n"
+                        f"Screenshot size: {width}x{height}\n"
+                        f"Desktop geometry: {json.dumps(self.tools.desktop_geometry(), ensure_ascii=False)}\n"
+                        f"Structural UI: {json.dumps(ui[:50], ensure_ascii=False)}\n"
+                        f"Verification history: {history[-6:] or ['none']}\n"
+                        f"Screen change since previous step: {changed}\n"
+                        "Choose the next single action. If the goal is already achieved, return done."
+                    )
+                    raw = self.client.chat(
+                        prompt,
+                        images=[screenshot],
+                        system=AGENT_PROMPT,
+                        temperature=0.05,
+                        num_ctx=12288,
+                        num_predict=180,
+                    )
+                    previous_signature = signature
+                finally:
+                    screenshot.unlink(missing_ok=True)
+
+                action = self._parse_action(raw)
+                name = str(action.get("action", ""))
+                reason = str(action.get("reason", ""))
+                expected = str(action.get("expected", ""))
+                print(f"[Astra agent {step}/{self.max_steps}] {name}: {reason}")
+                if expected:
+                    print(f"  expected: {expected}")
+
+                if name == "done":
+                    return str(action.get("message", "Done."))
+
+                if not auto_confirm:
+                    answer = input("Execute this action? [Y/n] ").strip().lower()
+                    if answer not in {"", "y", "yes", "s", "sim"}:
+                        return "Stopped by user."
+
+                result = self.tools.execute(action)
+                time.sleep(0.07)
+                verify_path = capture_screen()
+                try:
+                    after = self._signature(verify_path)
+                    delta = self._difference(previous_signature, after)
+                finally:
+                    verify_path.unlink(missing_ok=True)
+
+                history.append(
+                    f"{result.message}; expected={expected or 'unspecified'}; "
+                    f"screen_delta={delta:.4f}"
                 )
-                raw = self.client.chat(
-                    prompt,
-                    images=[screenshot],
-                    system=AGENT_PROMPT,
-                    temperature=0.05,
-                    num_ctx=12288,
-                    num_predict=180,
-                )
-                previous_signature = signature
-            finally:
-                screenshot.unlink(missing_ok=True)
+                previous_signature = after
 
-            action = self._parse_action(raw)
-            name = str(action.get("action", ""))
-            reason = str(action.get("reason", ""))
-            expected = str(action.get("expected", ""))
-            print(f"[Astra agent {step}/{self.max_steps}] {name}: {reason}")
-            if expected:
-                print(f"  expected: {expected}")
+                if not result.ok:
+                    history.append("tool error: " + result.message)
 
-            if name == "done":
-                return str(action.get("message", "Done."))
-
-            if not auto_confirm:
-                answer = input("Execute this action? [Y/n] ").strip().lower()
-                if answer not in {"", "y", "yes", "s", "sim"}:
-                    return "Stopped by user."
-
-            result = self.tools.execute(action)
-            time.sleep(0.07)
-            verify_path = capture_screen()
-            try:
-                after = self._signature(verify_path)
-                delta = self._difference(previous_signature, after)
-            finally:
-                verify_path.unlink(missing_ok=True)
-
-            history.append(
-                f"{result.message}; expected={expected or 'unspecified'}; "
-                f"screen_delta={delta:.4f}"
-            )
-            previous_signature = after
-
-            if not result.ok:
-                history.append("tool error: " + result.message)
-
-        return "Stopped after reaching the maximum number of agent steps."
+            return "Stopped after reaching the maximum number of agent steps."
+        finally:
+            self.tools.release_all()
 
     @staticmethod
     def _signature(path) -> np.ndarray:

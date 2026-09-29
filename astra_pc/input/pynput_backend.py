@@ -11,6 +11,7 @@ class PynputBackend(InputBackend):
         self.mouse = MouseController()
         self.keyboard = KeyboardController()
         self._left_down = False
+        self._keys_down: set[str] = set()
 
     def screen_size(self) -> tuple[int, int]:
         try:
@@ -43,6 +44,18 @@ class PynputBackend(InputBackend):
     def right_click(self) -> None:
         self.mouse.click(Button.right, 1)
 
+    def failsafe_release(self) -> None:
+        try:
+            self.left_button(False)
+        except Exception:
+            pass
+        for key in list(self._keys_down):
+            try:
+                self.keyboard.release(self._key(key))
+            except Exception:
+                pass
+        self._keys_down.clear()
+
     def scroll(self, amount: int) -> None:
         if amount:
             self.mouse.scroll(0, amount)
@@ -55,6 +68,18 @@ class PynputBackend(InputBackend):
             self.keyboard.press(key)
         for key in reversed(mapped):
             self.keyboard.release(key)
+
+    def key_down(self, key: str) -> None:
+        key = str(key).lower()
+        if key in self._keys_down:
+            return
+        self.keyboard.press(self._key(key))
+        self._keys_down.add(key)
+
+    def key_up(self, key: str) -> None:
+        key = str(key).lower()
+        self.keyboard.release(self._key(key))
+        self._keys_down.discard(key)
 
     def type_text(self, text: str) -> None:
         self.keyboard.type(text)
@@ -77,5 +102,14 @@ class PynputBackend(InputBackend):
             "down": Key.down,
             "left": Key.left,
             "right": Key.right,
+            "home": Key.home,
+            "end": Key.end,
+            "page_up": Key.page_up,
+            "page_down": Key.page_down,
+            "insert": Key.insert,
+            "caps_lock": Key.caps_lock,
+            "f1": Key.f1, "f2": Key.f2, "f3": Key.f3, "f4": Key.f4,
+            "f5": Key.f5, "f6": Key.f6, "f7": Key.f7, "f8": Key.f8,
+            "f9": Key.f9, "f10": Key.f10, "f11": Key.f11, "f12": Key.f12,
         }
         return aliases.get(name.lower(), name)

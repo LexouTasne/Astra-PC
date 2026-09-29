@@ -10,25 +10,25 @@ from .base import InputBackend
 
 
 _KEYCODES = {
-    "ctrl": 29,
-    "shift": 42,
-    "alt": 56,
-    "win": 125,
-    "tab": 15,
-    "enter": 28,
     "esc": 1,
-    "space": 57,
-    "backspace": 14,
-    "delete": 111,
-    "up": 103,
-    "down": 108,
-    "left": 105,
-    "right": 106,
-    "+": 13,
-    "-": 12,
-    "0": 11,
-    "[": 26,
-    "]": 27,
+    "1": 2, "2": 3, "3": 4, "4": 5, "5": 6, "6": 7, "7": 8, "8": 9, "9": 10, "0": 11,
+    "-": 12, "=": 13, "backspace": 14, "tab": 15,
+    "q": 16, "w": 17, "e": 18, "r": 19, "t": 20, "y": 21, "u": 22, "i": 23, "o": 24, "p": 25,
+    "[": 26, "]": 27, "enter": 28, "ctrl": 29,
+    "a": 30, "s": 31, "d": 32, "f": 33, "g": 34, "h": 35, "j": 36, "k": 37, "l": 38,
+    ";": 39, "'": 40, chr(96): 41, "shift": 42, "\\": 43,
+    "z": 44, "x": 45, "c": 46, "v": 47, "b": 48, "n": 49, "m": 50,
+    ",": 51, ".": 52, "/": 53, "right_shift": 54, "alt": 56, "space": 57, "caps_lock": 58,
+    "f1": 59, "f2": 60, "f3": 61, "f4": 62, "f5": 63, "f6": 64,
+    "f7": 65, "f8": 66, "f9": 67, "f10": 68, "num_lock": 69, "scroll_lock": 70,
+    "home": 102, "up": 103, "page_up": 104, "left": 105, "right": 106,
+    "end": 107, "down": 108, "page_down": 109, "insert": 110, "delete": 111,
+    "f11": 87, "f12": 88, "right_ctrl": 97, "right_alt": 100,
+    "win": 125, "cmd": 125, "menu": 139,
+    "numpad_7": 71, "numpad_8": 72, "numpad_9": 73, "numpad_minus": 74,
+    "numpad_4": 75, "numpad_5": 76, "numpad_6": 77, "numpad_plus": 78,
+    "numpad_1": 79, "numpad_2": 80, "numpad_3": 81, "numpad_0": 82, "numpad_decimal": 83,
+    "numpad_enter": 96, "numpad_slash": 98, "numpad_asterisk": 55,
 }
 
 
@@ -45,6 +45,7 @@ class YdotoolBackend(InputBackend):
             raise RuntimeError("ydotool is required for native Wayland input")
         self.binary = binary
         self._left_down = False
+        self._keys_down: set[str] = set()
         self._commands: queue.Queue[tuple[str, ...]] = queue.Queue(maxsize=64)
         self._latest_move: tuple[int, int] | None = None
         self._relative_move: tuple[int, int] = (0, 0)
@@ -253,9 +254,15 @@ class YdotoolBackend(InputBackend):
 
     def failsafe_release(self) -> None:
         # Bypass the async queue so emergency release is not stuck behind stale
-        # pointer events. Sending left-up is harmless even if nothing is held.
+        # pointer events. Sending releases is harmless even if nothing is held.
         self._execute(("click", "0x80"))
         self._left_down = False
+        held = list(getattr(self, "_keys_down", set()))
+        for key in held:
+            code = _KEYCODES.get(key)
+            if code is not None:
+                self._execute(("key", f"{code}:0"))
+        self._keys_down = set()
 
     def scroll(self, amount: int) -> None:
         if not amount:
@@ -280,6 +287,27 @@ class YdotoolBackend(InputBackend):
                 sequence.append(f"{code}:0")
         if sequence:
             self._queue_command("key", *sequence)
+
+    def key_down(self, key: str) -> None:
+        key = str(key).lower()
+        code = _KEYCODES.get(key)
+        if code is None:
+            raise ValueError(f"unsupported key: {key}")
+        if not hasattr(self, "_keys_down"):
+            self._keys_down = set()
+        if key in self._keys_down:
+            return
+        self._queue_command("key", f"{code}:1")
+        self._keys_down.add(key)
+
+    def key_up(self, key: str) -> None:
+        key = str(key).lower()
+        code = _KEYCODES.get(key)
+        if code is None:
+            raise ValueError(f"unsupported key: {key}")
+        self._queue_command("key", f"{code}:0")
+        if hasattr(self, "_keys_down"):
+            self._keys_down.discard(key)
 
     def type_text(self, text: str) -> None:
         self._queue_command("type", "--key-delay", "3", text)

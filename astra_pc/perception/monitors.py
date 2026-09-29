@@ -9,6 +9,9 @@ from dataclasses import dataclass, asdict
 from typing import Any
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
 @dataclass(slots=True)
 class Monitor:
     x: int
@@ -70,7 +73,8 @@ def _kscreen_monitors() -> list[Monitor]:
     current_primary = False
     enabled = False
 
-    for raw in result.stdout.splitlines():
+    clean_output = _ANSI_RE.sub("", result.stdout)
+    for raw in clean_output.splitlines():
         line = raw.strip()
         output = re.match(r"Output:\s+\S+\s+(.+)$", line)
         if output:
@@ -107,6 +111,14 @@ def _kscreen_monitors() -> list[Monitor]:
 
 
 def get_monitors() -> list[Monitor]:
+    # KDE Wayland knows the real logical desktop geometry, including offsets.
+    # screeninfo may report every output at 0,0 on Wayland, which breaks
+    # screenshot-to-pointer coordinate mapping on multi-monitor desktops.
+    if platform.system() == "Linux" and os.getenv("WAYLAND_DISPLAY"):
+        monitors = _kscreen_monitors()
+        if monitors:
+            return monitors
+
     monitors = _screeninfo_monitors()
     if monitors:
         return monitors
@@ -116,3 +128,14 @@ def get_monitors() -> list[Monitor]:
         return monitors
 
     return []
+
+
+def virtual_bounds(monitors: list[Monitor] | None = None) -> tuple[int, int, int, int]:
+    items = monitors if monitors is not None else get_monitors()
+    if not items:
+        return (0, 0, 0, 0)
+    min_x = min(m.x for m in items)
+    min_y = min(m.y for m in items)
+    max_x = max(m.x + m.width for m in items)
+    max_y = max(m.y + m.height for m in items)
+    return (min_x, min_y, max_x - min_x, max_y - min_y)

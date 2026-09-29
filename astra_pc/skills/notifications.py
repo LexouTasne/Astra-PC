@@ -4,6 +4,8 @@ import platform
 import shutil
 import subprocess
 
+from astra_pc.config import load_config
+
 from .base import Skill, SkillResult
 
 
@@ -12,6 +14,11 @@ class NotificationsSkill(Skill):
     description = "Show local desktop notifications."
 
     def execute(self, action: str, args: dict) -> SkillResult:
+        try:
+            if not bool(load_config().data.get("notifications", {}).get("enabled", True)):
+                return SkillResult(False, "notifications disabled")
+        except Exception:
+            pass
         if action != "notify":
             return SkillResult(False, f"Unknown notification action: {action}")
         title = str(args.get("title", "Astra"))[:100]

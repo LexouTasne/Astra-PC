@@ -352,6 +352,55 @@ class AstraDaemon:
             print(f"[voice] resident stop failed: {exc}")
             return False
 
+    @staticmethod
+    def _wants_visual_agent(text: str) -> bool:
+        q = " ".join(str(text).lower().strip().split())
+        action = any(
+            token in q
+            for token in (
+                "clica", "clique", "clicar", "aperta", "aperte", "pressiona",
+                "pressione", "segura", "segure", "solta", "solte", "mexe",
+                "mova", "move", "arrasta", "arraste", "vai até", "va até",
+                "vá até", "anda até", "ande até", "acha e", "encontra e",
+                "procura e", "abre isso", "fecha isso",
+            )
+        )
+        visual = any(
+            token in q
+            for token in (
+                "na tela", "minha tela", "a tela", "esse botão", "essa opção",
+                "essa janela", "aquele botão", "aquela opção", "aquela janela",
+                "ali", "aí", "ai", "até chegar", "ate chegar", "até lá", "ate la",
+                "aquela porta", "aquele lugar", "esse lugar", "onde está", "onde ta",
+            )
+        )
+        explicit = any(
+            token in q
+            for token in (
+                "modo agente", "agente visual", "usa a visão", "use a visão",
+                "olha a tela e", "olhe a tela e",
+            )
+        )
+        direct_visual_action = any(
+            token in q
+            for token in (
+                "clica no ", "clica na ", "clique no ", "clique na ",
+                "clica em ", "clique em ",
+                "acha o ", "acha a ", "encontra o ", "encontra a ",
+                "procura o ", "procura a ",
+            )
+        )
+        visual_object = any(
+            token in q
+            for token in (
+                "botão", "botao", "link", "ícone", "icone", "aba",
+                "janela", "campo", "menu", "opção", "opcao",
+            )
+        )
+        return explicit or (action and visual) or direct_visual_action or (
+            visual_object and any(v in q for v in ("acha", "encontra", "procura"))
+        )
+
     def _voice_request(self, text: str) -> str:
         q = text.lower()
         screen_phrases = (
@@ -361,7 +410,10 @@ class AstraDaemon:
             "o que estou vendo",
             "essa janela",
         )
-        kind = "screen" if any(phrase in q for phrase in screen_phrases) else "ask"
+        if self._wants_visual_agent(text):
+            kind = "agent"
+        else:
+            kind = "screen" if any(phrase in q for phrase in screen_phrases) else "ask"
         result = self.handle({"type": kind, "text": text, "voice": True})
         return str(result.get("message") or result.get("error") or "")
 
@@ -440,6 +492,8 @@ class AstraDaemon:
         )
 
     def _notify_system_event(self, event) -> None:
+        if not bool(self.config.data.get("notifications", {}).get("enabled", True)):
+            return
         try:
             value = round(float(event.payload.get("value", 0)), 1)
             label = "CPU" if "cpu" in event.name else "RAM"
@@ -832,6 +886,29 @@ class AstraDaemon:
             )
             return {"ok": True, "message": answer}
 
+        if kind == "agent":
+            goal = str(request.get("text", "")).strip()
+            if not goal:
+                return {"ok": False, "error": "empty_agent_goal"}
+            agent_cfg = self.config.data.get("agent", {})
+            if not bool(agent_cfg.get("enabled", True)):
+                return {"ok": False, "error": "visual_agent_disabled"}
+            from astra_pc.ai.desktop_agent import VisualDesktopAgent
+            agent = VisualDesktopAgent(
+                self.vision_client,
+                max_steps=int(agent_cfg.get("max_steps", 24)),
+            )
+            try:
+                message = agent.run(goal, auto_confirm=True)
+            except Exception as exc:
+                return {"ok": False, "error": f"agent_failed: {exc}"}
+            self._record_chat(goal, message)
+            return {
+                "ok": True,
+                "message": message,
+                "plan": {"type": "visual_agent"},
+            }
+
         if kind == "profile":
             profile = str(request.get("profile", "")).strip() or "default"
             self.context.profile = profile
@@ -894,6 +971,9 @@ class AstraDaemon:
                 return {"ok": False, "error": f"Não consegui analisar a imagem: {exc}"}
 
         lowered = text.lower().strip()
+
+        if kind == "ask" and self._wants_visual_agent(text):
+            return self.handle({"type": "agent", "text": text, "voice": voice_mode})
 
         time_answer = CommandRouter._time(text)
         if time_answer is not None:
