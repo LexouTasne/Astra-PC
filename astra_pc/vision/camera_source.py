@@ -764,6 +764,23 @@ def _manual_prompt_text(previous_error: bool = False) -> str:
     )
 
 
+def _manual_default_source() -> str:
+    saved = _load_saved_droidcam_source()
+    endpoint = _parse_droidcam_endpoint(saved)
+    if endpoint is not None:
+        return f"{endpoint[0]}:{endpoint[1]}"
+
+    state = load_camera_state()
+    remembered = _coerce_source(state.get("source"))
+    if remembered is not None:
+        endpoint = _parse_droidcam_endpoint(remembered)
+        if endpoint is not None:
+            return f"{endpoint[0]}:{endpoint[1]}"
+        return str(remembered)
+
+    return "/dev/video0"
+
+
 def request_manual_camera_source(*, previous_error: bool = False) -> str | int | None:
     """Ask for a camera source without depending on Astra's frontend."""
 
@@ -772,6 +789,7 @@ def request_manual_camera_source(*, previous_error: bool = False) -> str | int |
         return env_source
 
     prompt = _manual_prompt_text(previous_error)
+    default_source = _manual_default_source()
     system = platform.system()
 
     if system == "Linux" and (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
@@ -785,7 +803,7 @@ def request_manual_camera_source(*, previous_error: bool = False) -> str | int |
                         "Astra · Câmera",
                         "--inputbox",
                         prompt,
-                        "192.168.1.50:4747",
+                        default_source,
                     ],
                     capture_output=True,
                     text=True,
@@ -807,7 +825,7 @@ def request_manual_camera_source(*, previous_error: bool = False) -> str | int |
                         "--entry",
                         "--title=Astra · Câmera",
                         "--text=" + prompt,
-                        "--entry-text=192.168.1.50:4747",
+                        "--entry-text=" + default_source,
                     ],
                     capture_output=True,
                     text=True,
