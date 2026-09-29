@@ -274,6 +274,13 @@ def _run_desktop_status(args, config) -> None:
     voice_state = load_voice_state()
     camera_available = False
     camera_label = "Não detectada"
+    remembered_camera = {}
+    try:
+        from .vision.camera_source import load_camera_state
+        remembered_camera = load_camera_state()
+    except Exception:
+        remembered_camera = {}
+
     if platform.system() == "Linux":
         import glob
 
@@ -281,9 +288,12 @@ def _run_desktop_status(args, config) -> None:
         if cameras:
             camera_available = True
             camera_label = os.path.basename(cameras[0])
+        elif remembered_camera.get("source"):
+            camera_available = True
+            camera_label = str(remembered_camera["source"])
     else:
         camera_available = True
-        camera_label = "Sistema"
+        camera_label = str(remembered_camera.get("source") or "Sistema")
 
     mesh_cfg = config.data.get("mesh", {})
     ai = config.data.get("ai", {})
