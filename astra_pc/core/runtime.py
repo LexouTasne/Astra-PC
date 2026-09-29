@@ -266,7 +266,18 @@ class AstraRuntime:
                     self.viewport.zoom(out.zoom_steps)
 
                 if out.rotate_steps:
-                    self.viewport.rotate(out.rotate_steps)
+                    rotate_steps = out.rotate_steps
+                    if (
+                        bool(cam_cfg.get("mirror", True))
+                        and bool(
+                            gesture_cfg.get(
+                                "rotation_compensate_mirror",
+                                True,
+                            )
+                        )
+                    ):
+                        rotate_steps = -rotate_steps
+                    self.viewport.rotate(rotate_steps)
 
                 if out.swipe:
                     self._dispatch_action(f"swipe_{out.swipe}")
