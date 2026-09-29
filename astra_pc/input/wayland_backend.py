@@ -222,6 +222,12 @@ class YdotoolBackend(InputBackend):
         dx, dy = int(dx), int(dy)
         if not dx and not dy:
             return
+        # Keep the method safe for lightweight test/compatibility stubs that
+        # instantiate the backend without running __init__.
+        if not hasattr(self, "_move_lock"):
+            self._move_lock = threading.Lock()
+        if not hasattr(self, "_relative_move"):
+            self._relative_move = (0, 0)
         with self._move_lock:
             old_x, old_y = self._relative_move
             self._relative_move = (
