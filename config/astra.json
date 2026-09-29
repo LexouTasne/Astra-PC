@@ -67,7 +67,8 @@
     "transform_start_threshold": 0.065,
     "transform_start_frames": 2,
     "transform_release_frames": 3,
-    "zoom_max_steps_per_frame": 3
+    "zoom_max_steps_per_frame": 3,
+    "rotation_compensate_mirror": true
   },
   "actions": {
     "swipe_right": [
