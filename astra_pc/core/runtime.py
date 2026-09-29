@@ -36,11 +36,11 @@ class AstraRuntime:
         self.air_mouse = bool(air_mouse)
         self.drag = bool(drag)
         self.camera_source = camera_source
-        self.backend = None if dry_run else create_input_backend()
+        self.backend = None
         self.router = CommandRouter()
         self.voice = None
         self.viewport = AstraViewport(
-            self.backend,
+            None,
             config.data.get("viewport", {}),
         )
 
@@ -61,6 +61,32 @@ class AstraRuntime:
         self._pointer_control_enabled = self.pointer_enabled
         self._gesture_control_signature = None
         self.screen_origin = (0, 0)
+
+    def _open_input_backend_resilient(self, timeout: float = 6.0):
+        if self.dry_run:
+            return None
+
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        last_error = "input backend unavailable"
+        attempt = 0
+
+        while True:
+            attempt += 1
+            try:
+                backend = create_input_backend()
+                print(f"[input] AUTO_FOUND attempt={attempt}", flush=True)
+                return backend
+            except RuntimeError as exc:
+                last_error = str(exc)
+                if time.monotonic() >= deadline:
+                    break
+                print(
+                    f"[input] waiting for Wayland backend ({attempt}): {last_error}",
+                    flush=True,
+                )
+                time.sleep(0.45)
+
+        raise RuntimeError(f"gesture_input_unavailable: {last_error}")
 
     def run(self) -> None:
         cam_cfg = self.config.section("camera")
@@ -87,6 +113,11 @@ class AstraRuntime:
         cap = opened.cap
         print(f"[camera] using index {opened.index}: {opened.source}")
 
+        self.backend = self._open_input_backend_resilient(
+            timeout=float(cam_cfg.get("input_recovery_seconds", 6.0))
+        )
+        self.viewport.backend = self.backend
+
         # Load MediaPipe only after a working camera exists. This avoids GPU/TFLite
         # initialization noise and latency when there is no usable video source.
         from astra_pc.vision.hands import HandTracker
@@ -108,17 +139,7 @@ class AstraRuntime:
         else:
             screen_w, screen_h = self.backend.screen_size() if self.backend else (1920, 1080)
         if self.backend is not None and hasattr(self.backend, "health"):
-            input_deadline = time.monotonic() + float(
-                cam_cfg.get("input_recovery_seconds", 6.0)
-            )
-            ok_backend = False
-            detail = "input backend not ready"
-            while time.monotonic() < input_deadline:
-                ok_backend, detail = self.backend.health()
-                if ok_backend:
-                    break
-                print(f"[input] waiting: {detail}", flush=True)
-                time.sleep(0.35)
+            ok_backend, detail = self.backend.health()
             print(f"[input] {detail}", flush=True)
             if not ok_backend:
                 raise RuntimeError(f"gesture_input_unavailable: {detail}")
