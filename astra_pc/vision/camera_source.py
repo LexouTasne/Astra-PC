@@ -215,6 +215,20 @@ def _is_local_linux_source(source: str | int) -> bool:
 def _create_capture(source: str | int):
     if _is_local_linux_source(source):
         return cv2.VideoCapture(source, cv2.CAP_V4L2)
+
+    text = str(source)
+    if text.lower().startswith(("http://", "https://", "rtsp://", "rtmp://")):
+        params = []
+        if hasattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC"):
+            params.extend([cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 1200])
+        if hasattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC"):
+            params.extend([cv2.CAP_PROP_READ_TIMEOUT_MSEC, 1200])
+        if params and hasattr(cv2, "CAP_FFMPEG"):
+            try:
+                return cv2.VideoCapture(text, cv2.CAP_FFMPEG, params)
+            except Exception:
+                pass
+
     return cv2.VideoCapture(source)
 
 
