@@ -457,7 +457,7 @@ function GesturesPage({ run, stop, processes, status }) {
     enabled: true,
     features: {
       pointer: false,
-      click: true,
+      click: false,
       right_click: true,
       scroll: true,
       drag: false,
@@ -526,14 +526,11 @@ function GesturesPage({ run, stop, processes, status }) {
   }
 
   const options = [
-    ['pointer', 'Air Touch', 'Indicador move o cursor real · sem overlay do Astra'],
-    ['click', 'Clique', 'Pinça polegar + indicador'],
     ['right_click', 'Clique direito', 'Polegar + dedo médio'],
     ['scroll', 'Scroll', 'Dois dedos · sobe e desce'],
-    ['drag', 'Arrastar', 'Segure a pinça e mova'],
-    ['swipe', 'Swipe', 'Troca / navegação lateral'],
-    ['zoom', 'Zoom', 'Pinça longa + abrir / fechar'],
-    ['rotate', 'Rotação', 'Gire a pinça no modo transformação'],
+    ['swipe', 'Swipe', 'Navegação lateral'],
+    ['zoom', 'Zoom global', 'Pinça polegar + indicador · abre / fecha'],
+    ['rotate', 'Rotação', 'Gire a mesma pinça'],
     ['pause', 'Pausa por palma', 'Palma aberta pausa / retoma']
   ]
 
@@ -550,18 +547,14 @@ function GesturesPage({ run, stop, processes, status }) {
           </span>
           <h2>
             {active
-              ? gestureState.features?.pointer
-                ? 'Air Touch ativo.'
-                : 'Pode usar as mãos.'
+              ? 'Pode usar as mãos.'
               : searching
                 ? 'Conectando a câmera.'
                 : 'Controle o PC com gestos.'}
           </h2>
           <p>
             {active
-              ? gestureState.features?.pointer
-                ? 'Mova o indicador para controlar o cursor do sistema. O Astra não desenha outro cursor na tela.'
-                : 'Astra está vendo suas mãos. Ative o Air Touch em Configurar se quiser controlar o mouse.'
+              ? 'Astra está vendo suas mãos. A pinça controla o zoom global e a rotação.'
               : searching
                 ? 'Busca automática por até 10 segundos. Se não encontrar, o Astra abre a entrada manual.'
                 : status.camera?.available
@@ -633,12 +626,11 @@ function GesturesPage({ run, stop, processes, status }) {
 
         {helpOpen && (
           <div className="gesture-cheatsheet">
-            <div><strong>☝️ Air Touch</strong><span>indicador controla o cursor</span></div>
-            <div><strong>🤏 Pinça</strong><span>clique</span></div>
+            <div><strong>🤏 Pinça</strong><span>abra / feche para zoom global</span></div>
+            <div><strong>🔄 Mesma pinça</strong><span>gire para rotacionar</span></div>
             <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
             <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
             <div><strong>🖐️ Palma</strong><span>pausar / retomar</span></div>
-            <div><strong>🤏 Segura + abre</strong><span>zoom / rotação</span></div>
           </div>
         )}
       </div>
