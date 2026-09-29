@@ -92,6 +92,10 @@ class GestureEngine:
 
         self._pinching = False
         self._pinch_started = 0.0
+        self._pinch_anchor: tuple[float, float] | None = None
+        self._pinch_motion_max = 0.0
+        self._left_armed = False
+        self._left_open_frames = 0
         self._dragging = False
         self._paused = False
 
@@ -285,15 +289,38 @@ class GestureEngine:
             self._right_latched = False
 
         pinch = _dist(thumb, index)
-        pinch_on = pinch <= _scaled_threshold(
+        pinch_on_threshold = _scaled_threshold(
             hand,
             float(self.cfg.get("pinch_threshold", 0.045)),
             hand_ref,
         )
+        left_arm_threshold = _scaled_threshold(
+            hand,
+            float(self.cfg.get("click_arm_threshold", 0.095)),
+            hand_ref,
+        )
+        pinch_on = pinch <= pinch_on_threshold
         pinch_off = pinch >= left_release_threshold
         out = GestureOutput()
 
         pointer_pose = index_up and not middle_up and not ring_up and not pinky_up
+
+        # A left click must be deliberately armed from an OPEN thumb-index
+        # position first. Merely raising the index while the thumb happens to be
+        # close can never start a click.
+        if not self._pinching:
+            if pointer_pose and pinch >= left_arm_threshold:
+                self._left_open_frames += 1
+                if self._left_open_frames >= max(
+                    1,
+                    int(self.cfg.get("click_arm_frames", 2)),
+                ):
+                    self._left_armed = True
+            elif pinch_on:
+                self._left_open_frames = 0
+            elif not pointer_pose:
+                self._left_open_frames = 0
+                self._left_armed = False
 
         if self._transforming:
             if pointer_pose and (self.feature_enabled("zoom") or self.feature_enabled("rotate")):
@@ -322,24 +349,53 @@ class GestureEngine:
             or self.feature_enabled("drag")
             or transform_enabled
         )
-        if pinch_tracking_enabled and pinch_on and not self._pinching:
+        if (
+            pinch_tracking_enabled
+            and pinch_on
+            and not self._pinching
+            and self._left_armed
+        ):
             self._pinching = True
             self._pinch_started = now
+            self._pinch_anchor = (index.x, index.y)
+            self._pinch_motion_max = 0.0
+            self._left_armed = False
+            self._left_open_frames = 0
+            out.pointer = None
             out.label = "pinch"
 
         if self._pinching:
             hold_ms = (now - self._pinch_started) * 1000.0
-            transform_hold = float(self.cfg.get("transform_hold_ms", 140))
+            transform_hold = float(self.cfg.get("transform_hold_ms", 200))
+            click_min_ms = float(self.cfg.get("click_min_ms", 55))
+            click_max_motion = float(
+                self.cfg.get("click_max_motion", 0.028)
+            )
+
+            if self._pinch_anchor is not None:
+                motion_from_anchor = math.hypot(
+                    index.x - self._pinch_anchor[0],
+                    index.y - self._pinch_anchor[1],
+                )
+                self._pinch_motion_max = max(
+                    self._pinch_motion_max,
+                    motion_from_anchor,
+                )
+
+            # Freeze Air Touch while pinching. A click should happen at the
+            # cursor's current position, not drag the cursor while fingers close.
+            out.pointer = None
 
             if pinch_off and transform_enabled and hold_ms >= transform_hold:
                 self._pinching = False
                 self._dragging = False
+                self._pinch_anchor = None
+                self._pinch_motion_max = 0.0
                 self._transforming = True
                 self._transform_distance = _dist(thumb, index)
                 self._transform_angle = math.degrees(
                     math.atan2(index.y - thumb.y, index.x - thumb.x)
                 )
-                out.pointer = None
                 out.label = "transform-ready"
                 return out
 
@@ -352,19 +408,24 @@ class GestureEngine:
                 out.label = "drag"
 
             if pinch_off:
+                valid_click = (
+                    self.feature_enabled("click")
+                    and click_min_ms <= hold_ms < transform_hold
+                    and self._pinch_motion_max <= click_max_motion
+                )
                 if self._dragging:
                     out.left_down = False
                     out.label = "drop"
-                elif self.feature_enabled("click") and hold_ms < transform_hold:
-                    out.left_click = True
-                    out.label = "click"
-                elif self.feature_enabled("click") and not transform_enabled:
+                elif valid_click:
                     out.left_click = True
                     out.label = "click"
                 else:
                     out.label = "pinch-release"
+
                 self._pinching = False
                 self._dragging = False
+                self._pinch_anchor = None
+                self._pinch_motion_max = 0.0
 
         scrolling = (
             self.feature_enabled("scroll")
@@ -589,6 +650,10 @@ class GestureEngine:
 
     def _reset_transient(self, *, keep_palm: bool = False) -> None:
         self._pinching = False
+        self._pinch_anchor = None
+        self._pinch_motion_max = 0.0
+        self._left_armed = False
+        self._left_open_frames = 0
         self._dragging = False
         self._reset_transform()
         self._reset_scroll()
