@@ -79,6 +79,31 @@ function spawnAstra(args, { id = crypto.randomUUID(), interactive = false } = {}
   return { id, child }
 }
 
+function gracefulStopChild(child, graceMs = 1800) {
+  if (!child || child.exitCode !== null) return
+  try { child.kill('SIGINT') } catch {
+    try { child.kill('SIGTERM') } catch {}
+  }
+
+  setTimeout(() => {
+    if (child.exitCode === null) {
+      try { child.kill('SIGTERM') } catch {}
+    }
+  }, graceMs)
+
+  setTimeout(() => {
+    if (child.exitCode === null) {
+      try { child.kill('SIGKILL') } catch {}
+    }
+  }, graceMs + 1600)
+}
+
+function gracefulStopAll() {
+  for (const child of running.values()) {
+    gracefulStopChild(child)
+  }
+}
+
 function daemonRequest(payload, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const host = process.env.ASTRA_DAEMON_HOST || '127.0.0.1'
@@ -341,10 +366,7 @@ ipcMain.handle('astra:stop', async (_event, id) => {
   const child = running.get(String(id))
   if (!child) return { ok: false, error: 'Processo não encontrado.' }
   try {
-    child.kill('SIGINT')
-    setTimeout(() => {
-      if (!child.killed) child.kill('SIGTERM')
-    }, 1200)
+    gracefulStopChild(child)
     return { ok: true }
   } catch (error) {
     return { ok: false, error: friendlyError(error) }
@@ -378,10 +400,12 @@ ipcMain.handle('astra:window', (_event, action) => {
 })
 
 app.whenReady().then(createWindow)
+app.on('before-quit', () => {
+  gracefulStopAll()
+})
 app.on('window-all-closed', () => {
-  for (const child of running.values()) {
-    try { child.kill('SIGTERM') } catch {}
-  }
+  // Give gesture runtimes a chance to reset KWin zoom and close DroidCam.
+  gracefulStopAll()
   if (process.platform !== 'darwin') app.quit()
 })
 app.on('activate', () => {
