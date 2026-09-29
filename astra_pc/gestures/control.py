@@ -16,7 +16,6 @@ FEATURE_LABELS = {
     "swipe": "swipe por gestos",
     "zoom": "zoom por gestos",
     "rotate": "rotação por gestos",
-    "pause": "pausa por palma",
     "drag": "arrastar por gestos",
 }
 
@@ -108,7 +107,7 @@ def parse_gesture_control(text: str) -> tuple[str, str | None, bool | None] | No
     q = _norm(text)
     gesture_words = (
         "gesto", "gestos", "scroll", "rolagem", "air mouse", "cursor",
-        "clique", "zoom", "rotacao", "swipe", "arrastar", "drag", "palma",
+        "clique", "zoom", "rotacao", "swipe", "arrastar", "drag",
     )
     if not any(word in q for word in gesture_words):
         return None
