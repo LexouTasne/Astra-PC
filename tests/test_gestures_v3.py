@@ -142,11 +142,19 @@ def scale_hand(hand: Hand, scale: float, cx: float = 0.5, cy: float = 0.5) -> Ha
     )
 
 
-def non_pointer_hand() -> Hand:
+def one_noisy_folded_finger_hand() -> Hand:
     pts = list(pointer_hand(0.02).points)
-    # Make middle appear extended for one noisy frame.
+    # One folded finger is misclassified as extended.
     pts[10] = Point(0.52, 0.48, 0.0)
     pts[12] = Point(0.52, 0.24, 0.0)
+    return Hand(tuple(pts), "Right")
+
+
+def invalid_transform_pose_hand() -> Hand:
+    pts = list(one_noisy_folded_finger_hand().points)
+    # A second finger is also extended, making the transform pose invalid.
+    pts[14] = Point(0.60, 0.49, 0.0)
+    pts[16] = Point(0.60, 0.23, 0.0)
     return Hand(tuple(pts), "Right")
 
 
@@ -161,11 +169,21 @@ def test_whole_hand_scale_change_does_not_create_zoom():
     assert out.zoom_steps == 0
 
 
-def test_one_bad_pose_frame_does_not_cancel_transform():
+def test_one_noisy_folded_finger_is_tolerated_live():
     engine = GestureEngine(dict(CFG))
     enter_transform(engine)
 
-    noisy = engine.update([non_pointer_hand()])
+    noisy = engine.update([one_noisy_folded_finger_hand()])
+
+    assert noisy.label == "transform"
+    assert engine._transforming
+
+
+def test_invalid_pose_gets_dropout_grace_instead_of_cancel():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine)
+
+    noisy = engine.update([invalid_transform_pose_hand()])
     assert noisy.label == "transform-hold"
     assert engine._transforming
 
