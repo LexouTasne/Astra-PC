@@ -447,38 +447,83 @@ function VoicePage({ run, processes, status }) {
   )
 }
 
-function GesturesPage({ run, processes }) {
+function GesturesPage({ run, stop, processes, status }) {
+  const [helpOpen, setHelpOpen] = useState(false)
+  const [starting, setStarting] = useState(false)
+
+  const active = Object.values(processes).find(
+    item => item.running && item.action === 'gestures'
+  )
+
+  const toggleGestures = async () => {
+    if (starting) return
+    setStarting(true)
+    try {
+      if (active) {
+        await stop(active.id)
+      } else {
+        await run('gestures', ['--no-tutorial'], { quiet: true })
+      }
+    } finally {
+      setStarting(false)
+    }
+  }
+
   return (
-    <div className="page-scroll">
-      <FeatureHero
-        eyebrow="VISION CONTROL"
-        title="Gestos em modo seguro."
-        body="O padrão não move o mouse continuamente e não mantém drag. Primeiro você treina, depois libera o controle."
-        icon={Hand}
-      >
-        <ActionButton primary onClick={() => run('gestures-tutorial')}><Eye size={15} /> Abrir tutorial</ActionButton>
-        <ActionButton onClick={() => run('gestures-safe-preview')}><Camera size={15} /> Testar câmera</ActionButton>
-      </FeatureHero>
+    <div className="gesture-simple-page">
+      <div className="gesture-simple-main">
+        <div className={'gesture-orb ' + (active ? 'active' : '')}>
+          <Hand size={34} strokeWidth={1.5} />
+        </div>
 
-      <div className="gesture-grid">
-        {[
-          ['🤏', 'Pinça', 'Clique esquerdo atômico'],
-          ['✌️', 'Dois dedos', 'Scroll vertical'],
-          ['👌', 'Polegar + médio', 'Clique direito'],
-          ['🖐️', 'Palma', 'Pausar / retomar'],
-          ['👐', 'Duas mãos', 'Zoom e rotação'],
-          ['☝️', 'Indicador', 'Reconhecimento; air-mouse opcional']
-        ].map(([emoji, title, desc]) => (
-          <div className="gesture-card" key={title}><div className="gesture-emoji">{emoji}</div><strong>{title}</strong><span>{desc}</span></div>
-        ))}
+        <div className="gesture-simple-copy">
+          <span className={'gesture-state ' + (active ? 'online' : '')}>
+            <i /> {active ? 'GESTOS ATIVOS' : 'GESTOS DESLIGADOS'}
+          </span>
+          <h2>{active ? 'Pode usar as mãos.' : 'Controle o PC com gestos.'}</h2>
+          <p>
+            {active
+              ? 'Astra está vendo suas mãos. Nenhuma janela de câmera precisa ficar aberta.'
+              : status.camera?.available
+                ? 'Câmera pronta · ' + (status.camera?.label || 'detectada')
+                : 'Câmera não detectada.'}
+          </p>
+        </div>
+
+        <button
+          className={'gesture-power ' + (active ? 'stop' : '')}
+          onClick={toggleGestures}
+          disabled={starting || (!active && !status.camera?.available)}
+        >
+          <Power size={19} />
+          {starting ? 'AGUARDE…' : active ? 'DESATIVAR' : 'ATIVAR GESTOS'}
+        </button>
+
+        <div className="gesture-simple-links">
+          <button onClick={() => run('gestures-tutorial', [], { quiet: true })}>
+            <Eye size={14} /> Calibrar
+          </button>
+          <span />
+          <button onClick={() => setHelpOpen(v => !v)}>
+            <Hand size={14} /> {helpOpen ? 'Fechar guia' : 'Como usar'}
+          </button>
+        </div>
+
+        {helpOpen && (
+          <div className="gesture-cheatsheet">
+            <div><strong>🤏 Pinça</strong><span>clique</span></div>
+            <div><strong>✌️ Dois dedos</strong><span>scroll</span></div>
+            <div><strong>👌 Polegar + médio</strong><span>clique direito</span></div>
+            <div><strong>🖐️ Palma</strong><span>pausar / retomar</span></div>
+            <div><strong>🤏 Segura + abre</strong><span>zoom / rotação</span></div>
+          </div>
+        )}
       </div>
 
-      <div className="section-card safe-card">
-        <div className="safe-icon"><ShieldCheck size={20} /></div>
-        <div><h3>Fail-safe ativo</h3><p>Air-mouse e drag ficam desligados por padrão. Perdeu a mão, fechou ou deu erro: Astra força mouse-up.</p></div>
-        <Pill tone="good">SAFE</Pill>
+      <div className="gesture-simple-foot">
+        <ShieldCheck size={14} />
+        <span>Fail-safe ativo · perdeu a mão, o Astra solta o mouse.</span>
       </div>
-      <ProcessSummary processes={processes} filter="gestures" />
     </div>
   )
 }
@@ -642,19 +687,29 @@ export default function App() {
     return () => { clearInterval(timer); remove?.() }
   }, [])
 
-  const run = async (action, args = []) => {
+  const run = async (action, args = [], options = {}) => {
     const result = await window.astra.run(action, args)
     if (result.ok) {
       setProcesses(prev => ({ ...prev, [result.id]: { id: result.id, action, running: true } }))
-      setActivityOpen(true)
+      if (!options.quiet) setActivityOpen(true)
     } else {
-      setLogs(prev => [...prev, `[GUI] ${result.error}\n`])
-      setActivityOpen(true)
+      setLogs(prev => [...prev, '[GUI] ' + result.error + '\n'])
+      if (!options.quiet) setActivityOpen(true)
     }
     return result
   }
 
-  const stop = async id => window.astra.stop(id)
+  const stop = async id => {
+    const result = await window.astra.stop(id)
+    if (result?.ok) {
+      setProcesses(prev => (
+        prev[id]
+          ? { ...prev, [id]: { ...prev[id], running: false, code: 0 } }
+          : prev
+      ))
+    }
+    return result
+  }
   const ask = prompt => window.astra.ask(prompt)
   const update = () => window.astra.update()
 
@@ -663,7 +718,7 @@ export default function App() {
   const content = useMemo(() => ({
     chat: <ChatPage ask={ask} status={status} run={run} />,
     voice: <VoicePage run={run} processes={processes} status={status} />,
-    gestures: <GesturesPage run={run} processes={processes} />,
+    gestures: <GesturesPage run={run} stop={stop} processes={processes} status={status} />,
     mesh: <MeshPage run={run} processes={processes} status={status} />,
     system: <SystemPage status={status} refresh={refresh} run={run} />,
     setup: <SetupPage run={run} update={update} />
