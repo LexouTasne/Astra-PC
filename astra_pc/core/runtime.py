@@ -197,20 +197,10 @@ class AstraRuntime:
         print(
             f"[viewport] ZOOM_GLOBAL {self.viewport.zoom_backend.upper()}",
             flush=True,
-        )
-        print(
-            "[viewport] ROTATION360 "
-            + (
-                "READY"
-                if self.viewport.continuous_rotation_ready
-                else "UNAVAILABLE"
-            ),
-            flush=True,
-        )
-        print("[gestures] READY", flush=True)
+        )        print("[gestures] READY", flush=True)
         print("Astra gesture engine online.")
         print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
-        print("Pinça polegar+indicador = zoom global | gire a pinça = rotação 360°")
+        print("Pinça polegar+indicador = zoom global")
         print("Indicador+medio = scroll | polegar+medio = clique direito")
         print("Air Touch OFF | Drag OFF")
         print("Ctrl+C sai")
@@ -276,20 +266,6 @@ class AstraRuntime:
 
                 if out.zoom_steps:
                     self.viewport.zoom(out.zoom_steps)
-
-                if out.rotate_steps:
-                    rotate_steps = out.rotate_steps
-                    if (
-                        bool(cam_cfg.get("mirror", True))
-                        and bool(
-                            gesture_cfg.get(
-                                "rotation_compensate_mirror",
-                                True,
-                            )
-                        )
-                    ):
-                        rotate_steps = -rotate_steps
-                    self.viewport.rotate(rotate_steps)
 
                 if out.swipe:
                     self._dispatch_action(f"swipe_{out.swipe}")
@@ -371,7 +347,6 @@ class AstraRuntime:
             "scroll": True,
             "swipe": True,
             "zoom": True,
-            "rotate": True,
             "drag": False,
         }
         for name, default in defaults.items():
