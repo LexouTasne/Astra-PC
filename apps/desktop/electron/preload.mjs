@@ -5,6 +5,11 @@ contextBridge.exposeInMainWorld('astra', {
   ask: payload => ipcRenderer.invoke('astra:ask', payload),
   chooseImage: () => ipcRenderer.invoke('astra:choose-image'),
   dictate: () => ipcRenderer.invoke('astra:dictate'),
+  gestureState: () => ipcRenderer.invoke('astra:gesture-state'),
+  gestureSet: (feature, value) => ipcRenderer.invoke(
+    'astra:gesture-set',
+    { feature, value }
+  ),
   run: (command, args = []) => ipcRenderer.invoke('astra:run', { command, args }),
   stop: id => ipcRenderer.invoke('astra:stop', id),
   update: () => ipcRenderer.invoke('astra:update'),
