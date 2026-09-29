@@ -18,7 +18,6 @@ class GestureOutput:
     zoom_steps: int = 0
     rotate_steps: int = 0
     swipe: str | None = None
-    toggle_pause: bool = False
     label: str = "idle"
 
 
@@ -81,7 +80,6 @@ class GestureEngine:
         "swipe": True,
         "zoom": True,
         "rotate": True,
-        "pause": True,
         "drag": False,
     }
 
@@ -98,12 +96,6 @@ class GestureEngine:
         self._left_open_frames = 0
         self._pinch_close_frames = 0
         self._dragging = False
-        self._paused = False
-
-        self._last_pause_toggle = 0.0
-        self._palm_started: float | None = None
-        self._palm_latched = False
-
         self._right_latched = False
 
         self._transforming = False
@@ -133,7 +125,9 @@ class GestureEngine:
 
     @property
     def paused(self) -> bool:
-        return self._paused
+        # Palm-pause was intentionally removed. Kept as a read-only
+        # compatibility property for camera/debug UI.
+        return False
 
     def feature_enabled(self, name: str) -> bool:
         return bool(self._features.get(name, True))
@@ -153,12 +147,10 @@ class GestureEngine:
             self._reset_two_hand()
 
     def set_paused(self, value: bool) -> None:
-        self._paused = bool(value)
-        self._reset_transient()
+        # Compatibility no-op: gesture pausing is no longer a hand gesture.
+        return
 
     def reset_tracking(self) -> None:
-        self._palm_started = None
-        self._palm_latched = False
         self._right_latched = False
         self._stable_finger_state = None
         self._candidate_finger_state = None
@@ -170,8 +162,6 @@ class GestureEngine:
     def update(self, hands: list[Hand]) -> GestureOutput:
         if not hands:
             was_dragging = self._dragging
-            self._palm_started = None
-            self._palm_latched = False
             self._right_latched = False
             self._reset_transient()
             return GestureOutput(
@@ -231,30 +221,6 @@ class GestureEngine:
             _finger_extended(hand, 20, 18),
         )
         index_up, middle_up, ring_up, pinky_up = self._stable_fingers(raw_fingers)
-
-        open_palm = index_up and middle_up and ring_up and pinky_up
-        pause_hold = float(self.cfg.get("pause_hold_ms", 420)) / 1000.0
-        if self.feature_enabled("pause") and open_palm:
-            if self._palm_started is None:
-                self._palm_started = now
-            if not self._palm_latched and now - self._palm_started >= pause_hold:
-                cooldown = float(self.cfg.get("pause_cooldown_ms", 900)) / 1000.0
-                if now - self._last_pause_toggle >= cooldown:
-                    self._palm_latched = True
-                    self._paused = not self._paused
-                    self._last_pause_toggle = now
-                    self._reset_transient(keep_palm=True)
-                    return GestureOutput(
-                        toggle_pause=True,
-                        left_down=False,
-                        label="paused" if self._paused else "resumed",
-                    )
-        else:
-            self._palm_started = None
-            self._palm_latched = False
-
-        if self._paused:
-            return GestureOutput(label="paused")
 
         # Right click: thumb + middle pinch, separated from the left-click pinch.
         hand_ref = float(self.cfg.get("reference_hand_scale", 0.20))
@@ -486,9 +452,13 @@ class GestureEngine:
             0.025,
             float(self.cfg.get("pinch_zoom_ratio", 0.065)),
         )
-        rotate_threshold = max(
-            20.0,
-            float(self.cfg.get("pinch_rotate_threshold_deg", 65.0)),
+        rotate_deadzone = max(
+            0.5,
+            float(self.cfg.get("pinch_rotate_deadzone_deg", 1.0)),
+        )
+        max_rotate_degrees = max(
+            1,
+            int(self.cfg.get("rotate_max_degrees_per_frame", 12)),
         )
         max_zoom_steps = max(
             1,
@@ -524,12 +494,22 @@ class GestureEngine:
 
         if (
             self.feature_enabled("rotate")
-            and abs(angle_delta) >= rotate_threshold
+            and abs(angle_delta) >= rotate_deadzone
         ):
-            # Desktop-wide output rotation is 90-degree based. One deliberate
-            # hand twist emits one quadrant and then re-anchors the angle.
-            out.rotate_steps = 1 if angle_delta > 0 else -1
-            self._transform_angle = angle
+            # Rotation now has true degree semantics. Keep the sub-degree
+            # remainder in the anchor so slow movement is not lost.
+            degrees = math.trunc(angle_delta)
+            degrees = max(
+                -max_rotate_degrees,
+                min(max_rotate_degrees, degrees),
+            )
+            if degrees:
+                out.rotate_steps = degrees
+                self._transform_angle += degrees
+                while self._transform_angle > 180:
+                    self._transform_angle -= 360
+                while self._transform_angle < -180:
+                    self._transform_angle += 360
 
         if out.zoom_steps and out.rotate_steps:
             out.label = "zoom-rotate"
@@ -699,5 +679,3 @@ class GestureEngine:
         self._reset_scroll()
         self._swipe_history.clear()
         self._reset_two_hand()
-        if not keep_palm:
-            self._palm_started = None
