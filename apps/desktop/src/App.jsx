@@ -560,6 +560,30 @@ function GesturesPage({ run, stop, processes, status }) {
                   ? 'Câmera detectada · ' + (status.camera?.label || 'pronta')
                   : 'Clique em ativar. O Astra tenta encontrar a câmera automaticamente.'}
           </p>
+          {active && (
+            <div className="gesture-backend-status">
+              <span className={active.zoomGlobal === 'unavailable' ? 'bad' : ''}>
+                Zoom global · {
+                  active.zoomGlobal === 'global'
+                    ? 'direto'
+                    : active.zoomGlobal === 'fallback'
+                      ? 'fallback'
+                      : active.zoomGlobal === 'unavailable'
+                        ? 'indisponível'
+                        : 'verificando'
+                }
+              </span>
+              <span className={active.rotation360 === 'unavailable' ? 'bad' : ''}>
+                Rotação 360° · {
+                  active.rotation360 === 'ready'
+                    ? 'pronta'
+                    : active.rotation360 === 'unavailable'
+                      ? 'indisponível'
+                      : 'verificando'
+                }
+              </span>
+            </div>
+          )}
         </div>
 
         <button
@@ -810,13 +834,25 @@ export default function App() {
           }
         }
 
-        const outputTail = (current.outputTail + (event.text || '')).slice(-500)
+        const eventText = event.text || ''
+        const outputTail = (current.outputTail + eventText).slice(-700)
         const ready = current.ready || outputTail.includes('[gestures] READY')
+
+        let zoomGlobal = current.zoomGlobal
+        let rotation360 = current.rotation360
+        if (eventText.includes('[viewport] ZOOM_GLOBAL GLOBAL')) zoomGlobal = 'global'
+        if (eventText.includes('[viewport] ZOOM_GLOBAL FALLBACK')) zoomGlobal = 'fallback'
+        if (eventText.includes('[viewport] ZOOM_GLOBAL UNAVAILABLE')) zoomGlobal = 'unavailable'
+        if (eventText.includes('[viewport] ROTATION360 READY')) rotation360 = 'ready'
+        if (eventText.includes('[viewport] ROTATION360 UNAVAILABLE')) rotation360 = 'unavailable'
+
         return {
           ...prev,
           [event.id]: {
             ...current,
             ready,
+            zoomGlobal,
+            rotation360,
             outputTail
           }
         }
@@ -832,11 +868,12 @@ export default function App() {
       setProcesses(prev => ({
         ...prev,
         [result.id]: {
+          ...(prev[result.id] || {}),
           id: result.id,
           action,
           running: true,
-          ready: action !== 'gestures',
-          outputTail: ''
+          ready: action !== 'gestures' || Boolean(prev[result.id]?.ready),
+          outputTail: prev[result.id]?.outputTail || ''
         }
       }))
       if (!options.quiet) setActivityOpen(true)
