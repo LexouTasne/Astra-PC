@@ -47,6 +47,7 @@ class YdotoolBackend(InputBackend):
         self._left_down = False
         self._commands: queue.Queue[tuple[str, ...]] = queue.Queue(maxsize=64)
         self._latest_move: tuple[int, int] | None = None
+        self._relative_move: tuple[int, int] = (0, 0)
         self._move_lock = threading.Lock()
         self._pending_wheel = 0
         self._wheel_lock = threading.Lock()
@@ -141,6 +142,12 @@ class YdotoolBackend(InputBackend):
             self._latest_move = None
             return move
 
+    def _take_relative_move(self) -> tuple[int, int]:
+        with self._move_lock:
+            move = self._relative_move
+            self._relative_move = (0, 0)
+            return move
+
     def _take_wheel(self) -> int:
         with self._wheel_lock:
             amount = int(self._pending_wheel)
@@ -181,6 +188,13 @@ class YdotoolBackend(InputBackend):
                 )
                 did_work = True
 
+            relative = self._take_relative_move()
+            if relative != (0, 0) and not self._stop.is_set():
+                self._execute(
+                    ("mousemove", "--", str(relative[0]), str(relative[1]))
+                )
+                did_work = True
+
             move = self._take_move()
             if move is not None and not self._stop.is_set():
                 self._execute(
@@ -202,6 +216,18 @@ class YdotoolBackend(InputBackend):
     def move(self, x: int, y: int) -> None:
         with self._move_lock:
             self._latest_move = (int(x), int(y))
+        self._wake.set()
+
+    def move_relative(self, dx: int, dy: int) -> None:
+        dx, dy = int(dx), int(dy)
+        if not dx and not dy:
+            return
+        with self._move_lock:
+            old_x, old_y = self._relative_move
+            self._relative_move = (
+                max(-240, min(240, old_x + dx)),
+                max(-240, min(240, old_y + dy)),
+            )
         self._wake.set()
 
     def left_button(self, down: bool) -> None:
