@@ -301,7 +301,15 @@ class GestureEngine:
             self._reset_transform()
 
         if pointer_pose and self.feature_enabled("pointer"):
-            out.pointer = (index.x, index.y)
+            # Air Touch uses a stabilized index ray rather than the raw tip.
+            # The fingertip remains dominant for responsiveness while PIP/MCP
+            # damp camera noise and tiny involuntary tremors.
+            pip = hand[6]
+            mcp = hand[5]
+            out.pointer = (
+                index.x * 0.68 + pip.x * 0.22 + mcp.x * 0.10,
+                index.y * 0.68 + pip.y * 0.22 + mcp.y * 0.10,
+            )
             out.label = "pointer"
 
         transform_enabled = (
