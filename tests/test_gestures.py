@@ -46,11 +46,10 @@ def open_hand(x_offset: float = 0.0) -> Hand:
     return Hand(tuple(pts), "Right")
 
 
-def test_pointer_gesture():
+def test_air_touch_is_disabled_by_default():
     engine = GestureEngine(CFG)
     result = engine.update([fake_hand()])
-    assert result.pointer is not None
-    assert result.label == "pointer"
+    assert result.pointer is None
 
 
 def test_two_hand_mode_is_detected():
