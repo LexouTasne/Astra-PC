@@ -246,6 +246,7 @@
   "viewport": {
     "zoom_step": 0.065,
     "zoom_min": 1,
-    "zoom_max": 6
+    "zoom_max": 6,
+    "rotation_scope": "all"
   }
 }
