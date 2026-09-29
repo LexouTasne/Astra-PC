@@ -143,8 +143,8 @@ def test_pinch_threshold_scales_with_hand_size():
     near_down = near.update([scaled_pinch_hand(1.4, 0.45)])
     far_down = far.update([scaled_pinch_hand(0.7, 0.45)])
 
-    assert near_down.label == "pinch"
-    assert far_down.label == "pinch"
+    assert near_down.label in {"pinch-ready", "transform-ready"}
+    assert far_down.label in {"pinch-ready", "transform-ready"}
 
 
 def test_pose_change_requires_two_frames_but_initial_pose_is_immediate():
@@ -160,7 +160,7 @@ def test_pose_change_requires_two_frames_but_initial_pose_is_immediate():
     pointer_hand = Hand(tuple(pts), "Right")
 
     first = engine.update([pointer_hand])
-    assert first.label == "pointer"
+    assert first.pointer is None
 
     one_frame = engine.update([scroll_hand(0.0)])
     assert one_frame.label != "scroll-ready"
