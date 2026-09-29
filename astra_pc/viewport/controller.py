@@ -1,42 +1,47 @@
 from __future__ import annotations
 
-import os
 import platform
-import re
 import shutil
 import subprocess
 import threading
+import time
+from pathlib import Path
 
 from astra_pc.input.base import InputBackend
 
 
 class AstraViewport:
-    """System-wide viewport controlled by Astra gestures.
+    """Compositor-wide zoom and continuous rotation for Astra gestures.
 
-    On KDE/Wayland, zoom is handled by KWin's workspace zoom effect rather than
-    by the focused app, so it works even when the application has no zoom.
-    Rotation targets the primary display through kscreen-doctor.
+    KDE/Wayland zoom is provided by KWin's workspace zoom effect.
+    Continuous rotation is provided by Astra's KWin scripted effect, which
+    transforms every EffectWindow and therefore does not depend on app support.
     """
+
+    ROTATION_EFFECT_ID = "astra-rotation"
 
     def __init__(self, backend: InputBackend | None, cfg: dict | None = None):
         self.backend = backend
         self.cfg = cfg or {}
         self._lock = threading.RLock()
+
         self._zoom_level = 1.0
-        self._zoom_step = max(0.05, float(self.cfg.get("zoom_step", 0.18)))
+        self._zoom_step = max(0.025, float(self.cfg.get("zoom_step", 0.065)))
         self._zoom_min = max(1.0, float(self.cfg.get("zoom_min", 1.0)))
-        self._zoom_max = max(self._zoom_min, float(self.cfg.get("zoom_max", 5.0)))
-        self._rotation_quadrants = 0
-        self._rotation_scope = str(
-            self.cfg.get("rotation_scope", "all")
-        ).strip().lower()
-        self._primary_output: str | None = None
-        self._active_outputs: list[str] = []
+        self._zoom_max = max(
+            self._zoom_min,
+            float(self.cfg.get("zoom_max", 6.0)),
+        )
         self._zoom_prepared = False
-        self._qdbus: str | None = None
         self._kglobalaccel_zoom = False
 
-        self._rotation_pending: int | None = None
+        self._rotation_degrees = 0
+        self._rotation_effect_ready = False
+        self._rotation_pending = 0
+        self._rotation_reset_requested = False
+
+        self._qdbus: str | None = None
+
         self._rotation_wake = threading.Event()
         self._rotation_stop = threading.Event()
         self._rotation_worker = threading.Thread(
@@ -52,65 +57,82 @@ class AstraViewport:
 
     @property
     def rotation_degrees(self) -> int:
-        return (self._rotation_quadrants % 4) * 90
+        return self._rotation_degrees % 360
+
+    @property
+    def continuous_rotation_ready(self) -> bool:
+        return self._rotation_effect_ready
 
     def prepare(self) -> None:
         """Warm compositor hooks before the first hand gesture."""
         with self._lock:
+            self._qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
             self._ensure_zoom_backend()
-            if platform.system() == "Linux" and shutil.which("kscreen-doctor"):
-                primary, outputs = self._detect_outputs()
-                self._primary_output = primary
-                self._active_outputs = outputs
+            self._ensure_rotation_backend()
 
     def zoom(self, steps: int) -> bool:
-        if not steps or self.backend is None:
+        if not steps:
             return False
+
         with self._lock:
             self._ensure_zoom_backend()
             direction = 1 if steps > 0 else -1
             changed = False
             for _ in range(abs(int(steps))):
                 next_level = self._zoom_level * (
-                    1.0 + self._zoom_step if direction > 0
+                    1.0 + self._zoom_step
+                    if direction > 0
                     else 1.0 / (1.0 + self._zoom_step)
                 )
-                next_level = max(self._zoom_min, min(self._zoom_max, next_level))
+                next_level = max(
+                    self._zoom_min,
+                    min(self._zoom_max, next_level),
+                )
                 if abs(next_level - self._zoom_level) < 1e-4:
                     continue
 
-                # KWin workspace zoom: call KGlobalAccel directly when
-                # available; synthetic Meta shortcuts are only a fallback.
                 self._invoke_global_zoom(direction)
                 self._zoom_level = next_level
                 changed = True
             return changed
 
     def reset_zoom(self) -> bool:
-        if self.backend is None:
-            return False
         with self._lock:
+            self._ensure_zoom_backend()
             self._invoke_global_zoom(0)
             self._zoom_level = 1.0
             return True
 
-    def rotate(self, steps: int) -> bool:
-        if not steps:
+    def rotate(self, degrees: int) -> bool:
+        """Rotate the visual desktop by signed integer degrees."""
+        degrees = int(degrees)
+        if not degrees:
             return False
+
         with self._lock:
-            self._rotation_quadrants = (
-                self._rotation_quadrants + int(steps)
-            ) % 4
-            self._rotation_pending = self._rotation_quadrants
+            if not self._rotation_effect_ready:
+                self._ensure_rotation_backend()
+            self._rotation_degrees = (
+                self._rotation_degrees + degrees
+            ) % 360
+            self._rotation_pending += degrees
+            # Prevent an extreme tracking glitch from creating a huge backlog.
+            self._rotation_pending = max(
+                -180,
+                min(180, self._rotation_pending),
+            )
             self._rotation_wake.set()
-            return True
+            return self._rotation_effect_ready
 
     def reset_rotation(self) -> bool:
         with self._lock:
-            self._rotation_quadrants = 0
+            if not self._rotation_effect_ready:
+                self._ensure_rotation_backend()
+            self._rotation_degrees = 0
             self._rotation_pending = 0
+            self._rotation_reset_requested = True
             self._rotation_wake.set()
-            return True
+            return self._rotation_effect_ready
 
     def reset(self) -> None:
         try:
@@ -129,14 +151,19 @@ class AstraViewport:
 
         if platform.system() != "Linux":
             return
-        if shutil.which("kwriteconfig6"):
+
+        kwrite = shutil.which("kwriteconfig6")
+        if kwrite:
             try:
                 subprocess.run(
                     [
-                        "kwriteconfig6",
-                        "--file", "kwinrc",
-                        "--group", "Plugins",
-                        "--key", "zoomEnabled",
+                        kwrite,
+                        "--file",
+                        "kwinrc",
+                        "--group",
+                        "Plugins",
+                        "--key",
+                        "zoomEnabled",
                         "true",
                     ],
                     stdout=subprocess.DEVNULL,
@@ -146,10 +173,13 @@ class AstraViewport:
                 )
                 subprocess.run(
                     [
-                        "kwriteconfig6",
-                        "--file", "kwinrc",
-                        "--group", "Effect-zoom",
-                        "--key", "ZoomFactor",
+                        kwrite,
+                        "--file",
+                        "kwinrc",
+                        "--group",
+                        "Effect-zoom",
+                        "--key",
+                        "ZoomFactor",
                         str(1.0 + self._zoom_step),
                     ],
                     stdout=subprocess.DEVNULL,
@@ -159,36 +189,198 @@ class AstraViewport:
                 )
             except Exception:
                 pass
-        qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+
+        qdbus = self._qdbus or shutil.which("qdbus6") or shutil.which("qdbus")
         self._qdbus = qdbus
-        if qdbus:
+        if not qdbus:
+            return
+
+        try:
+            # Force the compositor effect into the current session instead of
+            # relying on the next KWin restart.
+            subprocess.run(
+                [
+                    qdbus,
+                    "org.kde.KWin",
+                    "/Effects",
+                    "org.kde.kwin.Effects.loadEffect",
+                    "zoom",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+            subprocess.run(
+                [qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+
+            for _ in range(5):
+                names = self._kwin_shortcut_names()
+                if (
+                    "view_zoom_in" in names
+                    and "view_zoom_out" in names
+                ):
+                    self._kglobalaccel_zoom = True
+                    break
+                time.sleep(0.06)
+        except Exception:
+            self._kglobalaccel_zoom = False
+
+    def _rotation_source_dir(self) -> Path:
+        return (
+            Path(__file__).resolve().parents[2]
+            / "packaging"
+            / "kwin"
+            / self.ROTATION_EFFECT_ID
+        )
+
+    def _rotation_target_dir(self) -> Path:
+        return (
+            Path.home()
+            / ".local"
+            / "share"
+            / "kwin"
+            / "effects"
+            / self.ROTATION_EFFECT_ID
+        )
+
+    def _ensure_rotation_backend(self) -> None:
+        if self._rotation_effect_ready:
+            return
+        if platform.system() != "Linux":
+            return
+
+        qdbus = self._qdbus or shutil.which("qdbus6") or shutil.which("qdbus")
+        self._qdbus = qdbus
+        if not qdbus:
+            return
+
+        source = self._rotation_source_dir()
+        if not (source / "metadata.json").exists():
+            return
+
+        target = self._rotation_target_dir()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source, target, dirs_exist_ok=True)
+        except Exception:
+            return
+
+        kwrite = shutil.which("kwriteconfig6")
+        if kwrite:
             try:
                 subprocess.run(
-                    [qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                    [
+                        kwrite,
+                        "--file",
+                        "kwinrc",
+                        "--group",
+                        "Plugins",
+                        "--key",
+                        f"{self.ROTATION_EFFECT_ID}Enabled",
+                        "true",
+                    ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     timeout=1.0,
                     check=False,
                 )
-                names = subprocess.run(
-                    [
-                        qdbus,
-                        "org.kde.kglobalaccel",
-                        "/component/kwin",
-                        "org.kde.kglobalaccel.Component.shortcutNames",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=1.0,
-                    check=False,
-                )
-                output = names.stdout if names.returncode == 0 else ""
-                self._kglobalaccel_zoom = (
-                    "view_zoom_in" in output
-                    and "view_zoom_out" in output
-                )
             except Exception:
-                self._kglobalaccel_zoom = False
+                pass
+
+        try:
+            # Reload on every Astra start so repo updates become active without
+            # a logout or KWin restart.
+            subprocess.run(
+                [
+                    qdbus,
+                    "org.kde.KWin",
+                    "/Effects",
+                    "org.kde.kwin.Effects.unloadEffect",
+                    self.ROTATION_EFFECT_ID,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+            subprocess.run(
+                [
+                    qdbus,
+                    "org.kde.KWin",
+                    "/Effects",
+                    "org.kde.kwin.Effects.loadEffect",
+                    self.ROTATION_EFFECT_ID,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+
+            for _ in range(12):
+                names = self._kwin_shortcut_names()
+                if (
+                    "AstraRotatePlus1" in names
+                    and "AstraRotateMinus1" in names
+                    and "AstraRotateReset" in names
+                ):
+                    self._rotation_effect_ready = True
+                    break
+                time.sleep(0.08)
+
+            if self._rotation_effect_ready:
+                self._invoke_kwin_shortcut("AstraRotateReset")
+                self._rotation_degrees = 0
+        except Exception:
+            self._rotation_effect_ready = False
+
+    def _kwin_shortcut_names(self) -> str:
+        if not self._qdbus:
+            return ""
+        try:
+            result = subprocess.run(
+                [
+                    self._qdbus,
+                    "org.kde.kglobalaccel",
+                    "/component/kwin",
+                    "org.kde.kglobalaccel.Component.shortcutNames",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            return result.stdout if result.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    def _invoke_kwin_shortcut(self, action: str) -> bool:
+        if not self._qdbus:
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    self._qdbus,
+                    "org.kde.kglobalaccel",
+                    "/component/kwin",
+                    "org.kde.kglobalaccel.Component.invokeShortcut",
+                    action,
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.8,
+                check=False,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     def _invoke_global_zoom(self, direction: int) -> None:
         action = {
@@ -224,6 +416,22 @@ class AstraViewport:
                 keys = ["win", "-"]
             self.backend.hotkey(keys)
 
+    @staticmethod
+    def _rotation_actions(delta: int) -> list[str]:
+        if not delta:
+            return []
+
+        positive = delta > 0
+        remaining = abs(int(delta))
+        actions: list[str] = []
+        for amount in (15, 5, 1):
+            count, remaining = divmod(remaining, amount)
+            suffix = "Plus" if positive else "Minus"
+            actions.extend(
+                [f"AstraRotate{suffix}{amount}"] * count
+            )
+        return actions
+
     def _rotation_loop(self) -> None:
         while not self._rotation_stop.is_set():
             self._rotation_wake.wait(0.25)
@@ -232,104 +440,25 @@ class AstraViewport:
                 return
 
             with self._lock:
-                pending = self._rotation_pending
-                self._rotation_pending = None
+                reset = self._rotation_reset_requested
+                self._rotation_reset_requested = False
+                delta = self._rotation_pending
+                self._rotation_pending = 0
 
-            if pending is None:
+            if not self._rotation_effect_ready:
                 continue
-            self._apply_rotation_value(pending)
 
-    def _apply_rotation(self) -> bool:
-        return self._apply_rotation_value(self._rotation_quadrants)
+            if reset:
+                self._invoke_kwin_shortcut("AstraRotateReset")
+                continue
 
-    def _apply_rotation_value(self, quadrant: int) -> bool:
-        if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
-            return False
-
-        if not self._active_outputs:
-            primary, outputs = self._detect_outputs()
-            self._primary_output = primary
-            self._active_outputs = outputs
-
-        if self._rotation_scope == "all":
-            targets = list(self._active_outputs)
-        else:
-            targets = [self._primary_output] if self._primary_output else []
-
-        targets = [item for item in targets if item]
-        if not targets:
-            return False
-
-        rotation = {
-            0: "none",
-            1: "right",
-            2: "inverted",
-            3: "left",
-        }[int(quadrant) % 4]
-        try:
-            cmd = ["kscreen-doctor"] + [
-                f"output.{output}.rotation.{rotation}"
-                for output in targets
-            ]
-            p = subprocess.run(
-                cmd,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=2.0,
-                check=False,
-            )
-            return p.returncode == 0
-        except Exception:
-            return False
+            for action in self._rotation_actions(delta):
+                if self._rotation_stop.is_set():
+                    return
+                self._invoke_kwin_shortcut(action)
 
     def close(self) -> None:
         self._rotation_stop.set()
         self._rotation_wake.set()
         if self._rotation_worker.is_alive():
             self._rotation_worker.join(timeout=1.0)
-
-
-    def _detect_outputs(self) -> tuple[str | None, list[str]]:
-        if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
-            return None, []
-        try:
-            p = subprocess.run(
-                ["kscreen-doctor", "-o"],
-                capture_output=True,
-                text=True,
-                timeout=2.0,
-                check=False,
-            )
-        except Exception:
-            return None, []
-        if p.returncode != 0:
-            return None, []
-
-        current_id = None
-        first_id = None
-        primary = None
-        outputs: list[str] = []
-
-        for raw in p.stdout.splitlines():
-            line = raw.strip()
-            m = re.match(r"Output:\s+(\S+)", line)
-            if m:
-                current_id = m.group(1)
-                if first_id is None:
-                    first_id = current_id
-
-                lowered = line.lower()
-                if "disabled" not in lowered and current_id not in outputs:
-                    outputs.append(current_id)
-                if re.search(r"\bpriority\s+1\b", line, re.I):
-                    primary = current_id
-                continue
-
-            if current_id and re.search(r"\bpriority\s+1\b", line, re.I):
-                primary = current_id
-
-        return primary or first_id, outputs
-
-    def _detect_primary_output(self) -> str | None:
-        primary, _outputs = self._detect_outputs()
-        return primary
