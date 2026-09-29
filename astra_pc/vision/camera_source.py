@@ -23,8 +23,14 @@ from astra_pc.paths import data_dir
 class LatestFrameCapture:
     """Continuously consume frames and expose only the newest real frame."""
 
-    def __init__(self, cap: cv2.VideoCapture):
+    def __init__(
+        self,
+        cap: cv2.VideoCapture,
+        *,
+        owner_process: subprocess.Popen | None = None,
+    ):
         self._cap = cap
+        self._owner_process = owner_process
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
         self._stop = threading.Event()
@@ -76,6 +82,16 @@ class LatestFrameCapture:
         finally:
             if self._thread.is_alive():
                 self._thread.join(timeout=0.7)
+            process = self._owner_process
+            if process is not None and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=1.0)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
 
     def set(self, prop, value):
         return self._cap.set(prop, value)
@@ -111,6 +127,228 @@ def _load_saved_droidcam_source() -> str | None:
             return f"http://{host}:{port}/video"
     except Exception:
         pass
+    return None
+
+
+def _parse_droidcam_endpoint(value: str | int | None) -> tuple[str, int] | None:
+    if value is None or isinstance(value, int):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if lowered.startswith("droidcam://"):
+        text = text[len("droidcam://"):]
+    elif lowered.startswith(("http://", "https://")):
+        text = text.split("//", 1)[1]
+    elif "://" in text:
+        return None
+
+    text = text.split("/", 1)[0].strip()
+    if not text:
+        return None
+
+    host = text
+    port = DROIDCAM_DEFAULT_PORT
+    if text.count(":") == 1:
+        maybe_host, maybe_port = text.rsplit(":", 1)
+        if maybe_port.isdigit():
+            host = maybe_host.strip()
+            port = int(maybe_port)
+
+    if not host or not (1 <= int(port) <= 65535):
+        return None
+
+    # Port 4747 is DroidCam Classic's normal endpoint. A raw private IP/IP:port
+    # entered through Astra's manual camera dialog is also intentionally treated
+    # as DroidCam.
+    if (
+        int(port) != DROIDCAM_DEFAULT_PORT
+        and not lowered.startswith("droidcam://")
+        and not lowered.startswith(("http://", "https://"))
+    ):
+        return None
+    return host, int(port)
+
+
+def _droidcam_cli_binary() -> Path | None:
+    for candidate in (
+        shutil.which("droidcam-cli"),
+        "/usr/local/bin/droidcam-cli",
+        "/usr/bin/droidcam-cli",
+    ):
+        if candidate and Path(candidate).exists():
+            return Path(candidate)
+    return None
+
+
+def _droidcam_virtual_devices() -> list[Path]:
+    if platform.system() != "Linux":
+        return []
+
+    root = Path("/sys/class/video4linux")
+    if not root.exists():
+        return []
+
+    preferred: list[Path] = []
+    other_virtual: list[Path] = []
+    for entry in sorted(root.glob("video*")):
+        device = Path("/dev") / entry.name
+        if not device.exists():
+            continue
+        try:
+            name = (entry / "name").read_text(
+                encoding="utf-8",
+                errors="ignore",
+            ).strip().lower()
+        except Exception:
+            name = ""
+
+        if "droidcam" in name:
+            preferred.append(device)
+        elif any(token in name for token in ("v4l2loopback", "virtual")):
+            other_virtual.append(device)
+
+    return preferred + other_virtual
+
+
+def _start_droidcam_cli(
+    host: str,
+    port: int,
+    device: Path,
+) -> subprocess.Popen | None:
+    cli = _droidcam_cli_binary()
+    if cli is None:
+        print("[camera] DROIDCAM_ERROR droidcam-cli not installed", flush=True)
+        return None
+
+    log_path = data_dir() / "droidcam-runtime.log"
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log = log_path.open("ab", buffering=0)
+    except Exception:
+        log = subprocess.DEVNULL
+
+    cmd = [
+        str(cli),
+        "-nocontrols",
+        f"-dev={device}",
+        host,
+        str(int(port)),
+    ]
+    print(
+        f"[camera] DROIDCAM_CONNECT {host}:{port} -> {device}",
+        flush=True,
+    )
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        try:
+            if log is not subprocess.DEVNULL:
+                log.close()
+        except Exception:
+            pass
+        print(f"[camera] DROIDCAM_ERROR start failed: {exc}", flush=True)
+        return None
+    finally:
+        try:
+            if log is not subprocess.DEVNULL:
+                log.close()
+        except Exception:
+            pass
+
+    time.sleep(0.20)
+    if process.poll() is not None:
+        print(
+            f"[camera] DROIDCAM_ERROR cli exited code={process.returncode}",
+            flush=True,
+        )
+        return None
+    return process
+
+
+def _open_droidcam_via_cli(
+    source: str,
+    *,
+    width: int,
+    height: int,
+    fps: int,
+    timeout_seconds: float = 3.5,
+) -> OpenedCamera | None:
+    endpoint = _parse_droidcam_endpoint(source)
+    if endpoint is None or platform.system() != "Linux":
+        return None
+
+    host, port = endpoint
+    devices = _droidcam_virtual_devices()
+    if not devices:
+        print(
+            "[camera] DROIDCAM_ERROR no V4L2 loopback/DroidCam device found",
+            flush=True,
+        )
+        return None
+
+    print(
+        "[camera] DROIDCAM_DEVICES "
+        + ",".join(str(device) for device in devices),
+        flush=True,
+    )
+    deadline = time.monotonic() + max(0.6, float(timeout_seconds))
+
+    for device in devices:
+        if time.monotonic() >= deadline:
+            break
+
+        process = _start_droidcam_cli(host, port, device)
+        if process is None:
+            continue
+
+        try:
+            while time.monotonic() < deadline and process.poll() is None:
+                opened = _try_open_candidate(
+                    str(device),
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    warmup_seconds=min(
+                        0.65,
+                        max(0.18, deadline - time.monotonic()),
+                    ),
+                )
+                if opened is not None:
+                    # Transfer lifecycle ownership: when gestures stop, the CLI
+                    # connection we created is terminated too.
+                    opened.cap._owner_process = process
+                    opened.source = f"droidcam://{host}:{port}"
+                    print(
+                        f"[camera] DROIDCAM_READY {device}",
+                        flush=True,
+                    )
+                    return opened
+                time.sleep(0.10)
+        finally:
+            # A successful return transferred ownership above.
+            if process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=0.7)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+
+    print(
+        "[camera] DROIDCAM_ERROR connected but virtual camera produced no frames",
+        flush=True,
+    )
     return None
 
 
@@ -513,7 +751,8 @@ def _manual_prompt_text(previous_error: bool = False) -> str:
         lead
         + "Digite a câmera manualmente:\n"
         + "• webcam: 0, 1, 2... ou /dev/videoX\n"
-        + "• DroidCam/IP: http://IP:PORT/video ou URL RTSP\n\n"
+        + "• DroidCam: IP:porta (ex. 192.168.1.50:4747)\n"
+        + "• câmera IP genérica: URL HTTP/RTSP\n\n"
         + "Cancelar deixa os gestos desligados."
     )
 
@@ -539,7 +778,7 @@ def request_manual_camera_source(*, previous_error: bool = False) -> str | int |
                         "Astra · Câmera",
                         "--inputbox",
                         prompt,
-                        "/dev/video0",
+                        "192.168.1.50:4747",
                     ],
                     capture_output=True,
                     text=True,
@@ -561,7 +800,7 @@ def request_manual_camera_source(*, previous_error: bool = False) -> str | int |
                         "--entry",
                         "--title=Astra · Câmera",
                         "--text=" + prompt,
-                        "--entry-text=/dev/video0",
+                        "--entry-text=192.168.1.50:4747",
                     ],
                     capture_output=True,
                     text=True,
@@ -688,19 +927,33 @@ def open_camera_resilient(
             for _, source in candidates:
                 if time.monotonic() >= deadline:
                     break
-                # Give remembered/configured sources more warmup time; new local
-                # devices still get retried on the next scan pass.
-                important = (
-                    _source_key(source) == _source_key(_coerce_source(configured_source))
-                    or _source_key(source) == _source_key(_coerce_source(remembered))
-                )
-                opened = _try_open_candidate(
-                    source,
-                    width=width,
-                    height=height,
-                    fps=fps,
-                    warmup_seconds=0.95 if important else 0.45,
-                )
+
+                droidcam_endpoint = _parse_droidcam_endpoint(source)
+                if droidcam_endpoint is not None and platform.system() == "Linux":
+                    opened = _open_droidcam_via_cli(
+                        str(source),
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        timeout_seconds=min(
+                            3.5,
+                            max(0.5, deadline - time.monotonic()),
+                        ),
+                    )
+                else:
+                    # Give remembered/configured sources more warmup time; new
+                    # local devices still get retried on the next scan pass.
+                    important = (
+                        _source_key(source) == _source_key(_coerce_source(configured_source))
+                        or _source_key(source) == _source_key(_coerce_source(remembered))
+                    )
+                    opened = _try_open_candidate(
+                        source,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        warmup_seconds=0.95 if important else 0.45,
+                    )
                 if opened is not None:
                     save_camera_state(opened.source, opened.index)
                     print(
@@ -717,23 +970,27 @@ def open_camera_resilient(
                     timeout_seconds=min(2.5, remaining)
                 )
                 if droidcam_source and time.monotonic() < deadline:
-                    opened = _try_open_candidate(
-                        droidcam_source,
-                        width=width,
-                        height=height,
-                        fps=fps,
-                        warmup_seconds=min(
-                            1.2,
-                            max(0.20, deadline - time.monotonic()),
-                        ),
-                    )
-                    if opened is not None:
-                        save_camera_state(opened.source, opened.index)
-                        print(
-                            f"[camera] AUTO_FOUND DroidCam={opened.source}",
-                            flush=True,
+                    endpoint = _parse_droidcam_endpoint(droidcam_source)
+                    if endpoint is not None:
+                        host, port = endpoint
+                        source = f"droidcam://{host}:{port}"
+                        opened = _open_droidcam_via_cli(
+                            source,
+                            width=width,
+                            height=height,
+                            fps=fps,
+                            timeout_seconds=min(
+                                3.5,
+                                max(0.5, deadline - time.monotonic()),
+                            ),
                         )
-                        return opened
+                        if opened is not None:
+                            save_camera_state(opened.source, opened.index)
+                            print(
+                                f"[camera] AUTO_FOUND DroidCam={opened.source}",
+                                flush=True,
+                            )
+                            return opened
 
             if time.monotonic() < deadline:
                 time.sleep(min(0.25, max(0.01, deadline - time.monotonic())))
@@ -752,13 +1009,25 @@ def open_camera_resilient(
                 return None
 
             print(f"[camera] manual probe: {source}", flush=True)
-            opened = _try_open_candidate(
-                source,
-                width=width,
-                height=height,
-                fps=fps,
-                warmup_seconds=2.0,
-            )
+            if (
+                _parse_droidcam_endpoint(source) is not None
+                and platform.system() == "Linux"
+            ):
+                opened = _open_droidcam_via_cli(
+                    str(source),
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    timeout_seconds=5.0,
+                )
+            else:
+                opened = _try_open_candidate(
+                    source,
+                    width=width,
+                    height=height,
+                    fps=fps,
+                    warmup_seconds=2.0,
+                )
             if opened is not None:
                 save_camera_state(opened.source, opened.index)
                 print(
