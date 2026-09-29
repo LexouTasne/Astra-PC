@@ -26,7 +26,13 @@
     "enabled": false,
     "active_margin": 0.1,
     "smoothing": 0.42,
-    "deadzone_px": 1
+    "deadzone_px": 1,
+    "mode": "relative",
+    "relative_gain": 1.15,
+    "relative_deadzone": 0.0028,
+    "relative_accel": 1.8,
+    "relative_max_step_px": 82,
+    "relative_jump_threshold": 0.11
   },
   "gestures": {
     "pinch_threshold": 0.052,
