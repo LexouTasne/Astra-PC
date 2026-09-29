@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import threading
 
-from astra_pc.input.factory import create_input_backend
-
 from .base import Skill, SkillResult
 
 
@@ -28,6 +26,7 @@ class InputControlSkill(Skill):
     def _get_backend(self):
         with self._lock:
             if self._backend is None:
+                from astra_pc.input.factory import create_input_backend
                 self._backend = create_input_backend()
             return self._backend
 
