@@ -25,7 +25,7 @@ from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
 from astra_pc.core.routine_suggestions import RoutineSuggestionEngine
 from astra_pc.core.semantic_memory import SemanticMemory
-from astra_pc.gestures.control import GestureControlState, apply_gesture_control
+from astra_pc.gestures.control import FEATURE_LABELS, GestureControlState, apply_gesture_control
 from astra_pc.perception.fusion import PerceptionFusion
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.perception.reference import ReferenceResolver
@@ -664,6 +664,51 @@ class AstraDaemon:
                 return {"ok": True, "text": text}
             except Exception as exc:
                 return {"ok": False, "error": str(exc)}
+
+        if kind == "gestures.state":
+            snap = self.gesture_control.snapshot(force=True)
+            overrides = dict(snap.get("overrides", {}))
+            gesture_cfg = dict(self.config.data.get("gestures", {}))
+            pointer_cfg = dict(self.config.data.get("pointer", {}))
+            defaults = {
+                "pointer": bool(pointer_cfg.get("enabled", False)),
+                "click": True,
+                "right_click": True,
+                "scroll": True,
+                "swipe": True,
+                "zoom": True,
+                "rotate": True,
+                "pause": True,
+                "drag": bool(gesture_cfg.get("drag_enabled", False)),
+            }
+            features = {
+                name: bool(overrides.get(name, default))
+                for name, default in defaults.items()
+            }
+            return {
+                "ok": True,
+                "enabled": bool(snap.get("enabled", True)),
+                "features": features,
+                "overrides": overrides,
+            }
+
+        if kind == "gestures.set":
+            feature = str(request.get("feature", "")).strip()
+            value = bool(request.get("value", False))
+            if feature == "system":
+                self.gesture_control.set_enabled(value)
+            elif feature in FEATURE_LABELS:
+                self.gesture_control.set_feature(feature, value)
+            else:
+                return {"ok": False, "error": "unknown_gesture_feature"}
+
+            snap = self.gesture_control.snapshot(force=True)
+            self.bus.publish(
+                "gestures.control",
+                state=snap,
+                source="desktop",
+            )
+            return self.handle({"type": "gestures.state"})
 
         if kind == "stop":
             self.stop()
