@@ -47,6 +47,7 @@ class AstraViewport:
     def prepare(self) -> None:
         with self._lock:
             self._qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+            self._remove_legacy_rotation_effect()
             self._ensure_zoom_backend()
 
     def zoom(self, steps: int) -> bool:
