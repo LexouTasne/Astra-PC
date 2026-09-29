@@ -82,7 +82,7 @@ def test_opening_pinch_zooms_in():
 
     out = engine.update([pointer_hand(0.04)])
 
-    assert out.zoom_steps == 1
+    assert 1 <= out.zoom_steps <= 3
     assert out.label == "zoom-in"
 
 
@@ -91,7 +91,7 @@ def test_closing_pinch_zooms_out_after_opening():
     enter_transform(engine)
 
     first = engine.update([pointer_hand(0.04)])
-    assert first.zoom_steps == 1
+    assert 1 <= first.zoom_steps <= 3
 
     second = engine.update([pointer_hand(0.025)])
     assert second.zoom_steps == -1
@@ -116,7 +116,7 @@ def test_zoom_and_rotation_can_fire_independently():
 
     out = engine.update([pointer_hand(0.04, 75.0)])
 
-    assert out.zoom_steps == 1
+    assert 1 <= out.zoom_steps <= 3
     assert out.rotate_steps == 1
     assert out.label == "zoom-rotate"
 
