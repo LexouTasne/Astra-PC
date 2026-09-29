@@ -331,20 +331,20 @@ class AstraRuntime:
         enabled = bool(snap.get("enabled", True))
 
         defaults = {
-            "pointer": self.pointer_enabled,
-            "click": True,
+            "pointer": False,
+            "click": False,
             "right_click": True,
             "scroll": True,
             "swipe": True,
             "zoom": True,
             "rotate": True,
             "pause": True,
-            "drag": bool(gesture_cfg.get("drag_enabled", False)),
+            "drag": False,
         }
         for name, default in defaults.items():
             gestures.set_feature_enabled(name, bool(overrides.get(name, default)))
 
-        pointer_enabled = bool(overrides.get("pointer", self.pointer_enabled))
+        pointer_enabled = False
         signature = (
             enabled,
             tuple(sorted((str(k), bool(v)) for k, v in overrides.items())),
