@@ -116,11 +116,8 @@ class AstraViewport:
                 self._rotation_degrees + degrees
             ) % 360
             self._rotation_pending += degrees
-            # Prevent an extreme tracking glitch from creating a huge backlog.
-            self._rotation_pending = max(
-                -180,
-                min(180, self._rotation_pending),
-            )
+            # GestureEngine already bounds the per-frame angular delta. Keep
+            # the queued sum exact so 359° really means 359°, never 180°.
             self._rotation_wake.set()
             return self._rotation_effect_ready
 
