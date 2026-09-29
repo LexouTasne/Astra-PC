@@ -67,7 +67,8 @@
     "zoom_max_steps_per_frame": 3,
     "rotation_compensate_mirror": true,
     "pinch_rotate_deadzone_deg": 1,
-    "rotate_max_degrees_per_frame": 12
+    "rotate_max_degrees_per_frame": 12,
+    "two_hand_transforms_enabled": false
   },
   "actions": {
     "swipe_right": [
