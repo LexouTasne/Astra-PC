@@ -4,8 +4,6 @@ import os
 import platform
 
 from .base import InputBackend
-from .pynput_backend import PynputBackend
-from .wayland_backend import YdotoolBackend
 
 
 def create_input_backend() -> InputBackend:
@@ -13,10 +11,14 @@ def create_input_backend() -> InputBackend:
     wayland = bool(os.getenv("WAYLAND_DISPLAY"))
 
     if system == "linux" and wayland:
+        from .wayland_backend import YdotoolBackend
+
         try:
             return YdotoolBackend()
         except RuntimeError as exc:
             if os.getenv("ASTRA_ALLOW_PYNPUT_WAYLAND_FALLBACK") == "1":
+                from .pynput_backend import PynputBackend
+
                 print(
                     "[input] ydotool unavailable; using explicitly enabled "
                     f"pynput Wayland fallback: {exc}"
@@ -28,4 +30,5 @@ def create_input_backend() -> InputBackend:
                 "Run: astra setup gestures"
             ) from exc
 
+    from .pynput_backend import PynputBackend
     return PynputBackend()
