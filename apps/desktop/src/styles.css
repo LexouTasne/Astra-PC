@@ -1112,3 +1112,27 @@ textarea, pre, .message-body, .log-view { user-select: text; }
     max-width: 230px;
   }
 }
+
+
+.gesture-backend-status {
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.gesture-backend-status span {
+  padding: 4px 7px;
+  border: 1px solid #242424;
+  border-radius: 999px;
+  background: #111;
+  color: #777;
+  font-size: 8px;
+  letter-spacing: .02em;
+}
+
+.gesture-backend-status span.bad {
+  border-color: #3a2626;
+  color: #a36d6d;
+}
