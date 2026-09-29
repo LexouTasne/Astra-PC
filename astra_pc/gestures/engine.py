@@ -108,6 +108,7 @@ class GestureEngine:
 
         self._transforming = False
         self._transform_start_frames = 0
+        self._transform_miss_frames = 0
         self._transform_distance: float | None = None
         self._transform_angle: float | None = None
 
@@ -317,7 +318,15 @@ class GestureEngine:
         # for zoom or twist the same pinch for rotation. No hold-to-enter mode.
         if self._transforming:
             if transform_enabled:
+                self._transform_miss_frames = 0
                 return self._update_pinch_transform(hand)
+
+            self._transform_miss_frames += 1
+            if self._transform_miss_frames < max(
+                1,
+                int(self.cfg.get("transform_release_frames", 3)),
+            ):
+                return GestureOutput(label="transform-hold")
             self._reset_transform()
 
         if transform_enabled:
@@ -333,7 +342,10 @@ class GestureEngine:
                     int(self.cfg.get("transform_start_frames", 2)),
                 ):
                     self._transforming = True
-                    self._transform_distance = max(1e-4, pinch)
+                    self._transform_distance = max(
+                        1e-4,
+                        pinch / max(1e-4, _hand_scale(hand)),
+                    )
                     self._transform_angle = math.degrees(
                         math.atan2(index.y - thumb.y, index.x - thumb.x)
                     )
@@ -453,7 +465,8 @@ class GestureEngine:
 
     def _update_pinch_transform(self, hand: Hand) -> GestureOutput:
         thumb, index = hand[4], hand[8]
-        distance = _dist(thumb, index)
+        hand_scale = max(1e-4, _hand_scale(hand))
+        distance = _dist(thumb, index) / hand_scale
         angle = math.degrees(math.atan2(index.y - thumb.y, index.x - thumb.x))
 
         if self._transform_distance is None:
@@ -462,31 +475,59 @@ class GestureEngine:
             self._transform_angle = angle
 
         base_distance = max(1e-4, self._transform_distance)
-        distance_ratio = distance / base_distance
+        distance_ratio = max(1e-4, distance / base_distance)
         angle_delta = angle - self._transform_angle
         while angle_delta > 180:
             angle_delta -= 360
         while angle_delta < -180:
             angle_delta += 360
 
-        zoom_ratio = max(0.03, float(self.cfg.get("pinch_zoom_ratio", 0.12)))
-        rotate_threshold = max(
-            4.0,
-            float(self.cfg.get("pinch_rotate_threshold_deg", 14.0)),
+        zoom_ratio = max(
+            0.025,
+            float(self.cfg.get("pinch_zoom_ratio", 0.065)),
         )
+        rotate_threshold = max(
+            20.0,
+            float(self.cfg.get("pinch_rotate_threshold_deg", 65.0)),
+        )
+        max_zoom_steps = max(
+            1,
+            int(self.cfg.get("zoom_max_steps_per_frame", 3)),
+        )
+
         out = GestureOutput(label="transform")
 
-        if (
-            self.feature_enabled("zoom")
-            and abs(distance_ratio - 1.0) >= zoom_ratio
-        ):
-            out.zoom_steps = 1 if distance_ratio > 1.0 else -1
-            self._transform_distance = distance
+        if self.feature_enabled("zoom"):
+            factor = 1.0 + zoom_ratio
+            zoom_steps = 0
+            if distance_ratio >= factor:
+                zoom_steps = int(
+                    math.log(distance_ratio) / math.log(factor)
+                )
+            elif distance_ratio <= 1.0 / factor:
+                zoom_steps = -int(
+                    math.log(1.0 / distance_ratio) / math.log(factor)
+                )
+
+            zoom_steps = max(
+                -max_zoom_steps,
+                min(max_zoom_steps, zoom_steps),
+            )
+            if zoom_steps:
+                out.zoom_steps = zoom_steps
+                # Consume only the emitted amount. Any remaining motion stays
+                # accumulated for the next frame instead of being discarded.
+                if zoom_steps > 0:
+                    self._transform_distance *= factor ** zoom_steps
+                else:
+                    self._transform_distance /= factor ** (-zoom_steps)
 
         if (
             self.feature_enabled("rotate")
             and abs(angle_delta) >= rotate_threshold
         ):
+            # Desktop-wide output rotation is 90-degree based. One deliberate
+            # hand twist emits one quadrant and then re-anchors the angle.
             out.rotate_steps = 1 if angle_delta > 0 else -1
             self._transform_angle = angle
 
@@ -632,6 +673,7 @@ class GestureEngine:
     def _reset_transform(self) -> None:
         self._transforming = False
         self._transform_start_frames = 0
+        self._transform_miss_frames = 0
         self._transform_distance = None
         self._transform_angle = None
 
