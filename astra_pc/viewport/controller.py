@@ -29,6 +29,8 @@ class AstraViewport:
         self._rotation_quadrants = 0
         self._primary_output: str | None = None
         self._zoom_prepared = False
+        self._qdbus: str | None = None
+        self._kglobalaccel_zoom = False
 
         self._rotation_pending: int | None = None
         self._rotation_wake = threading.Event()
@@ -71,9 +73,9 @@ class AstraViewport:
                 if abs(next_level - self._zoom_level) < 1e-4:
                     continue
 
-                # KDE workspace zoom: Meta+= / Meta+-. This is compositor-level,
-                # not Ctrl+plus inside the focused application.
-                self.backend.hotkey(["win", "+" if direction > 0 else "-"])
+                # KWin workspace zoom: call KGlobalAccel directly when
+                # available; synthetic Meta shortcuts are only a fallback.
+                self._invoke_global_zoom(direction)
                 self._zoom_level = next_level
                 changed = True
             return changed
@@ -82,7 +84,7 @@ class AstraViewport:
         if self.backend is None:
             return False
         with self._lock:
-            self.backend.hotkey(["win", "0"])
+            self._invoke_global_zoom(0)
             self._zoom_level = 1.0
             return True
 
@@ -152,6 +154,7 @@ class AstraViewport:
             except Exception:
                 pass
         qdbus = shutil.which("qdbus6") or shutil.which("qdbus")
+        self._qdbus = qdbus
         if qdbus:
             try:
                 subprocess.run(
@@ -161,8 +164,59 @@ class AstraViewport:
                     timeout=1.0,
                     check=False,
                 )
+                names = subprocess.run(
+                    [
+                        qdbus,
+                        "org.kde.kglobalaccel",
+                        "/component/kwin",
+                        "org.kde.kglobalaccel.Component.shortcutNames",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=1.0,
+                    check=False,
+                )
+                output = names.stdout if names.returncode == 0 else ""
+                self._kglobalaccel_zoom = (
+                    "view_zoom_in" in output
+                    and "view_zoom_out" in output
+                )
             except Exception:
-                pass
+                self._kglobalaccel_zoom = False
+
+    def _invoke_global_zoom(self, direction: int) -> None:
+        action = {
+            1: "view_zoom_in",
+            -1: "view_zoom_out",
+            0: "view_actual_size",
+        }[1 if direction > 0 else -1 if direction < 0 else 0]
+
+        if self._kglobalaccel_zoom and self._qdbus:
+            try:
+                subprocess.Popen(
+                    [
+                        self._qdbus,
+                        "org.kde.kglobalaccel",
+                        "/component/kwin",
+                        "org.kde.kglobalaccel.Component.invokeShortcut",
+                        action,
+                    ],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                return
+            except Exception:
+                self._kglobalaccel_zoom = False
+
+        if self.backend is not None:
+            keys = ["win", "0"]
+            if direction > 0:
+                keys = ["win", "+"]
+            elif direction < 0:
+                keys = ["win", "-"]
+            self.backend.hotkey(keys)
 
     def _rotation_loop(self) -> None:
         while not self._rotation_stop.is_set():
