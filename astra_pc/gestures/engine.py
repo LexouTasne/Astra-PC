@@ -160,7 +160,10 @@ class GestureEngine:
                 label="no-hand",
             )
 
-        if len(hands) >= 2:
+        if (
+            len(hands) >= 2
+            and bool(self.cfg.get("two_hand_transforms_enabled", False))
+        ):
             out = self._update_two_hands(hands[0], hands[1])
             if out.label != "idle":
                 return out
@@ -263,18 +266,21 @@ class GestureEngine:
         pinch_off = pinch >= left_release_threshold
         out = GestureOutput()
 
-        # Natural one-hand transform pose:
-        # index extended, other three fingers folded, thumb free to pinch.
-        pointer_pose = index_up and not middle_up and not ring_up and not pinky_up
-        transform_enabled = (
-            pointer_pose
-            and (self.feature_enabled("zoom") or self.feature_enabled("rotate"))
+        # Natural one-hand transform pose. Tolerate one noisy folded
+        # finger classification, but do not steal scroll/swipe unless thumb
+        # and index are actually close enough to start a transform.
+        folded_count = sum(
+            int(not value)
+            for value in (middle_up, ring_up, pinky_up)
+        )
+        transform_pose = index_up and folded_count >= 2
+        transform_features = (
+            self.feature_enabled("zoom")
+            or self.feature_enabled("rotate")
         )
 
-        # Old-style pinch transform: close thumb + index, then simply open/close
-        # for zoom or twist the same pinch for rotation. No hold-to-enter mode.
         if self._transforming:
-            if transform_enabled:
+            if transform_pose and transform_features:
                 self._transform_miss_frames = 0
                 return self._update_pinch_transform(hand)
 
@@ -286,7 +292,8 @@ class GestureEngine:
                 return GestureOutput(label="transform-hold")
             self._reset_transform()
 
-        if transform_enabled:
+        transform_candidate = transform_pose and transform_features
+        if transform_candidate:
             start_threshold = _scaled_threshold(
                 hand,
                 float(self.cfg.get("transform_start_threshold", 0.060)),
@@ -315,14 +322,15 @@ class GestureEngine:
                     out.label = "transform-ready"
                     return out
                 out.label = "pinch-ready"
-            else:
-                self._transform_start_frames = 0
-                out.label = "zoom-ready"
-            # Zoom/rotation own this pose completely. They never share the
-            # thumb-index pinch with Air Touch, click or drag.
-            return out
+                return out
 
         self._transform_start_frames = 0
+        pointer_pose = (
+            index_up
+            and not middle_up
+            and not ring_up
+            and not pinky_up
+        )
 
         # Legacy click remains available only when zoom/rotation are disabled.
         # This keeps the pinch unambiguous while the transform gestures are on.
