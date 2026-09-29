@@ -7,13 +7,12 @@ CFG = {
     "click_release_threshold": 0.065,
     "right_pinch_threshold": 0.05,
     "drag_hold_ms": 220,
-    "pause_cooldown_ms": 900,
     "scroll_gain": 8.0,
     "scroll_deadzone": 0.007,
     "swipe_velocity": 1.25,
     "swipe_cooldown_ms": 700,
     "two_hand_zoom_threshold": 0.035,
-    "two_hand_rotate_threshold_deg": 10.0,
+    "two_hand_rotate_deadzone_deg": 1.0,
 }
 
 
