@@ -51,7 +51,13 @@ def test_air_touch_is_disabled_by_default():
     assert result.pointer is None
 
 
-def test_two_hand_mode_is_detected():
+def test_two_hand_mode_requires_explicit_opt_in():
     engine = GestureEngine(CFG)
     result = engine.update([open_hand(-0.15), open_hand(0.15)])
+    assert result.label != "two-hand-ready"
+
+    cfg = dict(CFG)
+    cfg["two_hand_transforms_enabled"] = True
+    enabled = GestureEngine(cfg)
+    result = enabled.update([open_hand(-0.15), open_hand(0.15)])
     assert result.label == "two-hand-ready"
