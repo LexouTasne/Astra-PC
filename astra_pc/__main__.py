@@ -69,13 +69,15 @@ def _run_gestures(args, config) -> None:
             tutorial=tutorial,
             air_mouse=getattr(args, "air_mouse", False),
             drag=getattr(args, "drag", False),
+            camera_source=getattr(args, "camera_source", None),
         ).run()
     except RuntimeError as exc:
         detail = str(exc)
         if detail.startswith("camera_unavailable:"):
-            print("Astra não encontrou nenhuma câmera produzindo frames.")
-            print("Rode: astra setup camera")
-            print("Se estiver usando DroidCam, conecte o celular e depois tente novamente.")
+            print("Astra não encontrou uma câmera válida e o fallback manual foi cancelado.")
+            print("Você também pode forçar uma fonte:")
+            print("  astra gestures --camera-source /dev/video0")
+            print("  astra gestures --camera-source http://IP:PORT/video")
             raise SystemExit(2)
         if detail.startswith("gesture_input_unavailable:") or "Wayland input is not ready" in detail:
             print("Backend de mouse/teclado dos gestos não está pronto.")
@@ -1141,6 +1143,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     gestures = sub.add_parser("gestures", help="start real-time hand control")
     gestures.add_argument("--show-camera", action="store_true")
+    gestures.add_argument(
+        "--camera-source",
+        default=None,
+        help="manual camera source: index, /dev/videoX, HTTP/RTSP URL",
+    )
     gestures.add_argument("--dry-run", action="store_true")
     gestures.add_argument("--voice-model", type=Path)
     gestures.add_argument(
