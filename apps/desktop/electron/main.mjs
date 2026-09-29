@@ -274,6 +274,29 @@ ipcMain.handle('astra:choose-image', async () => {
   }
 })
 
+ipcMain.handle('astra:gesture-state', async () => {
+  try {
+    return await daemonRequest({ type: 'gestures.state' }, 5000)
+  } catch (error) {
+    return { ok: false, error: friendlyError(error) }
+  }
+})
+
+ipcMain.handle('astra:gesture-set', async (_event, payload) => {
+  const feature = String(payload?.feature || '').trim()
+  const value = Boolean(payload?.value)
+  if (!feature) return { ok: false, error: 'Gesto inválido.' }
+
+  try {
+    return await daemonRequest(
+      { type: 'gestures.set', feature, value },
+      5000
+    )
+  } catch (error) {
+    return { ok: false, error: friendlyError(error) }
+  }
+})
+
 ipcMain.handle('astra:dictate', async () => {
   try {
     const result = await daemonRequest(
