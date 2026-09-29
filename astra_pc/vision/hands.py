@@ -72,16 +72,23 @@ class HandTracker:
                 smoothed.append(new)
                 continue
 
-            motion_threshold = getattr(self, "_motion_threshold", 0.018)
-            slow_alpha = getattr(self, "_slow_alpha", self._smoothing)
-            fast_alpha = getattr(self, "_fast_alpha", max(self._smoothing, 0.94))
-            if motion <= motion_threshold:
-                ratio = motion / max(1e-6, motion_threshold)
-                a = slow_alpha + (self._smoothing - slow_alpha) * ratio
+            adaptive = all(
+                hasattr(self, name)
+                for name in ("_motion_threshold", "_slow_alpha", "_fast_alpha")
+            )
+            if not adaptive:
+                a = self._smoothing
             else:
-                span = max(1e-6, self._snap_distance - motion_threshold)
-                ratio = min(1.0, (motion - motion_threshold) / span)
-                a = self._smoothing + (fast_alpha - self._smoothing) * ratio
+                motion_threshold = self._motion_threshold
+                slow_alpha = self._slow_alpha
+                fast_alpha = self._fast_alpha
+                if motion <= motion_threshold:
+                    ratio = motion / max(1e-6, motion_threshold)
+                    a = slow_alpha + (self._smoothing - slow_alpha) * ratio
+                else:
+                    span = max(1e-6, self._snap_distance - motion_threshold)
+                    ratio = min(1.0, (motion - motion_threshold) / span)
+                    a = self._smoothing + (fast_alpha - self._smoothing) * ratio
 
             smoothed.append(
                 Point(
