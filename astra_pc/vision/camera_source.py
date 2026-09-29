@@ -83,15 +83,21 @@ class LatestFrameCapture:
             if self._thread.is_alive():
                 self._thread.join(timeout=0.7)
             process = self._owner_process
-            if process is not None and process.poll() is None:
-                try:
-                    process.terminate()
-                    process.wait(timeout=1.0)
-                except Exception:
+            if process is not None:
+                if process.poll() is None:
                     try:
-                        process.kill()
+                        process.terminate()
+                        process.wait(timeout=1.0)
                     except Exception:
-                        pass
+                        try:
+                            process.kill()
+                        except Exception:
+                            pass
+                try:
+                    from astra_pc.core.process_guard import unregister_process
+                    unregister_process("droidcam-cli", process.pid)
+                except Exception:
+                    pass
 
     def set(self, prop, value):
         return self._cap.set(prop, value)
@@ -277,6 +283,12 @@ def _start_droidcam_cli(
             flush=True,
         )
         return None
+
+    try:
+        from astra_pc.core.process_guard import register_process
+        register_process("droidcam-cli", process.pid)
+    except Exception:
+        pass
     return process
 
 
@@ -361,15 +373,21 @@ def _open_droidcam_via_cli(
                         return opened
                     time.sleep(0.08)
             finally:
-                if not transferred and process.poll() is None:
-                    try:
-                        process.terminate()
-                        process.wait(timeout=0.7)
-                    except Exception:
+                if not transferred:
+                    if process.poll() is None:
                         try:
-                            process.kill()
+                            process.terminate()
+                            process.wait(timeout=0.7)
                         except Exception:
-                            pass
+                            try:
+                                process.kill()
+                            except Exception:
+                                pass
+                    try:
+                        from astra_pc.core.process_guard import unregister_process
+                        unregister_process("droidcam-cli", process.pid)
+                    except Exception:
+                        pass
 
             print(
                 f"[camera] DROIDCAM_RETRY profile={profile} failed",
