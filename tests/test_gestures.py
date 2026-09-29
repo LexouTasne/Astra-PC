@@ -11,8 +11,6 @@ CFG = {
     "scroll_deadzone": 0.007,
     "swipe_velocity": 1.25,
     "swipe_cooldown_ms": 700,
-    "two_hand_zoom_threshold": 0.035,
-    "two_hand_rotate_deadzone_deg": 1.0,
 }
 
 
@@ -51,13 +49,9 @@ def test_air_touch_is_disabled_by_default():
     assert result.pointer is None
 
 
-def test_two_hand_mode_requires_explicit_opt_in():
+def test_two_hands_are_always_blocked_for_now():
     engine = GestureEngine(CFG)
     result = engine.update([open_hand(-0.15), open_hand(0.15)])
-    assert result.label != "two-hand-ready"
 
-    cfg = dict(CFG)
-    cfg["two_hand_transforms_enabled"] = True
-    enabled = GestureEngine(cfg)
-    result = enabled.update([open_hand(-0.15), open_hand(0.15)])
-    assert result.label == "two-hand-ready"
+    assert result.label == "multi-hand-blocked"
+    assert result.zoom_steps == 0
