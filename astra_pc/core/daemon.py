@@ -677,7 +677,6 @@ class AstraDaemon:
                 "scroll": True,
                 "swipe": True,
                 "zoom": True,
-                "rotate": True,
                 "drag": False,
             }
             features = {
