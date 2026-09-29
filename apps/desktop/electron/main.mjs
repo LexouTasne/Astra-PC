@@ -65,6 +65,13 @@ function spawnAstra(args, { id = crypto.randomUUID(), interactive = false } = {}
   child.stderr?.on('data', chunk => emit('stderr', chunk))
   child.on('exit', code => {
     running.delete(id)
+
+    // Belt-and-suspenders cleanup: if a gesture runtime crashes before its
+    // Python finally block, restore KWin zoom from a fresh helper process.
+    if (args[0] === 'gestures') {
+      collectAstra(['viewport-reset'], 5000).catch(() => {})
+    }
+
     mainWindow?.webContents.send('astra:process', {
       id,
       stream: 'exit',
