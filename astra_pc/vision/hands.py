@@ -38,6 +38,10 @@ class HandTracker:
             self._motion_threshold,
             float(cfg.get("landmark_snap_distance", 0.085)),
         )
+        self._input_width = max(
+            0,
+            int(cfg.get("input_width", 512)),
+        )
         self._previous: dict[str, tuple[Point, ...]] = {}
 
     @staticmethod
@@ -102,7 +106,20 @@ class HandTracker:
         return result
 
     def process(self, frame_bgr) -> list[Hand]:
-        rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        inference_frame = frame_bgr
+        if (
+            self._input_width > 0
+            and frame_bgr.shape[1] > self._input_width
+        ):
+            scale = self._input_width / float(frame_bgr.shape[1])
+            height = max(1, int(round(frame_bgr.shape[0] * scale)))
+            inference_frame = cv2.resize(
+                frame_bgr,
+                (self._input_width, height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+
+        rgb = cv2.cvtColor(inference_frame, cv2.COLOR_BGR2RGB)
         rgb.flags.writeable = False
         result = self._hands.process(rgb)
         if not result.multi_hand_landmarks:
