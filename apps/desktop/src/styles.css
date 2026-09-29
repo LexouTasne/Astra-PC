@@ -971,3 +971,144 @@ textarea, pre, .message-body, .log-view { user-select: text; }
     width: 100%;
   }
 }
+
+
+.gesture-settings {
+  width: min(560px, 100%);
+  margin-top: 18px;
+  border: 1px solid #222;
+  border-radius: 12px;
+  background: #0e0e0e;
+  overflow: hidden;
+}
+
+.gesture-settings-head {
+  min-height: 54px;
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #1d1d1d;
+  text-align: left;
+}
+
+.gesture-settings-head > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gesture-settings-head strong {
+  color: #d8d8d8;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.gesture-settings-head span {
+  color: #5d5d5d;
+  font-size: 8px;
+}
+
+.gesture-settings-head small {
+  flex: 0 0 auto;
+  color: #707070;
+  font-size: 7px;
+  letter-spacing: .12em;
+}
+
+.gesture-setting-list {
+  padding: 4px 8px 8px;
+}
+
+.gesture-setting-row {
+  width: 100%;
+  min-height: 48px;
+  padding: 7px 7px 7px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  border: 0;
+  border-bottom: 1px solid #191919;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.gesture-setting-row:last-child {
+  border-bottom: 0;
+}
+
+.gesture-setting-row:hover {
+  background: #121212;
+}
+
+.gesture-setting-row > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.gesture-setting-row strong {
+  color: #8b8b8b;
+  font-size: 10px;
+  font-weight: 520;
+  transition: color .12s ease;
+}
+
+.gesture-setting-row span {
+  color: #4f4f4f;
+  font-size: 8px;
+  line-height: 1.35;
+}
+
+.gesture-setting-row.enabled strong {
+  color: #e5e5e5;
+}
+
+.gesture-switch {
+  position: relative;
+  width: 31px;
+  height: 17px;
+  flex: 0 0 auto;
+  border: 1px solid #303030;
+  border-radius: 999px;
+  background: #171717;
+  transition: .13s ease;
+}
+
+.gesture-switch b {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #5b5b5b;
+  transition: .13s ease;
+}
+
+.gesture-setting-row.enabled .gesture-switch {
+  border-color: #5b5b5b;
+  background: #242424;
+}
+
+.gesture-setting-row.enabled .gesture-switch b {
+  left: 17px;
+  background: #f0f0f0;
+}
+
+.gesture-setting-row:disabled {
+  opacity: .55;
+  cursor: wait;
+}
+
+@media (max-width: 700px) {
+  .gesture-setting-row span {
+    max-width: 230px;
+  }
+}
