@@ -203,6 +203,7 @@ const actionMap = {
 }
 
 function createWindow() {
+  closingWindow = false
   mainWindow = new BrowserWindow({
     width: 1380,
     height: 880,
