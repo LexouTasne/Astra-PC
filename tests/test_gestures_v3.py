@@ -16,6 +16,11 @@ CFG = {
     "pinch_zoom_ratio": 0.10,
     "pinch_rotate_threshold_deg": 45.0,
     "pose_confirm_frames": 1,
+    "click_arm_threshold": 0.095,
+    "click_arm_frames": 2,
+    "click_close_frames": 2,
+    "click_min_ms": 55,
+    "click_max_motion": 0.028,
     "pause_hold_ms": 300,
     "pause_cooldown_ms": 600,
     "scroll_gain": 58.0,
@@ -61,17 +66,66 @@ def pointer_hand(thumb_distance: float, angle_deg: float = 0.0) -> Hand:
     return Hand(tuple(pts), "Right")
 
 
-def test_quick_pinch_stays_click():
-    engine = GestureEngine(dict(CFG))
+def translated_hand(hand: Hand, dx: float, dy: float = 0.0) -> Hand:
+    return Hand(
+        tuple(Point(p.x + dx, p.y + dy, p.z) for p in hand.points),
+        hand.handedness,
+    )
+
+
+def arm_click(engine: GestureEngine) -> None:
+    engine.update([pointer_hand(0.12)])
+    engine.update([pointer_hand(0.12)])
+
+
+def close_pinch(engine: GestureEngine) -> None:
     engine.update([pointer_hand(0.02)])
-    out = engine.update([pointer_hand(0.10)])
+    engine.update([pointer_hand(0.02)])
+
+
+def test_deliberate_armed_pinch_clicks():
+    engine = GestureEngine(dict(CFG))
+    arm_click(engine)
+    close_pinch(engine)
+    engine._pinch_started = time.monotonic() - 0.10
+
+    out = engine.update([pointer_hand(0.12)])
+
     assert out.left_click
     assert out.label == "click"
 
 
+def test_air_touch_pointing_never_clicks_without_arming():
+    engine = GestureEngine(dict(CFG))
+    # Thumb starts close to index: this must NEVER be interpreted as a click.
+    base = pointer_hand(0.02)
+
+    outputs = []
+    for dx in (0.00, 0.02, 0.04, 0.06, 0.08):
+        outputs.append(engine.update([translated_hand(base, dx)]))
+
+    assert not any(out.left_click for out in outputs)
+    assert not engine._pinching
+
+
+def test_moving_during_pinch_cancels_click():
+    engine = GestureEngine(dict(CFG))
+    arm_click(engine)
+    close_pinch(engine)
+    engine._pinch_started = time.monotonic() - 0.10
+
+    # Large index motion while fingers are pinched invalidates the click.
+    engine.update([translated_hand(pointer_hand(0.02), 0.05)])
+    out = engine.update([translated_hand(pointer_hand(0.12), 0.05)])
+
+    assert not out.left_click
+    assert out.label == "pinch-release"
+
+
 def test_long_pinch_opens_transform_mode_then_zooms():
     engine = GestureEngine(dict(CFG))
-    engine.update([pointer_hand(0.02)])
+    arm_click(engine)
+    close_pinch(engine)
     engine._pinch_started = time.monotonic() - 0.5
 
     armed = engine.update([pointer_hand(0.10)])
@@ -85,7 +139,8 @@ def test_long_pinch_opens_transform_mode_then_zooms():
 
 def test_pinch_transform_rotates_only_after_deliberate_twist():
     engine = GestureEngine(dict(CFG))
-    engine.update([pointer_hand(0.02)])
+    arm_click(engine)
+    close_pinch(engine)
     engine._pinch_started = time.monotonic() - 0.5
     engine.update([pointer_hand(0.10)])
 
@@ -101,7 +156,8 @@ def test_explicit_drag_disables_transform_conflict():
     cfg = dict(CFG)
     cfg["drag_enabled"] = True
     engine = GestureEngine(cfg)
-    engine.update([pointer_hand(0.02)])
+    arm_click(engine)
+    close_pinch(engine)
     engine._pinch_started = time.monotonic() - 0.5
     out = engine.update([pointer_hand(0.02)])
     assert out.label == "drag"
