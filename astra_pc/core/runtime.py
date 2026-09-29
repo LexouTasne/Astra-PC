@@ -194,6 +194,19 @@ class AstraRuntime:
 
         self._start_voice_if_requested(gestures)
 
+        print(
+            f"[viewport] ZOOM_GLOBAL {self.viewport.zoom_backend.upper()}",
+            flush=True,
+        )
+        print(
+            "[viewport] ROTATION360 "
+            + (
+                "READY"
+                if self.viewport.continuous_rotation_ready
+                else "UNAVAILABLE"
+            ),
+            flush=True,
+        )
         print("[gestures] READY", flush=True)
         print("Astra gesture engine online.")
         print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
