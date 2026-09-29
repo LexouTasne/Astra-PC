@@ -4,7 +4,12 @@
     "width": 640,
     "height": 360,
     "target_fps": 60,
-    "mirror": true
+    "mirror": true,
+    "source": "",
+    "auto_scan_seconds": 10,
+    "manual_fallback": true,
+    "input_recovery_seconds": 6,
+    "probe_limit": 16
   },
   "tracking": {
     "max_hands": 2,
