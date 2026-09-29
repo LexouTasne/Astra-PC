@@ -16,11 +16,12 @@
     "min_detection_confidence": 0.55,
     "min_tracking_confidence": 0.55,
     "model_complexity": 0,
-    "landmark_smoothing": 0.76,
-    "landmark_snap_distance": 0.085,
-    "landmark_slow_alpha": 0.58,
-    "landmark_fast_alpha": 0.94,
-    "landmark_motion_threshold": 0.018
+    "landmark_smoothing": 0.82,
+    "landmark_snap_distance": 0.075,
+    "landmark_slow_alpha": 0.66,
+    "landmark_fast_alpha": 0.97,
+    "landmark_motion_threshold": 0.014,
+    "input_width": 512
   },
   "pointer": {
     "enabled": false,
@@ -56,15 +57,17 @@
     "right_release_threshold": 0.074,
     "reference_hand_scale": 0.2,
     "transform_hold_ms": 200,
-    "pinch_zoom_ratio": 0.08,
-    "pinch_rotate_threshold_deg": 30,
+    "pinch_zoom_ratio": 0.065,
+    "pinch_rotate_threshold_deg": 65,
     "click_arm_threshold": 0.095,
     "click_arm_frames": 2,
     "click_close_frames": 2,
     "click_min_ms": 55,
     "click_max_motion": 0.028,
-    "transform_start_threshold": 0.06,
-    "transform_start_frames": 2
+    "transform_start_threshold": 0.065,
+    "transform_start_frames": 2,
+    "transform_release_frames": 3,
+    "zoom_max_steps_per_frame": 3
   },
   "actions": {
     "swipe_right": [
@@ -241,8 +244,8 @@
     "allow_remote_over_vpn": true
   },
   "viewport": {
-    "zoom_step": 0.08,
+    "zoom_step": 0.065,
     "zoom_min": 1,
-    "zoom_max": 5
+    "zoom_max": 6
   }
 }
