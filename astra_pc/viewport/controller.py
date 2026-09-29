@@ -27,7 +27,11 @@ class AstraViewport:
         self._zoom_min = max(1.0, float(self.cfg.get("zoom_min", 1.0)))
         self._zoom_max = max(self._zoom_min, float(self.cfg.get("zoom_max", 5.0)))
         self._rotation_quadrants = 0
+        self._rotation_scope = str(
+            self.cfg.get("rotation_scope", "all")
+        ).strip().lower()
         self._primary_output: str | None = None
+        self._active_outputs: list[str] = []
         self._zoom_prepared = False
         self._qdbus: str | None = None
         self._kglobalaccel_zoom = False
@@ -55,7 +59,9 @@ class AstraViewport:
         with self._lock:
             self._ensure_zoom_backend()
             if platform.system() == "Linux" and shutil.which("kscreen-doctor"):
-                self._primary_output = self._detect_primary_output()
+                primary, outputs = self._detect_outputs()
+                self._primary_output = primary
+                self._active_outputs = outputs
 
     def zoom(self, steps: int) -> bool:
         if not steps or self.backend is None:
@@ -240,10 +246,19 @@ class AstraViewport:
         if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
             return False
 
-        output = self._primary_output or self._detect_primary_output()
-        if not output:
+        if not self._active_outputs:
+            primary, outputs = self._detect_outputs()
+            self._primary_output = primary
+            self._active_outputs = outputs
+
+        if self._rotation_scope == "all":
+            targets = list(self._active_outputs)
+        else:
+            targets = [self._primary_output] if self._primary_output else []
+
+        targets = [item for item in targets if item]
+        if not targets:
             return False
-        self._primary_output = output
 
         rotation = {
             0: "none",
@@ -252,8 +267,12 @@ class AstraViewport:
             3: "left",
         }[int(quadrant) % 4]
         try:
+            cmd = ["kscreen-doctor"] + [
+                f"output.{output}.rotation.{rotation}"
+                for output in targets
+            ]
             p = subprocess.run(
-                ["kscreen-doctor", f"output.{output}.rotation.{rotation}"],
+                cmd,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=2.0,
@@ -270,9 +289,9 @@ class AstraViewport:
             self._rotation_worker.join(timeout=1.0)
 
 
-    def _detect_primary_output(self) -> str | None:
+    def _detect_outputs(self) -> tuple[str | None, list[str]]:
         if platform.system() != "Linux" or not shutil.which("kscreen-doctor"):
-            return None
+            return None, []
         try:
             p = subprocess.run(
                 ["kscreen-doctor", "-o"],
@@ -282,12 +301,15 @@ class AstraViewport:
                 check=False,
             )
         except Exception:
-            return None
+            return None, []
         if p.returncode != 0:
-            return None
+            return None, []
 
         current_id = None
         first_id = None
+        primary = None
+        outputs: list[str] = []
+
         for raw in p.stdout.splitlines():
             line = raw.strip()
             m = re.match(r"Output:\s+(\S+)", line)
@@ -295,9 +317,19 @@ class AstraViewport:
                 current_id = m.group(1)
                 if first_id is None:
                     first_id = current_id
+
+                lowered = line.lower()
+                if "disabled" not in lowered and current_id not in outputs:
+                    outputs.append(current_id)
                 if re.search(r"\bpriority\s+1\b", line, re.I):
-                    return current_id
+                    primary = current_id
                 continue
+
             if current_id and re.search(r"\bpriority\s+1\b", line, re.I):
-                return current_id
-        return first_id
+                primary = current_id
+
+        return primary or first_id, outputs
+
+    def _detect_primary_output(self) -> str | None:
+        primary, _outputs = self._detect_outputs()
+        return primary
