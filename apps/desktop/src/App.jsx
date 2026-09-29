@@ -451,16 +451,18 @@ function GesturesPage({ run, stop, processes, status }) {
   const [helpOpen, setHelpOpen] = useState(false)
   const [starting, setStarting] = useState(false)
 
-  const active = Object.values(processes).find(
+  const gestureProcess = Object.values(processes).find(
     item => item.running && item.action === 'gestures'
   )
+  const active = gestureProcess?.ready ? gestureProcess : null
+  const searching = gestureProcess && !gestureProcess.ready
 
   const toggleGestures = async () => {
     if (starting) return
     setStarting(true)
     try {
-      if (active) {
-        await stop(active.id)
+      if (gestureProcess) {
+        await stop(gestureProcess.id)
       } else {
         await run('gestures', ['--no-tutorial'], { quiet: true })
       }
@@ -473,7 +475,7 @@ function GesturesPage({ run, stop, processes, status }) {
     if (starting) return
     setStarting(true)
     try {
-      if (active) await stop(active.id)
+      if (gestureProcess) await stop(gestureProcess.id)
       await run('gestures-tutorial', [], { quiet: true })
     } finally {
       setStarting(false)
@@ -489,25 +491,39 @@ function GesturesPage({ run, stop, processes, status }) {
 
         <div className="gesture-simple-copy">
           <span className={'gesture-state ' + (active ? 'online' : '')}>
-            <i /> {active ? 'GESTOS ATIVOS' : 'GESTOS DESLIGADOS'}
+            <i /> {active ? 'GESTOS ATIVOS' : searching ? 'PROCURANDO CÂMERA…' : 'GESTOS DESLIGADOS'}
           </span>
-          <h2>{active ? 'Pode usar as mãos.' : 'Controle o PC com gestos.'}</h2>
+          <h2>
+            {active
+              ? 'Pode usar as mãos.'
+              : searching
+                ? 'Conectando a câmera.'
+                : 'Controle o PC com gestos.'}
+          </h2>
           <p>
             {active
               ? 'Astra está vendo suas mãos. Nenhuma janela de câmera precisa ficar aberta.'
-              : status.camera?.available
-                ? 'Câmera pronta · ' + (status.camera?.label || 'detectada')
-                : 'Câmera não detectada.'}
+              : searching
+                ? 'Busca automática por até 10 segundos. Se não encontrar, o Astra abre a entrada manual.'
+                : status.camera?.available
+                  ? 'Câmera detectada · ' + (status.camera?.label || 'pronta')
+                  : 'Clique em ativar. O Astra tenta encontrar a câmera automaticamente.'}
           </p>
         </div>
 
         <button
-          className={'gesture-power ' + (active ? 'stop' : '')}
+          className={'gesture-power ' + (gestureProcess ? 'stop' : '')}
           onClick={toggleGestures}
-          disabled={starting || (!active && !status.camera?.available)}
+          disabled={starting}
         >
           <Power size={19} />
-          {starting ? 'AGUARDE…' : active ? 'DESATIVAR' : 'ATIVAR GESTOS'}
+          {starting
+            ? 'AGUARDE…'
+            : active
+              ? 'DESATIVAR'
+              : searching
+                ? 'CANCELAR BUSCA'
+                : 'ATIVAR GESTOS'}
         </button>
 
         <div className="gesture-simple-links">
@@ -689,9 +705,35 @@ export default function App() {
     const timer = setInterval(refresh, 3500)
     const remove = window.astra.onProcess(event => {
       setProcesses(prev => {
-        const current = prev[event.id] || { id: event.id, action: 'Astra', running: true }
-        if (event.stream === 'exit') return { ...prev, [event.id]: { ...current, running: false, code: event.code } }
-        return prev
+        const current = prev[event.id] || {
+          id: event.id,
+          action: 'Astra',
+          running: true,
+          ready: false,
+          outputTail: ''
+        }
+        if (event.stream === 'exit') {
+          return {
+            ...prev,
+            [event.id]: {
+              ...current,
+              running: false,
+              ready: false,
+              code: event.code
+            }
+          }
+        }
+
+        const outputTail = (current.outputTail + (event.text || '')).slice(-500)
+        const ready = current.ready || outputTail.includes('[gestures] READY')
+        return {
+          ...prev,
+          [event.id]: {
+            ...current,
+            ready,
+            outputTail
+          }
+        }
       })
       if (event.text) setLogs(prev => [...prev, event.text].slice(-500))
     })
@@ -701,7 +743,16 @@ export default function App() {
   const run = async (action, args = [], options = {}) => {
     const result = await window.astra.run(action, args)
     if (result.ok) {
-      setProcesses(prev => ({ ...prev, [result.id]: { id: result.id, action, running: true } }))
+      setProcesses(prev => ({
+        ...prev,
+        [result.id]: {
+          id: result.id,
+          action,
+          running: true,
+          ready: action !== 'gestures',
+          outputTail: ''
+        }
+      }))
       if (!options.quiet) setActivityOpen(true)
     } else {
       setLogs(prev => [...prev, '[GUI] ' + result.error + '\n'])
