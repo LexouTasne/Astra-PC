@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 
-from astra_pc.input.factory import create_input_backend
 from astra_pc.viewport.controller import AstraViewport
 
 from .base import Skill, SkillResult
