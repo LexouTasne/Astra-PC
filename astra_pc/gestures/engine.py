@@ -74,8 +74,8 @@ class GestureEngine:
     """Deterministic gesture state machine with jitter-resistant motion gestures."""
 
     FEATURE_DEFAULTS = {
-        "pointer": True,
-        "click": True,
+        "pointer": False,
+        "click": False,
         "right_click": True,
         "scroll": True,
         "swipe": True,
@@ -107,6 +107,7 @@ class GestureEngine:
         self._right_latched = False
 
         self._transforming = False
+        self._transform_start_frames = 0
         self._transform_distance: float | None = None
         self._transform_angle: float | None = None
 
@@ -304,11 +305,57 @@ class GestureEngine:
         pinch_off = pinch >= left_release_threshold
         out = GestureOutput()
 
+        # Natural one-hand transform pose:
+        # index extended, other three fingers folded, thumb free to pinch.
         pointer_pose = index_up and not middle_up and not ring_up and not pinky_up
+        transform_enabled = (
+            pointer_pose
+            and (self.feature_enabled("zoom") or self.feature_enabled("rotate"))
+        )
 
-        # A left click must be deliberately armed from an OPEN thumb-index
-        # position first. Merely raising the index while the thumb happens to be
-        # close can never start a click.
+        # Old-style pinch transform: close thumb + index, then simply open/close
+        # for zoom or twist the same pinch for rotation. No hold-to-enter mode.
+        if self._transforming:
+            if transform_enabled:
+                return self._update_pinch_transform(hand)
+            self._reset_transform()
+
+        if transform_enabled:
+            start_threshold = _scaled_threshold(
+                hand,
+                float(self.cfg.get("transform_start_threshold", 0.060)),
+                hand_ref,
+            )
+            if pinch <= start_threshold:
+                self._transform_start_frames += 1
+                if self._transform_start_frames >= max(
+                    1,
+                    int(self.cfg.get("transform_start_frames", 2)),
+                ):
+                    self._transforming = True
+                    self._transform_distance = max(1e-4, pinch)
+                    self._transform_angle = math.degrees(
+                        math.atan2(index.y - thumb.y, index.x - thumb.x)
+                    )
+                    self._transform_start_frames = 0
+                    self._pinching = False
+                    self._left_armed = False
+                    self._left_open_frames = 0
+                    self._pinch_close_frames = 0
+                    out.label = "transform-ready"
+                    return out
+                out.label = "pinch-ready"
+            else:
+                self._transform_start_frames = 0
+                out.label = "zoom-ready"
+            # Zoom/rotation own this pose completely. They never share the
+            # thumb-index pinch with Air Touch, click or drag.
+            return out
+
+        self._transform_start_frames = 0
+
+        # Legacy click remains available only when zoom/rotation are disabled.
+        # This keeps the pinch unambiguous while the transform gestures are on.
         if not self._pinching:
             if pointer_pose and pinch >= left_arm_threshold:
                 self._left_open_frames += 1
@@ -323,35 +370,8 @@ class GestureEngine:
                 self._left_open_frames = 0
                 self._left_armed = False
 
-        if self._transforming:
-            if pointer_pose and (self.feature_enabled("zoom") or self.feature_enabled("rotate")):
-                return self._update_pinch_transform(hand)
-            self._reset_transform()
-
-        if pointer_pose and self.feature_enabled("pointer"):
-            # Air Touch uses a stabilized index ray rather than the raw tip.
-            # The fingertip remains dominant for responsiveness while PIP/MCP
-            # damp camera noise and tiny involuntary tremors.
-            pip = hand[6]
-            mcp = hand[5]
-            out.pointer = (
-                index.x * 0.68 + pip.x * 0.22 + mcp.x * 0.10,
-                index.y * 0.68 + pip.y * 0.22 + mcp.y * 0.10,
-            )
-            out.label = "pointer"
-
-        transform_enabled = (
-            pointer_pose
-            and not self.feature_enabled("drag")
-            and (self.feature_enabled("zoom") or self.feature_enabled("rotate"))
-        )
-        pinch_tracking_enabled = (
-            self.feature_enabled("click")
-            or self.feature_enabled("drag")
-            or transform_enabled
-        )
         if (
-            pinch_tracking_enabled
+            self.feature_enabled("click")
             and pinch_on
             and not self._pinching
             and self._left_armed
@@ -368,18 +388,14 @@ class GestureEngine:
                 self._left_armed = False
                 self._left_open_frames = 0
                 self._pinch_close_frames = 0
-                out.pointer = None
                 out.label = "pinch"
         elif not self._pinching:
             self._pinch_close_frames = 0
 
         if self._pinching:
             hold_ms = (now - self._pinch_started) * 1000.0
-            transform_hold = float(self.cfg.get("transform_hold_ms", 200))
             click_min_ms = float(self.cfg.get("click_min_ms", 55))
-            click_max_motion = float(
-                self.cfg.get("click_max_motion", 0.028)
-            )
+            click_max_motion = float(self.cfg.get("click_max_motion", 0.028))
 
             if self._pinch_anchor is not None:
                 motion_from_anchor = math.hypot(
@@ -391,48 +407,19 @@ class GestureEngine:
                     motion_from_anchor,
                 )
 
-            # Freeze Air Touch while pinching. A click should happen at the
-            # cursor's current position, not drag the cursor while fingers close.
-            out.pointer = None
-
-            if pinch_off and transform_enabled and hold_ms >= transform_hold:
-                self._pinching = False
-                self._dragging = False
-                self._pinch_anchor = None
-                self._pinch_motion_max = 0.0
-                self._transforming = True
-                self._transform_distance = _dist(thumb, index)
-                self._transform_angle = math.degrees(
-                    math.atan2(index.y - thumb.y, index.x - thumb.x)
-                )
-                out.label = "transform-ready"
-                return out
-
-            drag_enabled = self.feature_enabled("drag") and not transform_enabled
-            if drag_enabled and hold_ms >= float(self.cfg.get("drag_hold_ms", 350)):
-                if not self._dragging:
-                    out.left_down = True
-                self._dragging = True
-                out.pointer = (index.x, index.y)
-                out.label = "drag"
-
             if pinch_off:
                 valid_click = (
                     self.feature_enabled("click")
-                    and click_min_ms <= hold_ms < transform_hold
+                    and hold_ms >= click_min_ms
                     and self._pinch_motion_max <= click_max_motion
                 )
-                if self._dragging:
-                    out.left_down = False
-                    out.label = "drop"
-                elif valid_click:
+                if valid_click:
                     out.left_click = True
                     out.label = "click"
                 else:
                     out.label = "pinch-release"
 
                 self._pinching = False
-                self._dragging = False
                 self._pinch_anchor = None
                 self._pinch_motion_max = 0.0
 
@@ -487,28 +474,28 @@ class GestureEngine:
             4.0,
             float(self.cfg.get("pinch_rotate_threshold_deg", 14.0)),
         )
-        zoom_score = (
-            abs(distance_ratio - 1.0) / zoom_ratio
-            if self.feature_enabled("zoom")
-            else 0.0
-        )
-        rotate_score = (
-            abs(angle_delta) / rotate_threshold
-            if self.feature_enabled("rotate")
-            else 0.0
-        )
-
         out = GestureOutput(label="transform")
-        if zoom_score >= 1.0 and zoom_score >= rotate_score:
+
+        if (
+            self.feature_enabled("zoom")
+            and abs(distance_ratio - 1.0) >= zoom_ratio
+        ):
             out.zoom_steps = 1 if distance_ratio > 1.0 else -1
-            out.label = "zoom-in" if out.zoom_steps > 0 else "zoom-out"
             self._transform_distance = distance
-            self._transform_angle = angle
-        elif rotate_score >= 1.0:
+
+        if (
+            self.feature_enabled("rotate")
+            and abs(angle_delta) >= rotate_threshold
+        ):
             out.rotate_steps = 1 if angle_delta > 0 else -1
-            out.label = "rotate-right" if out.rotate_steps > 0 else "rotate-left"
-            self._transform_distance = distance
             self._transform_angle = angle
+
+        if out.zoom_steps and out.rotate_steps:
+            out.label = "zoom-rotate"
+        elif out.zoom_steps:
+            out.label = "zoom-in" if out.zoom_steps > 0 else "zoom-out"
+        elif out.rotate_steps:
+            out.label = "rotate-right" if out.rotate_steps > 0 else "rotate-left"
 
         return out
 
@@ -644,6 +631,7 @@ class GestureEngine:
 
     def _reset_transform(self) -> None:
         self._transforming = False
+        self._transform_start_frames = 0
         self._transform_distance = None
         self._transform_angle = None
 
