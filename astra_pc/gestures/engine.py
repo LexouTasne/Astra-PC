@@ -102,6 +102,7 @@ class GestureEngine:
         self._transform_start_frames = 0
         self._transform_miss_frames = 0
         self._transform_distance: float | None = None
+        self._transform_zoom_accum = 0.0
         self._transform_angle: float | None = None
 
         self._stable_finger_state: tuple[bool, bool, bool, bool] | None = None
@@ -312,6 +313,7 @@ class GestureEngine:
                         1e-4,
                         pinch / max(1e-4, _hand_scale(hand)),
                     )
+                    self._transform_zoom_accum = 0.0
                     self._transform_angle = math.degrees(
                         math.atan2(index.y - thumb.y, index.x - thumb.x)
                     )
@@ -469,28 +471,30 @@ class GestureEngine:
 
         if self.feature_enabled("zoom"):
             factor = 1.0 + zoom_ratio
-            zoom_steps = 0
-            if distance_ratio >= factor:
-                zoom_steps = int(
-                    math.log(distance_ratio) / math.log(factor)
-                )
-            elif distance_ratio <= 1.0 / factor:
-                zoom_steps = -int(
-                    math.log(1.0 / distance_ratio) / math.log(factor)
-                )
+            delta_steps = math.log(distance_ratio) / math.log(factor)
 
+            # If the user reverses direction, stale unapplied motion from the
+            # previous direction must never fight the new movement.
+            if (
+                self._transform_zoom_accum
+                and delta_steps
+                and (
+                    self._transform_zoom_accum > 0
+                ) != (delta_steps > 0)
+            ):
+                self._transform_zoom_accum = 0.0
+
+            self._transform_zoom_accum += delta_steps
+            self._transform_distance = distance
+
+            zoom_steps = math.trunc(self._transform_zoom_accum)
             zoom_steps = max(
                 -max_zoom_steps,
                 min(max_zoom_steps, zoom_steps),
             )
             if zoom_steps:
                 out.zoom_steps = zoom_steps
-                # Consume only the emitted amount. Any remaining motion stays
-                # accumulated for the next frame instead of being discarded.
-                if zoom_steps > 0:
-                    self._transform_distance *= factor ** zoom_steps
-                else:
-                    self._transform_distance /= factor ** (-zoom_steps)
+                self._transform_zoom_accum -= zoom_steps
 
         if (
             self.feature_enabled("rotate")
@@ -669,6 +673,7 @@ class GestureEngine:
         self._transform_start_frames = 0
         self._transform_miss_frames = 0
         self._transform_distance = None
+        self._transform_zoom_accum = 0.0
         self._transform_angle = None
 
     def _reset_scroll(self) -> None:
