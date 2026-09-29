@@ -15,7 +15,6 @@ FEATURE_LABELS = {
     "scroll": "scroll por gestos",
     "swipe": "swipe por gestos",
     "zoom": "zoom por gestos",
-    "rotate": "rotação por gestos",
     "drag": "arrastar por gestos",
 }
 
@@ -137,12 +136,8 @@ def parse_gesture_control(text: str) -> tuple[str, str | None, bool | None] | No
         return ("feature", "drag", value)
     if "zoom" in q:
         return ("feature", "zoom", value)
-    if "rotacao" in q or "girar" in q:
-        return ("feature", "rotate", value)
     if "swipe" in q:
         return ("feature", "swipe", value)
-    if "palma" in q or "pausa por gesto" in q:
-        return ("feature", "pause", value)
     if "clique" in q:
         return ("feature", "click", value)
     if "gesto" in q or "gestos" in q:
@@ -160,7 +155,7 @@ def apply_gesture_control(state: GestureControlState, text: str) -> str | None:
         snap = state.snapshot(force=True)
         overrides = snap.get("overrides", {})
         parts = ["ligado" if snap.get("enabled", True) else "desligado"]
-        for name in ("scroll", "pointer", "click", "right_click", "zoom", "rotate", "swipe", "drag"):
+        for name in ("scroll", "pointer", "click", "right_click", "zoom", "swipe", "drag"):
             if name in overrides:
                 parts.append(f"{FEATURE_LABELS[name]} {'ligado' if overrides[name] else 'desligado'}")
         return "Gestos: " + "; ".join(parts) + "."
