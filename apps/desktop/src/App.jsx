@@ -652,7 +652,7 @@ function pageMeta(page) {
   return {
     chat: ['Chat', 'Converse com a Astra local'],
     voice: ['Voz', 'Reconhecimento e resposta neural'],
-    gestures: ['Gestos', 'Visão e controle seguro'],
+    gestures: ['Gestos', 'Controle simples por mãos'],
     mesh: ['Mesh', 'Dispositivos conectados'],
     system: ['Sistema', 'Saúde do núcleo local'],
     setup: ['Setup', 'Configuração e reparos']
@@ -731,11 +731,15 @@ export default function App() {
       <Sidebar page={page} setPage={setPage} collapsed={collapsed} setCollapsed={setCollapsed} status={status} />
       <main className="main-shell">
         <Titlebar title={title} subtitle={subtitle} />
-        <div className="workspace">
+        <div className={'workspace ' + (page === 'gestures' ? 'gesture-focus' : '')}>
           <section className="content-pane">{content[page]}</section>
-          <RightRail status={status} onRefresh={refresh} visible={railVisible} setVisible={setRailVisible} />
+          {page !== 'gestures' && (
+            <RightRail status={status} onRefresh={refresh} visible={railVisible} setVisible={setRailVisible} />
+          )}
         </div>
-        <ActivityDrawer logs={logs} processes={processes} onStop={stop} open={activityOpen} setOpen={setActivityOpen} />
+        {page !== 'gestures' && (
+          <ActivityDrawer logs={logs} processes={processes} onStop={stop} open={activityOpen} setOpen={setActivityOpen} />
+        )}
       </main>
     </div>
   )
