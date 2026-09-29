@@ -311,6 +311,16 @@ class AstraViewport:
                 pass
 
         try:
+            # Refresh KWin after copying the package so a first-time install is
+            # discoverable immediately, without logging out of Plasma.
+            subprocess.run(
+                [qdbus, "org.kde.KWin", "/KWin", "reconfigure"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+
             # Reload on every Astra start so repo updates become active without
             # a logout or KWin restart.
             subprocess.run(
