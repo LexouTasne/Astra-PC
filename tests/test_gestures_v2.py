@@ -16,8 +16,6 @@ CFG = {
     "right_pinch_threshold": 0.055,
     "drag_enabled": False,
     "drag_hold_ms": 420,
-    "pause_hold_ms": 0,
-    "pause_cooldown_ms": 0,
     "scroll_gain": 100.0,
     "scroll_deadzone": 0.001,
     "scroll_smoothing": 1.0,
@@ -27,7 +25,7 @@ CFG = {
     "swipe_window_ms": 350,
     "swipe_cooldown_ms": 0,
     "two_hand_zoom_threshold": 0.02,
-    "two_hand_rotate_threshold_deg": 6.0,
+    "two_hand_rotate_deadzone_deg": 1.0,
 }
 
 
