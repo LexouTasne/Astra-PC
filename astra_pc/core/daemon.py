@@ -671,15 +671,15 @@ class AstraDaemon:
             gesture_cfg = dict(self.config.data.get("gestures", {}))
             pointer_cfg = dict(self.config.data.get("pointer", {}))
             defaults = {
-                "pointer": bool(pointer_cfg.get("enabled", False)),
-                "click": True,
+                "pointer": False,
+                "click": False,
                 "right_click": True,
                 "scroll": True,
                 "swipe": True,
                 "zoom": True,
                 "rotate": True,
                 "pause": True,
-                "drag": bool(gesture_cfg.get("drag_enabled", False)),
+                "drag": False,
             }
             features = {
                 name: bool(overrides.get(name, default))
