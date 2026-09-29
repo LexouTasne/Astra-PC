@@ -756,3 +756,218 @@ textarea, pre, .message-body, .log-view { user-select: text; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,.02); }
   50% { box-shadow: 0 0 0 5px rgba(255,255,255,.07); }
 }
+
+
+/* Gesture focus mode ----------------------------------------------------- */
+.workspace.gesture-focus {
+  background: #0b0b0b;
+}
+
+.gesture-simple-page {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  padding: clamp(24px, 5vw, 64px);
+  overflow: auto;
+}
+
+.gesture-simple-main {
+  width: min(620px, 100%);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.gesture-orb {
+  width: 82px;
+  height: 82px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 24px;
+  border: 1px solid #2b2b2b;
+  border-radius: 50%;
+  background: #111;
+  color: #767676;
+  transition: .18s ease;
+}
+
+.gesture-orb.active {
+  border-color: #4a4a4a;
+  background: #171717;
+  color: #f4f4f4;
+  box-shadow: 0 0 0 7px rgba(255,255,255,.025);
+}
+
+.gesture-simple-copy {
+  max-width: 520px;
+}
+
+.gesture-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #666;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .14em;
+}
+
+.gesture-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #494949;
+}
+
+.gesture-state.online {
+  color: #d6d6d6;
+}
+
+.gesture-state.online i {
+  background: #efefef;
+  box-shadow: 0 0 10px rgba(255,255,255,.32);
+}
+
+.gesture-simple-copy h2 {
+  margin: 12px 0 8px;
+  color: #f2f2f2;
+  font-size: clamp(24px, 3.4vw, 38px);
+  line-height: 1.06;
+  font-weight: 540;
+  letter-spacing: -.045em;
+}
+
+.gesture-simple-copy p {
+  margin: 0;
+  color: #6f6f6f;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.gesture-power {
+  min-width: 210px;
+  height: 48px;
+  margin-top: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid #ededed;
+  border-radius: 10px;
+  background: #ededed;
+  color: #0a0a0a;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  cursor: pointer;
+  transition: .12s ease;
+}
+
+.gesture-power:hover {
+  background: #fff;
+  border-color: #fff;
+}
+
+.gesture-power.stop {
+  border-color: #333;
+  background: #151515;
+  color: #d7d7d7;
+}
+
+.gesture-power.stop:hover {
+  border-color: #444;
+  background: #1a1a1a;
+}
+
+.gesture-power:disabled {
+  opacity: .38;
+  cursor: default;
+}
+
+.gesture-simple-links {
+  margin-top: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+}
+
+.gesture-simple-links > span {
+  width: 1px;
+  height: 14px;
+  background: #292929;
+}
+
+.gesture-simple-links button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 3px;
+  border: 0;
+  background: transparent;
+  color: #686868;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.gesture-simple-links button:hover {
+  color: #d0d0d0;
+}
+
+.gesture-cheatsheet {
+  width: min(510px, 100%);
+  margin-top: 20px;
+  padding: 7px 14px;
+  border: 1px solid #202020;
+  border-radius: 10px;
+  background: #0f0f0f;
+}
+
+.gesture-cheatsheet > div {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid #1b1b1b;
+}
+
+.gesture-cheatsheet > div:last-child {
+  border-bottom: 0;
+}
+
+.gesture-cheatsheet strong {
+  flex: 1;
+  color: #bdbdbd;
+  font-size: 10px;
+  font-weight: 530;
+  text-align: left;
+}
+
+.gesture-cheatsheet span {
+  color: #5e5e5e;
+  font-size: 9px;
+}
+
+.gesture-simple-foot {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: #4f4f4f;
+  font-size: 8px;
+}
+
+@media (max-width: 700px) {
+  .gesture-simple-page {
+    padding: 22px 18px;
+  }
+  .gesture-simple-copy h2 {
+    font-size: 27px;
+  }
+  .gesture-power {
+    width: 100%;
+  }
+}
