@@ -375,9 +375,9 @@ def _open_droidcam_via_cli(
                 f"[camera] DROIDCAM_RETRY profile={profile} failed",
                 flush=True,
             )
-            # Give Android a short moment to release/recreate its encoder before
-            # the next safer profile is requested.
-            time.sleep(0.30)
+            # Android camera stacks can need a moment to fully destroy the
+            # failed encoder before accepting another stream configuration.
+            time.sleep(0.90)
 
     print(
         "[camera] DROIDCAM_ERROR connected but virtual camera produced no frames",
@@ -1020,8 +1020,8 @@ def open_camera_resilient(
                         height=height,
                         fps=fps,
                         timeout_seconds=min(
-                            3.5,
-                            max(0.5, deadline - time.monotonic()),
+                            6.0,
+                            max(0.8, deadline - time.monotonic()),
                         ),
                     )
                 else:
@@ -1064,8 +1064,8 @@ def open_camera_resilient(
                             height=height,
                             fps=fps,
                             timeout_seconds=min(
-                                3.5,
-                                max(0.5, deadline - time.monotonic()),
+                                6.0,
+                                max(0.8, deadline - time.monotonic()),
                             ),
                         )
                         if opened is not None:
