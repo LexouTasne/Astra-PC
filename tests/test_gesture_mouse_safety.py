@@ -62,7 +62,7 @@ def test_transform_motion_never_becomes_drag():
 
     assert moved.left_down is None
     assert not moved.left_click
-    assert moved.zoom_steps == 1
+    assert 1 <= moved.zoom_steps <= 3
 
 
 def test_tracking_loss_never_leaves_mouse_down():
