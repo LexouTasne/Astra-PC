@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import concurrent.futures
 import glob
+import ipaddress
 import json
 import os
 import platform
 import shutil
+import socket
 import subprocess
 import sys
 import threading
@@ -92,6 +95,149 @@ def _state_path() -> Path:
     return data_dir() / "camera.json"
 
 
+DROIDCAM_DEFAULT_PORT = 4747
+
+
+def _droidcam_state_path() -> Path:
+    return data_dir() / "droidcam.json"
+
+
+def _load_saved_droidcam_source() -> str | None:
+    try:
+        value = json.loads(_droidcam_state_path().read_text(encoding="utf-8"))
+        host = str(value.get("host", "")).strip()
+        port = int(value.get("port", DROIDCAM_DEFAULT_PORT))
+        if host and 1 <= port <= 65535:
+            return f"http://{host}:{port}/video"
+    except Exception:
+        pass
+    return None
+
+
+def _local_private_hosts(max_hosts: int = 512) -> list[str]:
+    ordered: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: str) -> None:
+        if value in seen:
+            return
+        try:
+            addr = ipaddress.IPv4Address(value)
+        except ValueError:
+            return
+        if not addr.is_private or addr.is_loopback:
+            return
+        seen.add(value)
+        ordered.append(value)
+
+    if platform.system() == "Linux" and shutil.which("ip"):
+        try:
+            p = subprocess.run(
+                ["ip", "-4", "neigh", "show"],
+                capture_output=True,
+                text=True,
+                timeout=0.8,
+                check=False,
+            )
+            for line in p.stdout.splitlines():
+                add(line.split(" ", 1)[0].strip())
+        except Exception:
+            pass
+
+    try:
+        import psutil
+
+        for _name, addresses in psutil.net_if_addrs().items():
+            for item in addresses:
+                if item.family != socket.AF_INET or not item.address:
+                    continue
+                try:
+                    local = ipaddress.IPv4Address(item.address)
+                    network = ipaddress.IPv4Network(
+                        f"{item.address}/{item.netmask or '255.255.255.0'}",
+                        strict=False,
+                    )
+                except ValueError:
+                    continue
+                if not local.is_private or local.is_loopback:
+                    continue
+
+                # Never fan out across a huge corporate/private subnet.
+                if network.prefixlen < 24:
+                    network = ipaddress.IPv4Network(
+                        f"{local}/24",
+                        strict=False,
+                    )
+                for addr in network.hosts():
+                    if addr != local:
+                        add(str(addr))
+                        if len(ordered) >= max_hosts:
+                            return ordered
+    except Exception:
+        pass
+
+    return ordered
+
+
+def discover_droidcam_source(timeout_seconds: float = 2.5) -> str | None:
+    """Discover a DroidCam-compatible HTTP endpoint on the local LAN only."""
+
+    saved = _load_saved_droidcam_source()
+    if saved:
+        try:
+            host_port = saved.split("//", 1)[1].split("/", 1)[0]
+            host, port_text = host_port.rsplit(":", 1)
+            with socket.create_connection(
+                (host, int(port_text)),
+                timeout=0.25,
+            ):
+                return saved
+        except Exception:
+            pass
+
+    hosts = _local_private_hosts()
+    if not hosts:
+        return None
+
+    deadline = time.monotonic() + max(0.2, float(timeout_seconds))
+    workers = min(64, max(8, len(hosts)))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+    futures = {
+        executor.submit(
+            socket.create_connection,
+            (host, DROIDCAM_DEFAULT_PORT),
+            0.18,
+        ): host
+        for host in hosts
+    }
+    try:
+        while futures and time.monotonic() < deadline:
+            remaining = max(0.01, deadline - time.monotonic())
+            done, _ = concurrent.futures.wait(
+                futures,
+                timeout=min(0.20, remaining),
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            if not done:
+                continue
+            for future in done:
+                host = futures.pop(future)
+                try:
+                    connection = future.result()
+                    connection.close()
+                    for pending in futures:
+                        pending.cancel()
+                    return f"http://{host}:{DROIDCAM_DEFAULT_PORT}/video"
+                except Exception:
+                    pass
+    finally:
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return None
+
+
 def load_camera_state() -> dict:
     try:
         value = json.loads(_state_path().read_text(encoding="utf-8"))
@@ -167,7 +313,11 @@ def candidate_cameras(
     """Return stable candidates in the order Astra should try them."""
 
     raw: list[str | int] = []
-    for value in (configured_source, remembered_source):
+    for value in (
+        configured_source,
+        remembered_source,
+        _load_saved_droidcam_source(),
+    ):
         source = _coerce_source(value)
         if source is not None:
             raw.append(source)
@@ -501,6 +651,7 @@ def open_camera_resilient(
     deadline = time.monotonic() + max(0.0, float(auto_timeout))
     pass_number = 0
     last_reported_second = None
+    droidcam_scanned = False
 
     previous_level = None
     try:
@@ -557,6 +708,32 @@ def open_camera_resilient(
                         flush=True,
                     )
                     return opened
+
+            if not droidcam_scanned and time.monotonic() < deadline:
+                droidcam_scanned = True
+                remaining = max(0.0, deadline - time.monotonic())
+                print("[camera] searching DroidCam on local LAN", flush=True)
+                droidcam_source = discover_droidcam_source(
+                    timeout_seconds=min(2.5, remaining)
+                )
+                if droidcam_source and time.monotonic() < deadline:
+                    opened = _try_open_candidate(
+                        droidcam_source,
+                        width=width,
+                        height=height,
+                        fps=fps,
+                        warmup_seconds=min(
+                            1.2,
+                            max(0.20, deadline - time.monotonic()),
+                        ),
+                    )
+                    if opened is not None:
+                        save_camera_state(opened.source, opened.index)
+                        print(
+                            f"[camera] AUTO_FOUND DroidCam={opened.source}",
+                            flush=True,
+                        )
+                        return opened
 
             if time.monotonic() < deadline:
                 time.sleep(min(0.25, max(0.01, deadline - time.monotonic())))
