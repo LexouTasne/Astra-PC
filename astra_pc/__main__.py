@@ -1147,6 +1147,18 @@ def _run_generate(args, config) -> None:
         print(path)
 
 
+def _run_viewport_reset(_args, config) -> None:
+    """Emergency compositor reset used by the desktop process supervisor."""
+    from astra_pc.viewport.controller import AstraViewport
+
+    viewport = AstraViewport(None, config.data.get("viewport", {}))
+    try:
+        viewport.prepare()
+        viewport.reset_zoom(wait=True)
+    finally:
+        viewport.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Astra-PC — local gesture + multimodal desktop assistant"
@@ -1158,6 +1170,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tui", help="open the legacy terminal control panel")
     sub.add_parser("desktop-status", help=argparse.SUPPRESS)
     sub.add_parser("desktop-update", help=argparse.SUPPRESS)
+    sub.add_parser("viewport-reset", help=argparse.SUPPRESS)
 
     gestures = sub.add_parser("gestures", help="start real-time hand control")
     gestures.add_argument("--show-camera", action="store_true")
@@ -1379,6 +1392,7 @@ def main() -> None:
         "tui": _run_home,
         "desktop-status": _run_desktop_status,
         "desktop-update": _run_desktop_update,
+        "viewport-reset": _run_viewport_reset,
         "home": _run_home,
         "setup": _run_setup,
         "gestures": _run_gestures,
