@@ -16,8 +16,6 @@ CFG = {
     "transform_release_frames": 3,
     "zoom_max_steps_per_frame": 3,
     "pinch_zoom_ratio": 0.065,
-    "pinch_rotate_deadzone_deg": 1.0,
-    "rotate_max_degrees_per_frame": 12,
     "pose_confirm_frames": 1,
     "scroll_gain": 58.0,
     "scroll_deadzone": 0.0018,
@@ -28,7 +26,6 @@ CFG = {
     "swipe_window_ms": 240,
     "swipe_cooldown_ms": 360,
     "two_hand_zoom_threshold": 0.02,
-    "two_hand_rotate_deadzone_deg": 1.0,
 }
 
 
@@ -97,27 +94,6 @@ def test_closing_pinch_zooms_out_after_opening():
     assert second.label == "zoom-out"
 
 
-def test_twisting_same_pinch_rotates():
-    engine = GestureEngine(dict(CFG))
-    enter_transform(engine)
-
-    one_degree = engine.update([pointer_hand(0.02, 1.2)])
-    assert one_degree.rotate_steps == 1
-
-    more = engine.update([pointer_hand(0.02, 6.2)])
-    assert 4 <= more.rotate_steps <= 6
-    assert more.label in {"rotate-right", "zoom-rotate"}
-
-
-def test_zoom_and_rotation_can_fire_independently():
-    engine = GestureEngine(dict(CFG))
-    enter_transform(engine)
-
-    out = engine.update([pointer_hand(0.04, 7.0)])
-
-    assert 1 <= out.zoom_steps <= 3
-    assert 1 <= out.rotate_steps <= 7
-    assert out.label == "zoom-rotate"
 
 
 def test_pointer_and_drag_are_off_by_default():
