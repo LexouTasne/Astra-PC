@@ -244,7 +244,7 @@ def _start_droidcam_cli(
     cmd = [
         str(cli),
         "-nocontrols",
-        f"-dev={device}",
+        f"-dev={device.as_posix()}",
         f"-size={size}",
         host,
         str(int(port)),
