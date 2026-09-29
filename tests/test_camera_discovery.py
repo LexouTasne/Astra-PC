@@ -136,3 +136,57 @@ def test_successful_droidcam_bridge_keeps_cli_alive(monkeypatch):
     assert result.cap._owner_process is process
     assert not process.terminated
     assert not process.killed
+
+
+class RecordingCap:
+    def __init__(self):
+        self.calls = []
+
+    def set(self, prop, value):
+        self.calls.append((prop, value))
+        return True
+
+
+def test_virtual_camera_is_not_reconfigured_by_opencv(monkeypatch):
+    cap = RecordingCap()
+    monkeypatch.setattr(camera, "_is_virtual_video_source", lambda source: True)
+
+    camera._configure_capture(
+        cap,
+        source="/dev/video9",
+        width=640,
+        height=360,
+        fps=60,
+    )
+
+    # Only queue depth is allowed. Resolution/FPS/FourCC belong to droidcam-cli.
+    assert all(prop == camera.cv2.CAP_PROP_BUFFERSIZE for prop, _ in cap.calls)
+
+
+def test_droidcam_cli_starts_with_safe_size(monkeypatch, tmp_path):
+    class Proc:
+        def poll(self):
+            return None
+
+    commands = []
+
+    monkeypatch.setattr(camera, "_droidcam_cli_binary", lambda: camera.Path("/usr/bin/droidcam-cli"))
+    monkeypatch.setattr(camera, "data_dir", lambda: tmp_path)
+
+    def fake_popen(cmd, **kwargs):
+        commands.append(cmd)
+        return Proc()
+
+    monkeypatch.setattr(camera.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(camera.time, "sleep", lambda *_: None)
+
+    result = camera._start_droidcam_cli(
+        "192.168.1.20",
+        4747,
+        camera.Path("/dev/video9"),
+        size="640x480",
+    )
+
+    assert result is not None
+    assert "-size=640x480" in commands[0]
+    assert "-dev=/dev/video9" in commands[0]
