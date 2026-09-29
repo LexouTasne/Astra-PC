@@ -237,6 +237,18 @@ class AstraViewport:
             self._kglobalaccel_zoom = False
 
     def _rotation_source_dir(self) -> Path:
+        package_root = Path(__file__).resolve().parents[1]
+        bundled = (
+            package_root
+            / "assets"
+            / "kwin"
+            / self.ROTATION_EFFECT_ID
+        )
+        if (bundled / "metadata.json").exists():
+            return bundled
+
+        # Source-tree compatibility for development checkouts created before
+        # the effect became package data.
         return (
             Path(__file__).resolve().parents[2]
             / "packaging"
