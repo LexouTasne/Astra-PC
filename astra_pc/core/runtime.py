@@ -180,7 +180,6 @@ class AstraRuntime:
             if not completed:
                 raise RuntimeError("gesture_tutorial_failed")
             # Tutorial consumes camera frames and may leave transient gesture state.
-            gestures.set_paused(False)
             self._smooth_xy = None
 
         self._sync_gesture_control(gestures, gesture_cfg, force=True)
@@ -198,7 +197,7 @@ class AstraRuntime:
         print("[gestures] READY", flush=True)
         print("Astra gesture engine online.")
         print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
-        print("Pinça polegar+indicador = zoom global | gire a pinça = rotação global")
+        print("Pinça polegar+indicador = zoom global | gire a pinça = rotação 360°")
         print("Indicador+medio = scroll | polegar+medio = clique direito")
         print("Air Touch OFF | Drag OFF")
         print("Ctrl+C sai")
@@ -283,10 +282,10 @@ class AstraRuntime:
                     self._dispatch_action(f"swipe_{out.swipe}")
 
                 if self.show_camera:
-                    color = (0, 255, 0) if not gestures.paused else (0, 180, 255)
+                    color = (0, 255, 0)
                     cv2.putText(
                         frame,
-                        f"ASTRA 0.8 | {label} | {'OFF' if not self._gesture_system_enabled else ('PAUSED' if gestures.paused else 'ACTIVE')}",
+                        f"ASTRA 0.8 | {label} | {'OFF' if not self._gesture_system_enabled else 'ACTIVE'}",
                         (18, 32),
                         cv2.FONT_HERSHEY_SIMPLEX,
                         0.7,
@@ -360,7 +359,6 @@ class AstraRuntime:
             "swipe": True,
             "zoom": True,
             "rotate": True,
-            "pause": True,
             "drag": False,
         }
         for name, default in defaults.items():
@@ -377,12 +375,6 @@ class AstraRuntime:
             self.backend.failsafe_release()
             self._smooth_xy = None
             self._reset_air_touch()
-        if changed and (
-            not enabled
-            or not bool(overrides.get("pause", True))
-        ):
-            gestures.set_paused(False)
-
         if changed:
             feature_text = ", ".join(
                 f"{name}={'on' if value else 'off'}"
