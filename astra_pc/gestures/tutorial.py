@@ -155,19 +155,19 @@ def _steps(include_drag: bool = False) -> list[TutorialStep]:
         ),
         TutorialStep(
             "7/9 - Pinça de zoom",
-            "Levante so o indicador e encoste polegar + indicador.",
+            "Use UMA mao: indicador levantado, outros tres fechados. Encoste polegar + indicador.",
             lambda hands, out: out.label in {"pinch-ready", "transform-ready", "transform"},
-            hint="Nao precisa segurar: a pinça entra no modo zoom imediatamente.",
+            hint="Se aparecer uma segunda mao, o Astra cancela o zoom.",
         ),
         TutorialStep(
             "8/9 - Zoom aproximar",
-            "Faca a pinça e ABRA polegar + indicador.",
+            "Com uma mao so, depois de armar a pinça, ABRA polegar + indicador.",
             lambda hands, out: out.zoom_steps > 0,
             hint="O zoom e global do desktop, nao do aplicativo.",
         ),
         TutorialStep(
             "9/9 - Zoom afastar",
-            "Faca a pinça, abra um pouco e depois FECHE os dedos.",
+            "Depois de aproximar, FECHE polegar + indicador para afastar.",
             lambda hands, out: out.zoom_steps < 0,
         ),    ]
 
