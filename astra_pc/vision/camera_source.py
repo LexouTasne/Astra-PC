@@ -124,7 +124,7 @@ def _load_saved_droidcam_source() -> str | None:
         host = str(value.get("host", "")).strip()
         port = int(value.get("port", DROIDCAM_DEFAULT_PORT))
         if host and 1 <= port <= 65535:
-            return f"http://{host}:{port}/video"
+            return f"droidcam://{host}:{port}"
     except Exception:
         pass
     return None
@@ -138,11 +138,15 @@ def _parse_droidcam_endpoint(value: str | int | None) -> tuple[str, int] | None:
         return None
 
     lowered = text.lower()
-    if lowered.startswith("droidcam://"):
+    explicit_droidcam = lowered.startswith("droidcam://")
+    http_source = lowered.startswith(("http://", "https://"))
+    raw_source = "://" not in text
+
+    if explicit_droidcam:
         text = text[len("droidcam://"):]
-    elif lowered.startswith(("http://", "https://")):
+    elif http_source:
         text = text.split("//", 1)[1]
-    elif "://" in text:
+    elif not raw_source:
         return None
 
     text = text.split("/", 1)[0].strip()
@@ -163,11 +167,10 @@ def _parse_droidcam_endpoint(value: str | int | None) -> tuple[str, int] | None:
     # Port 4747 is DroidCam Classic's normal endpoint. A raw private IP/IP:port
     # entered through Astra's manual camera dialog is also intentionally treated
     # as DroidCam.
-    if (
-        int(port) != DROIDCAM_DEFAULT_PORT
-        and not lowered.startswith("droidcam://")
-        and not lowered.startswith(("http://", "https://"))
-    ):
+    if http_source and int(port) != DROIDCAM_DEFAULT_PORT:
+        return None
+    if raw_source and ":" not in str(value) and not explicit_droidcam:
+        # A bare hostname/IP is ambiguous; keep it for generic camera handling.
         return None
     return host, int(port)
 
@@ -466,7 +469,7 @@ def discover_droidcam_source(timeout_seconds: float = 2.5) -> str | None:
                     connection.close()
                     for pending in futures:
                         pending.cancel()
-                    return f"http://{host}:{DROIDCAM_DEFAULT_PORT}/video"
+                    return f"droidcam://{host}:{DROIDCAM_DEFAULT_PORT}"
                 except Exception:
                     pass
     finally:
