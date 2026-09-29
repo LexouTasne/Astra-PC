@@ -10,6 +10,10 @@ class InputBackend(ABC):
     @abstractmethod
     def move(self, x: int, y: int) -> None: ...
 
+    def move_relative(self, dx: int, dy: int) -> None:
+        """Optional relative pointer motion for Air Touch."""
+        raise NotImplementedError
+
     @abstractmethod
     def left_button(self, down: bool) -> None: ...
 
