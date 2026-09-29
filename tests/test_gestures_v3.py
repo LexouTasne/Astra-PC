@@ -13,8 +13,10 @@ CFG = {
     "drag_enabled": False,
     "transform_start_threshold": 0.060,
     "transform_start_frames": 2,
-    "pinch_zoom_ratio": 0.08,
-    "pinch_rotate_threshold_deg": 30.0,
+    "transform_release_frames": 3,
+    "zoom_max_steps_per_frame": 3,
+    "pinch_zoom_ratio": 0.065,
+    "pinch_rotate_threshold_deg": 65.0,
     "pose_confirm_frames": 1,
     "pause_hold_ms": 300,
     "pause_cooldown_ms": 600,
@@ -100,10 +102,10 @@ def test_twisting_same_pinch_rotates():
     engine = GestureEngine(dict(CFG))
     enter_transform(engine)
 
-    small = engine.update([pointer_hand(0.02, 15.0)])
+    small = engine.update([pointer_hand(0.02, 35.0)])
     assert small.rotate_steps == 0
 
-    rotated = engine.update([pointer_hand(0.02, 35.0)])
+    rotated = engine.update([pointer_hand(0.02, 75.0)])
     assert rotated.rotate_steps == 1
     assert rotated.label in {"rotate-right", "zoom-rotate"}
 
@@ -112,7 +114,7 @@ def test_zoom_and_rotation_can_fire_independently():
     engine = GestureEngine(dict(CFG))
     enter_transform(engine)
 
-    out = engine.update([pointer_hand(0.04, 35.0)])
+    out = engine.update([pointer_hand(0.04, 75.0)])
 
     assert out.zoom_steps == 1
     assert out.rotate_steps == 1
@@ -125,3 +127,57 @@ def test_pointer_and_drag_are_off_by_default():
 
     assert result.pointer is None
     assert result.left_down is None
+
+
+def scale_hand(hand: Hand, scale: float, cx: float = 0.5, cy: float = 0.5) -> Hand:
+    return Hand(
+        tuple(
+            Point(
+                cx + (p.x - cx) * scale,
+                cy + (p.y - cy) * scale,
+                p.z * scale,
+            )
+            for p in hand.points
+        ),
+        hand.handedness,
+    )
+
+
+def non_pointer_hand() -> Hand:
+    pts = list(pointer_hand(0.02).points)
+    # Make middle appear extended for one noisy frame.
+    pts[10] = Point(0.52, 0.48, 0.0)
+    pts[12] = Point(0.52, 0.24, 0.0)
+    return Hand(tuple(pts), "Right")
+
+
+def test_whole_hand_scale_change_does_not_create_zoom():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine, 0.02)
+
+    baseline = pointer_hand(0.02)
+    larger = scale_hand(baseline, 1.35, cx=baseline[0].x, cy=baseline[0].y)
+    out = engine.update([larger])
+
+    assert out.zoom_steps == 0
+
+
+def test_one_bad_pose_frame_does_not_cancel_transform():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine)
+
+    noisy = engine.update([non_pointer_hand()])
+    assert noisy.label == "transform-hold"
+    assert engine._transforming
+
+    recovered = engine.update([pointer_hand(0.04)])
+    assert recovered.zoom_steps > 0
+
+
+def test_fast_pinch_open_can_emit_multiple_zoom_steps():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine)
+
+    out = engine.update([pointer_hand(0.055)])
+
+    assert 1 <= out.zoom_steps <= 3
