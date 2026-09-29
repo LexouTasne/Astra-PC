@@ -200,6 +200,10 @@ class GestureEngine:
         if raw != self._candidate_finger_state:
             self._candidate_finger_state = raw
             self._candidate_finger_frames = 1
+            if self._candidate_finger_frames >= self._pose_confirm_frames:
+                self._stable_finger_state = raw
+                self._candidate_finger_state = None
+                self._candidate_finger_frames = 0
             return self._stable_finger_state
 
         self._candidate_finger_frames += 1
