@@ -27,6 +27,7 @@ class ViewportSkill(Skill):
     def _get(self) -> AstraViewport:
         with self._lock:
             if self._viewport is None:
+                from astra_pc.input.factory import create_input_backend
                 self._viewport = AstraViewport(create_input_backend())
             return self._viewport
 
