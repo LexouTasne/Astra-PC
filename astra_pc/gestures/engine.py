@@ -593,9 +593,6 @@ class GestureEngine:
             self._swipe_history.clear()
 
     def _update_two_hands(self, a: Hand, b: Hand) -> GestureOutput:
-        if self._paused:
-            return GestureOutput(label="paused")
-
         # Two-hand transforms require two open hands. Accidental second-hand
         # detections no longer steal pointer/click gestures.
         if not (_open_palm(a) and _open_palm(b)):
@@ -622,25 +619,42 @@ class GestureEngine:
             angle_delta += 360
 
         zoom_threshold = max(0.001, float(self.cfg.get("two_hand_zoom_threshold", 0.035)))
-        rotate_threshold = max(1.0, float(self.cfg.get("two_hand_rotate_threshold_deg", 10.0)))
+        rotate_deadzone = max(
+            0.5,
+            float(self.cfg.get("two_hand_rotate_deadzone_deg", 1.0)),
+        )
         zoom_score = (
-            abs(distance_delta) / zoom_threshold if self.feature_enabled("zoom") else 0.0
+            abs(distance_delta) / zoom_threshold
+            if self.feature_enabled("zoom")
+            else 0.0
         )
         rotate_score = (
-            abs(angle_delta) / rotate_threshold if self.feature_enabled("rotate") else 0.0
+            abs(angle_delta) / rotate_deadzone
+            if self.feature_enabled("rotate")
+            else 0.0
         )
 
-        # Choose the dominant transform so zoom and rotate never fire together.
+        # Choose the dominant transform so zoom and rotate never fight.
         if zoom_score >= 1.0 and zoom_score >= rotate_score:
             out.zoom_steps = 1 if distance_delta > 0 else -1
             out.label = "zoom-in" if distance_delta > 0 else "zoom-out"
             self._two_hand_distance = distance
             self._two_hand_angle = angle
         elif rotate_score >= 1.0:
-            out.rotate_steps = 1 if angle_delta > 0 else -1
-            out.label = "rotate-right" if angle_delta > 0 else "rotate-left"
-            self._two_hand_distance = distance
-            self._two_hand_angle = angle
+            degrees = math.trunc(angle_delta)
+            limit = max(
+                1,
+                int(self.cfg.get("rotate_max_degrees_per_frame", 12)),
+            )
+            degrees = max(-limit, min(limit, degrees))
+            if degrees:
+                out.rotate_steps = degrees
+                out.label = "rotate-right" if degrees > 0 else "rotate-left"
+                self._two_hand_angle += degrees
+                while self._two_hand_angle > 180:
+                    self._two_hand_angle -= 360
+                while self._two_hand_angle < -180:
+                    self._two_hand_angle += 360
         else:
             # Slow baseline adaptation kills stationary-hand jitter without
             # swallowing deliberate motion.
@@ -667,7 +681,7 @@ class GestureEngine:
         self._two_hand_distance = None
         self._two_hand_angle = None
 
-    def _reset_transient(self, *, keep_palm: bool = False) -> None:
+    def _reset_transient(self) -> None:
         self._pinching = False
         self._pinch_anchor = None
         self._pinch_motion_max = 0.0
