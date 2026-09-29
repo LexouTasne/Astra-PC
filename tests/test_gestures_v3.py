@@ -187,3 +187,37 @@ def test_rotation_preserves_one_degree_granularity():
     assert out1.rotate_steps == 1
     assert out2.rotate_steps == 1
     assert out3.rotate_steps == 1
+
+
+def test_second_hand_blocks_zoom_completely():
+    engine = GestureEngine(dict(CFG))
+
+    out = engine.update([pointer_hand(0.02), pointer_hand(0.02)])
+
+    assert out.label == "multi-hand-blocked"
+    assert out.zoom_steps == 0
+    assert not engine._transforming
+
+
+def test_second_hand_cancels_active_zoom_session():
+    engine = GestureEngine(dict(CFG))
+    enter_transform(engine)
+    assert engine._transforming
+
+    blocked = engine.update([pointer_hand(0.04), pointer_hand(0.04)])
+
+    assert blocked.label == "multi-hand-blocked"
+    assert blocked.zoom_steps == 0
+    assert not engine._transforming
+
+
+def test_zoom_requires_exact_start_pose():
+    engine = GestureEngine(dict(CFG))
+    noisy = one_noisy_folded_finger_hand()
+
+    first = engine.update([noisy])
+    second = engine.update([noisy])
+
+    assert first.label != "pinch-ready"
+    assert second.label != "transform-ready"
+    assert not engine._transforming
