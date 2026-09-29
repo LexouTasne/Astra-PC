@@ -192,10 +192,15 @@ def candidate_cameras(
         seen.add(key)
         result.append((_index_for_source(source), source))
 
+    configured = _coerce_source(configured_source)
+    remembered = _coerce_source(remembered_source)
+    configured_key = _source_key(configured) if configured is not None else None
+    remembered_key = _source_key(remembered) if remembered is not None else None
+
     result.sort(
         key=lambda item: (
-            0 if _source_key(item[1]) == _source_key(_coerce_source(configured_source)) else
-            1 if _source_key(item[1]) == _source_key(_coerce_source(remembered_source)) else
+            0 if configured_key and _source_key(item[1]) == configured_key else
+            1 if remembered_key and _source_key(item[1]) == remembered_key else
             2 if item[0] == int(preferred) else
             3,
             item[0] if item[0] is not None else 9999,
