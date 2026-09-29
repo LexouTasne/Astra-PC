@@ -197,7 +197,8 @@ class AstraRuntime:
         print(
             f"[viewport] ZOOM_GLOBAL {self.viewport.zoom_backend.upper()}",
             flush=True,
-        )        print("[gestures] READY", flush=True)
+        )
+        print("[gestures] READY", flush=True)
         print("Astra gesture engine online.")
         print("Gestos: câmera validada, tracking ativo e fail-safe pronto")
         print("Pinça polegar+indicador = zoom global")
@@ -497,10 +498,7 @@ class AstraRuntime:
                 return
 
             result = self.router.execute(text)
-            if result.message == "pause_gestures":
-                self.gesture_control.set_enabled(False)
-                print("[voice] gesture system disabled")
-            elif result.message == "resume_gestures":
+            if result.message == "resume_gestures":
                 self.gesture_control.set_enabled(True)
                 print("[voice] gesture system enabled")
             else:
