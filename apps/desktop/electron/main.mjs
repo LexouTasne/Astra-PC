@@ -13,6 +13,7 @@ const python = process.env.ASTRA_PYTHON || 'python'
 const running = new Map()
 
 let mainWindow = null
+let closingWindow = false
 
 function pythonArgs(args) {
   return ['-m', 'astra_pc', ...args]
@@ -223,6 +224,23 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(desktopRoot, 'dist', 'index.html'))
   mainWindow.once('ready-to-show', () => mainWindow?.show())
+
+  mainWindow.on('close', event => {
+    if (closingWindow) return
+
+    event.preventDefault()
+    closingWindow = true
+    gracefulStopAll()
+
+    Promise.race([
+      collectAstra(['viewport-reset'], 5000).catch(() => ''),
+      new Promise(resolve => setTimeout(resolve, 1600))
+    ]).finally(() => {
+      try { mainWindow?.destroy() } catch {}
+      if (process.platform !== 'darwin') app.quit()
+    })
+  })
+
   mainWindow.on('closed', () => { mainWindow = null })
 }
 
