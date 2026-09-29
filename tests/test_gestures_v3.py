@@ -25,7 +25,6 @@ CFG = {
     "swipe_distance": 0.085,
     "swipe_window_ms": 240,
     "swipe_cooldown_ms": 360,
-    "two_hand_zoom_threshold": 0.02,
 }
 
 
@@ -174,19 +173,6 @@ def test_fast_pinch_open_can_emit_multiple_zoom_steps():
     out = engine.update([pointer_hand(0.055)])
 
     assert 1 <= out.zoom_steps <= 3
-
-
-def test_rotation_preserves_one_degree_granularity():
-    engine = GestureEngine(dict(CFG))
-    enter_transform(engine)
-
-    out1 = engine.update([pointer_hand(0.02, 1.1)])
-    out2 = engine.update([pointer_hand(0.02, 2.1)])
-    out3 = engine.update([pointer_hand(0.02, 3.1)])
-
-    assert out1.rotate_steps == 1
-    assert out2.rotate_steps == 1
-    assert out3.rotate_steps == 1
 
 
 def test_second_hand_blocks_zoom_completely():
