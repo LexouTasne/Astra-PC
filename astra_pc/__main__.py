@@ -1081,6 +1081,7 @@ def _run_mesh(args, config) -> None:
 
 def _run_agent(args, config) -> None:
     from .ai.desktop_agent import VisualDesktopAgent
+    from .ai.swarm import SubAgentPool
 
     brain, text_client = _brain(config)
     client = brain.vision_client
@@ -1088,9 +1089,86 @@ def _run_agent(args, config) -> None:
         raise SystemExit(
             "Ollama is not reachable. Run installer.py or start 'ollama serve'."
         )
-    agent = VisualDesktopAgent(client, max_steps=args.max_steps)
+
+    swarm_cfg = config.data.get("swarm", {})
+    pool = None
+    if bool(swarm_cfg.get("enabled", True)):
+        pool = SubAgentPool(
+            text_client,
+            client,
+            planner_client=getattr(brain, "fast_client", text_client),
+            max_agents=int(swarm_cfg.get("max_agents", 100)),
+            max_workers=int(swarm_cfg.get("max_workers", 3)),
+            max_balanced_agents=int(swarm_cfg.get("max_balanced_agents", 1)),
+        )
+
+    agent = VisualDesktopAgent(
+        client,
+        max_steps=args.max_steps,
+        subagents=pool,
+        swarm_interval=int(swarm_cfg.get("visual_interval", 3)),
+        swarm_parallel=min(2, int(swarm_cfg.get("max_workers", 3))),
+    )
     result = agent.run(args.goal, auto_confirm=args.yes)
     print("Astra>", result)
+
+
+def _run_doctor(args, config) -> None:
+    import json
+    from .diagnostics import run_diagnostics
+
+    result = run_diagnostics(config, deep=bool(args.deep))
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        summary = result["summary"]
+        print(
+            f"Astra Doctor: {summary['passed']}/{summary['total']} checks passed"
+        )
+        for item in result["checks"]:
+            mark = "OK" if item["ok"] else "FAIL"
+            elapsed = f" ({item['elapsed_ms']:.0f} ms)" if item["elapsed_ms"] else ""
+            print(f"[{mark}] {item['name']}: {item['detail']}{elapsed}")
+    if not result["ok"]:
+        raise SystemExit(1)
+
+
+def _run_mission(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    result = daemon_request(
+        {"type": "mission", "text": args.goal},
+        host=daemon_cfg.get("host", "127.0.0.1"),
+        port=int(daemon_cfg.get("port", 8765)),
+        timeout=args.timeout,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def _run_agents(args, config) -> None:
+    import json
+    from .core.ipc import daemon_request
+
+    daemon_cfg = config.data.get("daemon", {})
+    host = daemon_cfg.get("host", "127.0.0.1")
+    port = int(daemon_cfg.get("port", 8765))
+
+    if args.agents_command == "status":
+        payload = {"type": "agents.status"}
+    elif args.agents_command == "cancel":
+        payload = {"type": "agents.cancel"}
+    else:
+        payload = {
+            "type": "agents.run",
+            "text": args.goal,
+            "count": args.count,
+            "vision": bool(args.vision),
+        }
+
+    result = daemon_request(payload, host=host, port=port, timeout=args.timeout)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 def _run_benchmark(args, config) -> None:
@@ -1228,6 +1306,26 @@ def build_parser() -> argparse.ArgumentParser:
 
     benchmark = sub.add_parser("benchmark", help="measure local Astra response latency")
     benchmark.add_argument("--rounds", type=int, default=3)
+
+    doctor = sub.add_parser("doctor", help="run Astra syntax/runtime diagnostics")
+    doctor.add_argument("--deep", action="store_true", help="also verify a real screen capture")
+    doctor.add_argument("--json", action="store_true", help="print machine-readable JSON")
+
+    mission = sub.add_parser("mission", help="run a multi-step Astra mission")
+    mission.add_argument("goal")
+    mission.add_argument("--timeout", type=float, default=300.0)
+
+    agents = sub.add_parser("agents", help="run and inspect Astra sub-agent swarms")
+    agents_sub = agents.add_subparsers(dest="agents_command", required=True)
+    agents_run = agents_sub.add_parser("run", help="decompose a goal across sub-agents")
+    agents_run.add_argument("goal")
+    agents_run.add_argument("--count", type=int, default=4)
+    agents_run.add_argument("--vision", action="store_true")
+    agents_run.add_argument("--timeout", type=float, default=180.0)
+    agents_status = agents_sub.add_parser("status", help="show swarm state")
+    agents_status.add_argument("--timeout", type=float, default=10.0)
+    agents_cancel = agents_sub.add_parser("cancel", help="cancel active swarm/visual work")
+    agents_cancel.add_argument("--timeout", type=float, default=10.0)
 
     sub.add_parser("awareness", help="show Astra's current context/perception state")
 
@@ -1404,6 +1502,9 @@ def main() -> None:
         "listen-once": _run_listen_once,
         "voice": _run_voice,
         "benchmark": _run_benchmark,
+        "doctor": _run_doctor,
+        "mission": _run_mission,
+        "agents": _run_agents,
         "awareness": _run_awareness,
         "memory": _run_memory,
         "learn": _run_learn,

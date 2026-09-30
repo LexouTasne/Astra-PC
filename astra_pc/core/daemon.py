@@ -12,6 +12,7 @@ from astra_pc.accessibility import create_accessibility_provider
 from astra_pc.ai.agent import AstraBrain
 from astra_pc.ai.embeddings import EmbeddingClient
 from astra_pc.ai.ollama_client import OllamaClient
+from astra_pc.ai.swarm import SubAgentPool, SubAgentTask
 from astra_pc.browser.dom import BrowserDOM
 from astra_pc.core.cache import ResponseCache
 from astra_pc.core.context import ContextEngine
@@ -67,6 +68,15 @@ class AstraDaemon:
             self.vision_client,
             self.strong_client,
             fast_client=self.fast_client,
+        )
+        swarm_cfg = config.data.get("swarm", {})
+        self.subagents = SubAgentPool(
+            self.text_client,
+            self.vision_client,
+            planner_client=self.fast_client,
+            max_agents=int(swarm_cfg.get("max_agents", 100)),
+            max_workers=int(swarm_cfg.get("max_workers", 3)),
+            max_balanced_agents=int(swarm_cfg.get("max_balanced_agents", 1)),
         )
 
         daemon_cfg = config.data.get("daemon", {})
@@ -131,6 +141,10 @@ class AstraDaemon:
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
         self._voice_lock = threading.RLock()
+        self._agent_lock = threading.Lock()
+        self._agent_cancel = threading.Event()
+        self._mission_lock = threading.Lock()
+        self._mission_cancel = threading.Event()
         self._voice_preview_lock = threading.RLock()
         self._voice_preview_state = {"text": "", "kind": "", "at": 0.0}
         self._voice_preview_warm_at = {"text": 0.0, "vision": 0.0}
@@ -276,6 +290,7 @@ class AstraDaemon:
                     language=language,
                     request_handler=self._voice_request,
                     preview_handler=self._voice_preview,
+                    cancel_handler=self._cancel_active_work,
                     conversation_window=float(
                         voice_cfg.get("conversation_window", 9.0)
                     ),
@@ -361,6 +376,63 @@ class AstraDaemon:
         except Exception as exc:
             print(f"[voice] resident stop failed: {exc}")
             return False
+
+    def _cancel_active_work(self) -> None:
+        self._agent_cancel.set()
+        self._mission_cancel.set()
+        self.subagents.cancel()
+        self.bus.publish("agents.cancelled")
+        self.bus.publish("mission.cancelled")
+
+    def _swarm_parallel_limit(self) -> int:
+        state = self.governor.state()
+        if state.mode == "eco":
+            return 1
+        if state.mode == "balanced":
+            return min(2, self.subagents.max_workers)
+        return self.subagents.max_workers
+
+    @staticmethod
+    def _wants_mission(text: str) -> bool:
+        q = " ".join(str(text).lower().strip().split())
+        return any(
+            phrase in q
+            for phrase in (
+                "modo missão", "modo missao", "missão completa", "missao completa",
+                "faz isso inteiro", "faça isso inteiro", "faz tudo isso",
+                "faça tudo isso", "faz tudo pra mim", "faça tudo pra mim",
+                "resolve isso inteiro", "resolva isso inteiro",
+                "cuida disso pra mim", "cuide disso pra mim",
+                "do começo ao fim", "do comeco ao fim",
+                "assume essa tarefa", "assuma essa tarefa",
+            )
+        )
+
+    @staticmethod
+    def _wants_swarm(text: str) -> bool:
+        q = " ".join(str(text).lower().strip().split())
+        if re.search(r"([0-9]{1,3})\s*(?:sub[- ]?)?agentes?", q):
+            return True
+        return any(
+            phrase in q
+            for phrase in (
+                "subagente", "sub-agente", "sub agente",
+                "vários agentes", "varios agentes",
+                "múltiplos agentes", "multiplos agentes",
+                "agentes em paralelo", "pensa em paralelo", "pense em paralelo",
+                "divide entre agentes", "divida entre agentes",
+                "equipe de agentes", "usa agentes", "use agentes",
+                "usar agentes", "swarm",
+            )
+        )
+
+    @staticmethod
+    def _requested_agent_count(text: str, default: int = 4) -> int:
+        q = " ".join(str(text).lower().strip().split())
+        match = re.search(r"([0-9]{1,3})\s*(?:sub[- ]?)?agentes?", q)
+        if not match:
+            return max(1, min(100, int(default)))
+        return max(1, min(100, int(match.group(1))))
 
     @staticmethod
     def _wants_visual_agent(text: str) -> bool:
@@ -454,7 +526,11 @@ class AstraDaemon:
             "o que estou vendo",
             "essa janela",
         )
-        if self._wants_visual_agent(text):
+        if self._wants_mission(text):
+            kind = "mission"
+        elif self._wants_swarm(text):
+            kind = "agents.run"
+        elif self._wants_visual_agent(text):
             kind = "agent"
         else:
             kind = "screen" if any(phrase in q for phrase in screen_phrases) else "ask"
@@ -896,6 +972,12 @@ class AstraDaemon:
                 },
                 "skills": self.skills.describe(),
                 "gestures": self.gesture_control.snapshot(force=True),
+                "swarm": self.subagents.status(),
+                "mission": {
+                    "enabled": bool(self.config.data.get("mission", {}).get("enabled", True)),
+                    "busy": self._mission_lock.locked(),
+                    "max_steps": int(self.config.data.get("mission", {}).get("max_steps", 16)),
+                },
                 "mesh": {
                     "enabled": self.mesh_server is not None,
                     "port": (
@@ -910,6 +992,201 @@ class AstraDaemon:
                     ),
                     "live_sensors": list(self.mesh_sensor_state.values()),
                 },
+            }
+
+        if kind == "mission":
+            goal = str(request.get("text", "")).strip()
+            if not goal:
+                return {"ok": False, "error": "empty_mission_goal"}
+
+            mission_cfg = self.config.data.get("mission", {})
+            if not bool(mission_cfg.get("enabled", True)):
+                return {"ok": False, "error": "mission_mode_disabled"}
+            if not self._mission_lock.acquire(blocking=False):
+                return {"ok": False, "error": "mission_busy"}
+
+            self._mission_cancel.clear()
+            self._agent_cancel.clear()
+            self.subagents.reset_cancel()
+            self.bus.publish("mission.started", goal=goal)
+
+            def execute_skill(step):
+                plan = {
+                    "type": "skill",
+                    "skill": str(step.get("skill", "")),
+                    "action": str(step.get("action", "")),
+                    "args": dict(step.get("args") or {}),
+                }
+                return self._execute_skill_plan(
+                    goal,
+                    plan,
+                    {"confirmed": False, "voice": bool(request.get("voice", False))},
+                )
+
+            def execute_visual(subgoal):
+                return self.handle({
+                    "type": "agent",
+                    "text": subgoal,
+                    "voice": bool(request.get("voice", False)),
+                })
+
+            def execute_swarm(subgoal, count, vision):
+                return self.handle({
+                    "type": "agents.run",
+                    "text": subgoal,
+                    "count": count,
+                    "vision": vision,
+                    "voice": bool(request.get("voice", False)),
+                })
+
+            try:
+                from astra_pc.ai.mission import MissionAgent
+                mission = MissionAgent(
+                    self.text_client,
+                    skill_provider=self.skills.describe,
+                    context_provider=lambda: self._assistant_context(
+                        self._semantic_context(goal)
+                    ),
+                    execute_skill=execute_skill,
+                    execute_visual=execute_visual,
+                    execute_swarm=execute_swarm,
+                    cancel_event=self._mission_cancel,
+                    max_steps=int(mission_cfg.get("max_steps", 16)),
+                )
+                try:
+                    result = mission.run(goal)
+                except Exception as exc:
+                    return {"ok": False, "error": f"mission_failed: {exc}"}
+
+                payload = result.as_dict()
+                payload["plan"] = {"type": "mission"}
+                self._record_chat(goal, result.message)
+                self.bus.publish(
+                    "mission.finished",
+                    goal=goal,
+                    ok=result.ok,
+                    steps=len(result.steps),
+                )
+                return payload
+            finally:
+                self._mission_cancel.clear()
+                self._mission_lock.release()
+
+        if kind == "agents.status":
+            return {"ok": True, **self.subagents.status()}
+
+        if kind == "agents.cancel":
+            self._cancel_active_work()
+            return {"ok": True, "message": "active_work_cancelled"}
+
+        if kind == "agents.run":
+            goal = str(request.get("text", "")).strip()
+            raw_tasks = request.get("agents") or []
+            if not isinstance(raw_tasks, list):
+                return {"ok": False, "error": "agents_must_be_a_list"}
+
+            shared_context = self._assistant_context(
+                self._semantic_context(goal or "subagents")
+            )
+            tasks = []
+            for item in raw_tasks[: self.subagents.max_agents]:
+                if not isinstance(item, dict):
+                    continue
+                instruction = str(item.get("instruction", "")).strip()
+                if not instruction:
+                    continue
+                tasks.append(
+                    SubAgentTask(
+                        role=str(item.get("role", "worker")),
+                        instruction=instruction,
+                        use_vision=bool(item.get("use_vision", False)),
+                    )
+                )
+
+            screenish = any(
+                phrase in goal.lower()
+                for phrase in (
+                    "tela", "janela", "botão", "botao", "ícone", "icone",
+                    "visual", "imagem", "monitor",
+                )
+            )
+            if not tasks and goal:
+                requested = int(
+                    request.get(
+                        "count",
+                        self._requested_agent_count(
+                            goal,
+                            int(self.config.data.get("swarm", {}).get("default_agents", 4)),
+                        ),
+                    )
+                )
+                tasks = self.subagents.plan_tasks(
+                    goal,
+                    count=requested,
+                    shared_context=shared_context,
+                    include_vision=bool(request.get("vision", screenish)),
+                )
+
+            if not tasks:
+                return {"ok": False, "error": "no_subagent_tasks"}
+
+            image_path = None
+            if any(task.use_vision for task in tasks):
+                image_path = capture_screen()
+            self.bus.publish(
+                "agents.started",
+                goal=goal,
+                count=len(tasks),
+            )
+            try:
+                results = self.subagents.run(
+                    tasks,
+                    shared_context=shared_context,
+                    image=image_path,
+                    on_result=lambda result: self.bus.publish(
+                        "agents.result",
+                        result=result.as_dict(),
+                    ),
+                    max_parallel=self._swarm_parallel_limit(),
+                )
+            finally:
+                if image_path is not None:
+                    image_path.unlink(missing_ok=True)
+            self.bus.publish(
+                "agents.finished",
+                goal=goal,
+                count=len(results),
+            )
+
+            payload = [result.as_dict() for result in results]
+            usable = [
+                {
+                    "role": result.role,
+                    "output": result.output,
+                    "elapsed_ms": round(result.elapsed_ms, 1),
+                }
+                for result in results
+                if result.ok and result.output
+            ]
+            summary_prompt = (
+                f"Objetivo do usuário: {goal}\n"
+                f"Resultados de subagentes: {json.dumps(usable, ensure_ascii=False)[:12000]}\n"
+                "Sintetize uma resposta final direta em português do Brasil. "
+                "Não invente ações que os subagentes não executaram."
+            )
+            message = (
+                self.brain.ask(summary_prompt)
+                if usable
+                else "Os subagentes não retornaram resultados utilizáveis."
+            )
+            self._record_chat(goal or "subagentes", message)
+            return {
+                "ok": bool(results) and all(result.ok for result in results),
+                "message": message,
+                "results": payload,
+                "count": len(results),
+                "requested": len(tasks),
+                "swarm": self.subagents.status(),
             }
 
         if kind == "memory.search":
@@ -937,21 +1214,44 @@ class AstraDaemon:
             agent_cfg = self.config.data.get("agent", {})
             if not bool(agent_cfg.get("enabled", True)):
                 return {"ok": False, "error": "visual_agent_disabled"}
-            from astra_pc.ai.desktop_agent import VisualDesktopAgent
-            agent = VisualDesktopAgent(
-                self.vision_client,
-                max_steps=int(agent_cfg.get("max_steps", 24)),
-            )
+            if not self._agent_lock.acquire(blocking=False):
+                return {"ok": False, "error": "visual_agent_busy"}
+
+            self._agent_cancel.clear()
+            self.subagents.reset_cancel()
             try:
-                message = agent.run(goal, auto_confirm=True)
-            except Exception as exc:
-                return {"ok": False, "error": f"agent_failed: {exc}"}
-            self._record_chat(goal, message)
-            return {
-                "ok": True,
-                "message": message,
-                "plan": {"type": "visual_agent"},
-            }
+                from astra_pc.ai.desktop_agent import VisualDesktopAgent
+                swarm_cfg = self.config.data.get("swarm", {})
+                agent = VisualDesktopAgent(
+                    self.vision_client,
+                    max_steps=int(agent_cfg.get("max_steps", 24)),
+                    subagents=(
+                        self.subagents
+                        if bool(swarm_cfg.get("enabled", True))
+                        else None
+                    ),
+                    swarm_interval=int(swarm_cfg.get("visual_interval", 3)),
+                    swarm_parallel=self._swarm_parallel_limit(),
+                    on_subagent_result=lambda result: self.bus.publish(
+                        "agents.result",
+                        result=result.as_dict(),
+                        source="visual_agent",
+                    ),
+                    cancel_event=self._agent_cancel,
+                )
+                try:
+                    message = agent.run(goal, auto_confirm=True)
+                except Exception as exc:
+                    return {"ok": False, "error": f"agent_failed: {exc}"}
+                self._record_chat(goal, message)
+                return {
+                    "ok": True,
+                    "message": message,
+                    "plan": {"type": "visual_agent"},
+                }
+            finally:
+                self._agent_cancel.clear()
+                self._agent_lock.release()
 
         if kind == "profile":
             profile = str(request.get("profile", "")).strip() or "default"
@@ -1015,6 +1315,12 @@ class AstraDaemon:
                 return {"ok": False, "error": f"Não consegui analisar a imagem: {exc}"}
 
         lowered = text.lower().strip()
+
+        if kind == "ask" and self._wants_mission(text):
+            return self.handle({"type": "mission", "text": text, "voice": voice_mode})
+
+        if kind == "ask" and self._wants_swarm(text):
+            return self.handle({"type": "agents.run", "text": text, "voice": voice_mode})
 
         if kind == "ask" and self._wants_visual_agent(text):
             return self.handle({"type": "agent", "text": text, "voice": voice_mode})

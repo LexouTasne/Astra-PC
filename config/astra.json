@@ -238,5 +238,17 @@
   "agent": {
     "enabled": true,
     "max_steps": 24
+  },
+  "swarm": {
+    "enabled": true,
+    "max_agents": 100,
+    "max_workers": 3,
+    "visual_interval": 3,
+    "default_agents": 4,
+    "max_balanced_agents": 1
+  },
+  "mission": {
+    "enabled": true,
+    "max_steps": 16
   }
 }

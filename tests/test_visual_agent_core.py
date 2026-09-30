@@ -105,5 +105,47 @@ class VoicePartialPipelineTests(unittest.TestCase):
         engine._enqueue_partial(b"second")
         self.assertEqual(engine._partials.get_nowait(), b"second")
 
+
+class AgentRepairTests(unittest.TestCase):
+    def test_action_validation_rejects_out_of_bounds_pointer(self):
+        from astra_pc.ai.tools import DesktopTools
+
+        tools = object.__new__(DesktopTools)
+        tools.width = 3200
+        tools.height = 1363
+        bad = tools.validate({"action": "click", "x": 5000, "y": 20})
+        good = tools.validate({"action": "click", "x": 100, "y": 20})
+        self.assertFalse(bad.ok)
+        self.assertTrue(good.ok)
+
+    def test_agent_repairs_invalid_model_action_before_execution(self):
+        from pathlib import Path
+        from astra_pc.ai.desktop_agent import VisualDesktopAgent
+        from astra_pc.ai.tools import ToolResult
+
+        class FakeClient:
+            def __init__(self):
+                self.calls = 0
+
+            def chat(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls == 1:
+                    return "not-json"
+                return '{"action":"wait","seconds":0,"reason":"repaired"}'
+
+        class FakeTools:
+            def validate(self, action):
+                if action.get("action") == "wait":
+                    return ToolResult(True, "valid")
+                return ToolResult(False, "bad")
+
+        agent = object.__new__(VisualDesktopAgent)
+        agent.client = FakeClient()
+        agent.tools = FakeTools()
+        agent.cancel_event = None
+        action = agent._request_valid_action("test", Path("/tmp/fake.png"))
+        self.assertEqual(action["action"], "wait")
+        self.assertEqual(agent.client.calls, 2)
+
 if __name__ == "__main__":
     unittest.main()

@@ -48,7 +48,72 @@ class DesktopTools:
         except Exception:
             pass
 
+    def validate(self, action: dict) -> ToolResult:
+        if not isinstance(action, dict):
+            return ToolResult(False, "action must be an object")
+
+        name = str(action.get("action", "")).strip().lower()
+        allowed_actions = {
+            "move", "click", "right_click", "type", "key_down", "key_up",
+            "hotkey", "scroll", "open_url", "wait", "done",
+        }
+        if name not in allowed_actions:
+            return ToolResult(False, f"unknown action: {name}")
+
+        if name in {"move", "click", "right_click"}:
+            try:
+                x = int(action.get("x"))
+                y = int(action.get("y"))
+            except (TypeError, ValueError):
+                return ToolResult(False, "pointer action requires integer x/y")
+            if not (0 <= x < self.width and 0 <= y < self.height):
+                return ToolResult(
+                    False,
+                    f"pointer coordinates outside screenshot bounds: {x},{y}",
+                )
+
+        if name == "type":
+            value = str(action.get("text", ""))
+            if not value:
+                return ToolResult(False, "type action requires text")
+            if len(value) > 8000:
+                return ToolResult(False, "type action exceeds 8000 characters")
+
+        if name in {"key_down", "key_up"}:
+            key = str(action.get("key", "")).strip().lower()
+            if not key or len(key) > 32:
+                return ToolResult(False, "invalid key")
+
+        if name == "hotkey":
+            keys = action.get("keys", [])
+            if not isinstance(keys, list) or not keys or len(keys) > 5:
+                return ToolResult(False, "invalid hotkey")
+
+        if name == "scroll":
+            try:
+                int(action.get("amount", 0))
+            except (TypeError, ValueError):
+                return ToolResult(False, "scroll amount must be an integer")
+
+        if name == "open_url":
+            url = str(action.get("url", ""))
+            if not url.startswith(("https://", "http://")):
+                return ToolResult(False, "only http/https URLs are allowed")
+
+        if name == "wait":
+            try:
+                value = float(action.get("seconds", 1.0))
+            except (TypeError, ValueError):
+                return ToolResult(False, "wait seconds must be numeric")
+            if value < 0:
+                return ToolResult(False, "wait seconds cannot be negative")
+
+        return ToolResult(True, "valid")
+
     def execute(self, action: dict) -> ToolResult:
+        validation = self.validate(action)
+        if not validation.ok:
+            return validation
         name = str(action.get("action", "")).lower()
 
         if name == "move":

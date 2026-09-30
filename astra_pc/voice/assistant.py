@@ -183,6 +183,7 @@ class AstraVoiceAssistant:
         language: str = "pt",
         request_handler: Callable[[str], str] | None = None,
         preview_handler: Callable[[str], None] | None = None,
+        cancel_handler: Callable[[], None] | None = None,
         conversation_window: float = 9.0,
         partial_interval_ms: int = 850,
         wakeword_model: str | Path | None = None,
@@ -203,6 +204,7 @@ class AstraVoiceAssistant:
         self.router = CommandRouter()
         self.request_handler = request_handler
         self.preview_handler = preview_handler
+        self.cancel_handler = cancel_handler
         self.conversation_window = max(0.0, float(conversation_window))
         self.partial_interval_ms = max(400, int(partial_interval_ms))
         self._conversation_until = 0.0
@@ -388,8 +390,10 @@ class AstraVoiceAssistant:
             stop_words = ("para", "pare", "cala", "cancelar", "stop", "silêncio", "silencio")
             if wake is not None and any(word in normalized for word in stop_words):
                 self.speaker.cancel()
+                if self.cancel_handler is not None:
+                    self.cancel_handler()
                 self._conversation_until = 0.0
-                print("[barge-in] speech cancelled")
+                print("[barge-in] speech and active work cancelled")
             return
 
         if wake is not None:
@@ -413,8 +417,10 @@ class AstraVoiceAssistant:
         if request.lower() in {"para", "pare", "cala", "cancelar", "stop", "silencio", "silêncio"}:
             if self.speaker:
                 self.speaker.cancel()
+            if self.cancel_handler is not None:
+                self.cancel_handler()
             self._conversation_until = 0.0
-            print("[barge-in] speech cancelled")
+            print("[barge-in] speech and active work cancelled")
             return
 
         try:
