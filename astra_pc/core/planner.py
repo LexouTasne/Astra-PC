@@ -267,6 +267,19 @@ class AstraPlanner:
     @staticmethod
     def _fast_plan(text: str, context: DesktopContext | None = None) -> dict[str, Any] | None:
         q = " ".join(text.lower().strip().split())
+
+        # Explicit typing intent must win before path detection. Commands such as
+        # "digite go test ./..." contain slash-like tokens that are text, not a
+        # request to inspect the filesystem.
+        type_match = re.match(r"^(?:digite|digita|escreva|escreve)\s+(.+)$", text.strip(), re.I)
+        if type_match:
+            return {
+                "type": "skill",
+                "skill": "input",
+                "action": "type_text",
+                "args": {"text": type_match.group(1)},
+            }
+
         path = AstraPlanner.extract_path(text)
 
         if path:

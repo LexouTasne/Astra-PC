@@ -398,3 +398,25 @@ def test_json_payload_generated_by_mission_is_valid_matrix():
     goal = "Em /tmp/astra crie config.json que imprima ASTRA JSON OK."
     content = MissionAgent._code_content_for_file(goal, "config.json", "")
     assert json.loads(content) == {"message": "ASTRA JSON OK"}
+
+
+def test_count_plural_itens_routes_to_count_items():
+    agent = object.__new__(MissionAgent)
+    steps = agent._direct_file_steps("Conte os itens em /home/lex/Downloads.")
+    assert any(step["action"] == "count_items" for step in steps)
+
+
+def test_create_explicit_python_path_without_word_arquivo():
+    agent = object.__new__(MissionAgent)
+    steps = agent._direct_file_steps(
+        "Crie /home/lex/demo.py com conteúdo print('ok')."
+    )
+    assert steps == [{
+        "type": "skill",
+        "skill": "files",
+        "action": "create_text_file",
+        "args": {
+            "path": "/home/lex/demo.py",
+            "content": "print('ok')",
+        },
+    }]

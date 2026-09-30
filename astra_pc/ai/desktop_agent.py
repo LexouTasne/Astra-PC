@@ -13,6 +13,7 @@ from astra_pc.accessibility import create_accessibility_provider
 from astra_pc.screen.capture import capture_screen
 
 from .ollama_client import OllamaClient
+from .soul import planner_soul
 from .swarm import SubAgentPool, default_tasks
 from .tools import DesktopTools
 
@@ -218,7 +219,7 @@ class VisualDesktopAgent:
             raw = self.client.chat(
                 prompt + repair_note,
                 images=[screenshot],
-                system=AGENT_PROMPT,
+                system=AGENT_PROMPT + "\n" + planner_soul(),
                 temperature=0.03 if attempt > 1 else 0.05,
                 num_ctx=4096,
                 num_predict=120,

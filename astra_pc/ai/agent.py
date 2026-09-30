@@ -4,6 +4,7 @@ from pathlib import Path
 
 from .ollama_client import OllamaClient
 from .router import ModelRouter
+from .soul import load_soul, voice_soul
 
 
 VOICE_SYSTEM_PROMPT = """Você é Astra, uma assistente local. Responda em português do Brasil.
@@ -51,10 +52,11 @@ class AstraBrain:
 
     @staticmethod
     def _system(extra_context: str | None = None) -> str:
+        base = SYSTEM_PROMPT + "\n\nSOUL DO ASTRA:\n" + load_soul()
         if not extra_context:
-            return SYSTEM_PROMPT
+            return base
         return (
-            SYSTEM_PROMPT
+            base
             + "\n\nCONTEXTO LOCAL CONFIÁVEL FORNECIDO PELO ASTRA:\n"
             + extra_context.strip()
             + "\nUse esse contexto somente quando for relevante ao pedido atual."
@@ -84,10 +86,11 @@ class AstraBrain:
 
     @staticmethod
     def _voice_system(extra_context: str | None = None) -> str:
+        base = VOICE_SYSTEM_PROMPT + "\n" + voice_soul()
         if not extra_context:
-            return VOICE_SYSTEM_PROMPT
+            return base
         return (
-            VOICE_SYSTEM_PROMPT
+            base
             + "\nContexto confiável:\n"
             + extra_context.strip()
         )
@@ -154,7 +157,7 @@ class AstraBrain:
         return self.vision_client.chat(
             prompt,
             images=frames,
-            system=SYSTEM_PROMPT + "\nAs imagens anexadas são quadros de vídeo em ordem temporal.",
+            system=self._system() + "\nAs imagens anexadas são quadros de vídeo em ordem temporal.",
             num_ctx=8192,
             num_predict=220,
             temperature=0.15,

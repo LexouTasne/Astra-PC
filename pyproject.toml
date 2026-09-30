@@ -54,3 +54,8 @@ astra = "astra_pc.__main__:main"
 [tool.setuptools.packages.find]
 include = ["astra_pc*"]
 
+[tool.pytest.ini_options]
+markers = [
+  "model_integration: slow tests that call local Ollama models",
+  "vision_integration: very slow tests that call the local vision model"
+]

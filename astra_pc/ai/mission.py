@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .ollama_client import OllamaClient
+from .soul import planner_soul
 
 
 MISSION_SYSTEM = """You are Astra's tool planner. Return exactly one JSON object and nothing else.
 Use only listed skills/actions. Prefer a skill over visual clicking.
+Intent map: list/liste -> list_dir; read/leia -> read_file; count/conte/quantos -> count_items; search/procure/encontre -> search_files; create folder/pasta -> create_dir; create file/arquivo -> create_text_file; delete/apague -> delete_file.
 When the goal contains an explicit file path, use it as the base path/root.
 For file operations, skill MUST be "files" and action is the file action such as create_dir or list_dir.
 For create_dir, include the requested new folder name in path.
@@ -291,6 +293,36 @@ class MissionAgent:
                 "args": {"path": target},
             }]
 
+        # Explicit file creation by full filename is deterministic even when the
+        # user omits the word "arquivo", e.g. "crie /home/lex/demo.py ...".
+        folder_creation_intent = bool(re.search(
+            r"\b(?:crie|criar|cria|prepare|preparar|monte|montar)\b"
+            r"[^.!?\n]{0,100}\b(?:pasta|subpasta)\b",
+            goal,
+            re.I,
+        ))
+        if creation_intent and len(named_files) == 1 and not folder_creation_intent:
+            filename = named_files[0]
+            base_path = Path(base).expanduser()
+            target = base_path if base_path.name == filename else base_path / filename
+            content = self._code_content_for_file(goal, filename, "")
+            if not content:
+                raw_content = re.search(
+                    r"(?:com\s+(?:o\s+)?conte[uú]do|contendo(?:\s+exatamente)?)"
+                    r"\s*:?[ \t]*(.+)$",
+                    goal,
+                    re.I,
+                )
+                if raw_content:
+                    content = raw_content.group(1).strip()
+                    # Spoken requests often end the sentence after code.
+                    if content.endswith(".") and len(content) > 1:
+                        content = content[:-1].rstrip()
+            return [{
+                "type": "skill", "skill": "files", "action": "create_text_file",
+                "args": {"path": str(target), "content": content},
+            }]
+
         # Explicit multi-file code generation can be compiled directly into file
         # tool calls. Ambiguous requests still fall back to the model planner.
         if creation_intent and len(named_files) >= 2:
@@ -420,11 +452,11 @@ class MissionAgent:
             (r"\bcxx\b", "*.cxx"),
             (r"(?<!\w)cc(?!\w)", "*.cc"),
             (r"\b(?:hpp|header\s+c\+\+|headers\s+c\+\+)\b", "*.hpp"),
-            (r"\b(?:linguagem\s+c|arquivos?\s+c)\b", "*.c"),
-            (r"\b(?:header\s+c|headers\s+c|arquivos?\s+h)\b", "*.h"),
             (r"\b(?:csharp|c\s*sharp)\b|(?<!\w)c#(?!\w)", "*.cs"),
+            (r"\b(?:linguagem\s+c|arquivos?\s+c)(?!#)\b|(?<!\w)c(?![\w#+])", "*.c"),
+            (r"\b(?:header\s+c|headers\s+c|arquivos?\s+h)\b", "*.h"),
             (r"\brust\b", "*.rs"),
-            (r"\bgolang\b|\blinguagem\s+go\b|\barquivos?\s+go\b", "*.go"),
+            (r"\bgolang\b|\blinguagem\s+go\b|\barquivos?\s+go\b|\bgo\b", "*.go"),
             (r"\bkotlin\b", "*.kt"),
             (r"\bswift\b", "*.swift"),
             (r"\bphp\b", "*.php"),
@@ -444,7 +476,7 @@ class MissionAgent:
             (r"\bpng\b", "*.png"),
             (r"\b(?:jpg|jpeg)\b", "*.jpg"),
         )
-        count_terms = ("arquivo", "item", "pasta", "coisa", "script", "texto")
+        count_terms = ("arquivo", "arquivos", "item", "itens", "pasta", "pastas", "coisa", "coisas", "script", "scripts", "texto", "textos")
         natural_extension_hint = any(
             re.search(pattern, q, re.I) for pattern, _ in extension_aliases
         )
@@ -679,6 +711,26 @@ class MissionAgent:
         base = self._explicit_path(goal)
         action = str(normalized.get("action", "")).lower()
         mentions = self._named_file_mentions(goal)
+        q = " ".join(str(goal).lower().split())
+
+        # Deterministic intent repair: a tiny planner can confuse list/search/count.
+        # When the user wording is unambiguous, prefer the parser's verified action.
+        direct = self._direct_file_steps(goal)
+        if len(mentions) <= 1 and re.search(
+            r"\b(?:crie|criar|cria|monte|montar|prepare|preparar|gere|gerar)\b",
+            q,
+        ):
+            for candidate in direct:
+                if candidate.get("action") in {"create_dir", "create_text_file"}:
+                    return candidate
+        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q):
+            for candidate in direct:
+                if candidate.get("action") == "count_items":
+                    return candidate
+        if re.search(r"\b(?:procure|procurar|encontre|localize|buscar|busque|ache)\b", q):
+            for candidate in direct:
+                if candidate.get("action") == "search_files":
+                    return candidate
 
         delete_intent = bool(re.search(
             r"\b(?:apague|apagar|delete|deletar|exclua|excluir|remova|remover)\b",
@@ -835,8 +887,19 @@ class MissionAgent:
             "list_dir", "search_files", "read_file", "count_items", "create_dir",
             "create_text_file", "write_file", "delete_file",
         }
+        step_type = str(normalized.get("type", "")).lower()
         skill_name = str(normalized.get("skill", "")).lower()
         action_name = str(normalized.get("action", "")).lower()
+
+        # Small local models sometimes use "files" as the step type. Repair that
+        # common schema slip before validation instead of wasting another inference.
+        if step_type == "files":
+            normalized["type"] = "skill"
+            normalized["skill"] = "files"
+        elif step_type in file_actions:
+            normalized["type"] = "skill"
+            normalized["skill"] = "files"
+            normalized.setdefault("action", step_type)
         if skill_name in file_actions:
             normalized["skill"] = "files"
             if not action_name:
@@ -908,7 +971,7 @@ class MissionAgent:
             client = self.fallback_client if use_fallback else self.client
             raw = client.chat(
                 prompt + repair,
-                system=MISSION_SYSTEM,
+                system=MISSION_SYSTEM + "\n" + planner_soul(),
                 temperature=0.02 if attempt > 1 else 0.05,
                 num_ctx=2048 if use_fallback else 1024,
                 num_predict=140 if use_fallback else 96,
