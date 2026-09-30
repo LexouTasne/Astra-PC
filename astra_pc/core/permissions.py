@@ -15,7 +15,8 @@ class PermissionLayer:
 
     SAFE = {
         "open_app", "open_url", "close_app", "volume", "media", "window_layout",
-        "status", "top_processes", "list_dir", "search_files", "read_file", "read_context", "hotkey",
+        "status", "top_processes", "list_dir", "search_files", "read_file", "count_items",
+        "create_dir", "create_text_file", "read_context", "hotkey",
         "git_status", "git_diff", "git_branch",
         "clipboard_read", "clipboard_write", "notify", "project_summary",
         "window_maximize", "window_minimize", "window_snap_left",

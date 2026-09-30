@@ -168,6 +168,7 @@ class SubAgentPool:
             num_ctx=4096,
             num_predict=700,
             think=False,
+            format="json",
         )
         cleaned = raw.strip()
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
@@ -322,6 +323,16 @@ class SubAgentPool:
                 "Retorne apenas o resultado útil para o agente principal."
             )
             client, tier = self._client_for_task(task, image)
+            balanced_acquired = False
+            if tier == "balanced":
+                self._balanced_slots.acquire()
+                balanced_acquired = True
+                if self._cancel.is_set():
+                    self._balanced_slots.release()
+                    return SubAgentResult(
+                        task.task_id, task.role, False,
+                        error="cancelled", model_tier=tier,
+                    )
             kwargs = {
                 "system": system,
                 "temperature": 0.05,
@@ -345,6 +356,8 @@ class SubAgentPool:
                 model_tier=(locals().get("tier") or task.model_tier),
             )
         finally:
+            if locals().get("balanced_acquired", False):
+                self._balanced_slots.release()
             with self._state_lock:
                 self._running = max(0, self._running - 1)
             self._slots.release()

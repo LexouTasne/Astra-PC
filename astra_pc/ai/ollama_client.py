@@ -84,6 +84,7 @@ class OllamaClient:
         num_ctx: int = 4096,
         num_predict: int = 120,
         think: bool | str | None = False,
+        format: str | dict | None = None,
     ) -> str:
         messages: list[dict] = []
         if system:
@@ -110,6 +111,8 @@ class OllamaClient:
         }
         if think is not None:
             payload["think"] = think
+        if format is not None:
+            payload["format"] = format
         data = self._request("/api/chat", payload)
         try:
             return str(data["message"]["content"]).strip()

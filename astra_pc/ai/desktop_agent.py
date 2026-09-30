@@ -114,7 +114,7 @@ class VisualDesktopAgent:
                             swarm_findings = [
                                 result.as_dict()
                                 for result in self.subagents.run(
-                                    default_tasks(goal, include_vision=True),
+                                    default_tasks(goal, include_vision=True)[:self.swarm_parallel],
                                     shared_context=shared,
                                     image=screenshot,
                                     on_result=self.on_subagent_result,
@@ -236,6 +236,7 @@ class VisualDesktopAgent:
                 temperature=0.03 if attempt > 1 else 0.05,
                 num_ctx=12288,
                 num_predict=220,
+                format="json",
             )
 
             try:

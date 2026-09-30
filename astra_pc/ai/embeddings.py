@@ -11,14 +11,16 @@ class EmbeddingClient:
         model: str = "qwen3-embedding:0.6b",
         host: str = "http://127.0.0.1:11434",
         timeout: int = 60,
+        keep_alive: str | int | float = 0,
     ):
         self.model = model
         self.host = host.rstrip("/")
         self.timeout = timeout
+        self.keep_alive = keep_alive
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         payload = json.dumps(
-            {"model": self.model, "input": texts}
+            {"model": self.model, "input": texts, "keep_alive": self.keep_alive}
         ).encode("utf-8")
         req = urllib.request.Request(
             self.host + "/api/embed",

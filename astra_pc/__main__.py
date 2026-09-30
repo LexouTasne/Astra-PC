@@ -16,25 +16,28 @@ def _brain(config):
     ai = config.data.get("ai", {})
     host = ai.get("host", "http://127.0.0.1:11434")
     timeout = int(ai.get("timeout", 180))
-    keep_alive = ai.get("keep_alive", -1)
+    keep_alive = ai.get("keep_alive", "2m")
+    text_keep = ai.get("text_keep_alive", keep_alive)
+    vision_keep = ai.get("vision_keep_alive", "45s")
+    fast_keep = ai.get("fast_keep_alive", -1)
 
     text_client = OllamaClient(
         model=ai.get("text_model", "qwen3-vl:2b-instruct"),
         host=host,
         timeout=timeout,
-        keep_alive=keep_alive,
+        keep_alive=text_keep,
     )
     fast_client = OllamaClient(
         model=ai.get("fast_model", "qwen3:0.6b"),
         host=host,
         timeout=timeout,
-        keep_alive="10m",
+        keep_alive=fast_keep,
     )
     vision_client = OllamaClient(
         model=ai.get("vision_model", "qwen3-vl:2b-instruct"),
         host=host,
         timeout=timeout,
-        keep_alive=keep_alive,
+        keep_alive=vision_keep,
     )
     strong_name = str(ai.get("strong_model", "")).strip()
     strong_client = (

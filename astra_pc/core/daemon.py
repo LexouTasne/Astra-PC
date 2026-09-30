@@ -41,25 +41,28 @@ class AstraDaemon:
         ai = config.data.get("ai", {})
         host = ai.get("host", "http://127.0.0.1:11434")
         timeout = int(ai.get("timeout", 180))
-        keep = ai.get("keep_alive", -1)
+        keep = ai.get("keep_alive", "2m")
+        text_keep = ai.get("text_keep_alive", keep)
+        vision_keep = ai.get("vision_keep_alive", "45s")
+        fast_keep = ai.get("fast_keep_alive", -1)
 
         self.text_client = OllamaClient(
             ai.get("text_model", "qwen3-vl:2b-instruct"),
             host,
             timeout,
-            keep,
+            text_keep,
         )
         self.fast_client = OllamaClient(
             ai.get("fast_model", "qwen3:0.6b"),
             host,
             timeout,
-            "10m",
+            fast_keep,
         )
         self.vision_client = OllamaClient(
             ai.get("vision_model", "qwen3-vl:2b-instruct"),
             host,
             timeout,
-            keep,
+            vision_keep,
         )
         strong_name = str(ai.get("strong_model", "")).strip()
         self.strong_client = OllamaClient(strong_name, host, timeout, "5m") if strong_name else None
@@ -99,6 +102,7 @@ class AstraDaemon:
             model=embed_cfg.get("embedding_model", "qwen3-embedding:0.6b"),
             host=host,
             timeout=int(embed_cfg.get("embedding_timeout", 25)),
+            keep_alive=embed_cfg.get("embedding_keep_alive", 0),
         )
         self.semantic = SemanticMemory(memory_path, self.embedding_client)
         self.cache = ResponseCache(cache_path, ttl=int(daemon_cfg.get("cache_ttl", 86400)))
@@ -539,11 +543,11 @@ class AstraDaemon:
 
     def _warm_text(self) -> None:
         try:
-            self.brain.preload()
-            self.bus.publish("model.ready", model="text")
+            self.brain.preload_fast()
+            self.bus.publish("model.ready", model="fast")
         except Exception as exc:
-            self.bus.publish("model.error", model="text", error=str(exc))
-            print(f"[model:text] warmup failed: {exc}")
+            self.bus.publish("model.error", model="fast", error=str(exc))
+            print(f"[model:fast] warmup failed: {exc}")
 
     def _warm_vision(self) -> None:
         try:
@@ -706,7 +710,12 @@ class AstraDaemon:
                 )
         return "\n\n".join(parts)
 
-    def _semantic_context(self, text: str) -> list[dict[str, Any]]:
+    def _semantic_context(
+        self,
+        text: str,
+        *,
+        eager: bool = True,
+    ) -> list[dict[str, Any]]:
         q = " ".join(text.lower().split())
         memory_cues = (
             "lembra",
@@ -725,7 +734,8 @@ class AstraDaemon:
             "já falamos",
             "ja falamos",
         )
-        if len(q) < 48 and not any(cue in q for cue in memory_cues):
+        has_memory_cue = any(cue in q for cue in memory_cues)
+        if not has_memory_cue and (not eager or len(q) < 48):
             return []
         try:
             return self.semantic.search(text, limit=4)
@@ -1042,10 +1052,11 @@ class AstraDaemon:
             try:
                 from astra_pc.ai.mission import MissionAgent
                 mission = MissionAgent(
-                    self.text_client,
+                    self.fast_client,
+                    fallback_client=self.text_client,
                     skill_provider=self.skills.describe,
                     context_provider=lambda: self._assistant_context(
-                        self._semantic_context(goal)
+                        self._semantic_context(goal, eager=False)
                     ),
                     execute_skill=execute_skill,
                     execute_visual=execute_visual,
@@ -1086,7 +1097,7 @@ class AstraDaemon:
                 return {"ok": False, "error": "agents_must_be_a_list"}
 
             shared_context = self._assistant_context(
-                self._semantic_context(goal or "subagents")
+                self._semantic_context(goal or "subagents", eager=False)
             )
             tasks = []
             for item in raw_tasks[: self.subagents.max_agents]:

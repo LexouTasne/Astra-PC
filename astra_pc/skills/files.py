@@ -9,14 +9,85 @@ from .base import Skill, SkillResult
 class FilesSkill(Skill):
     name = "files"
     description = (
-        "List folders, search files and read text files inside the user's home directory."
+        "List/search/read files, count folder contents, create folders and create new "
+        "text files inside the user's home directory. Overwriting an existing file "
+        "requires confirmation."
     )
-    safe_actions = ("list_dir", "search_files", "read_file")
+    safe_actions = (
+        "list_dir", "search_files", "read_file", "count_items",
+        "create_dir", "create_text_file",
+    )
+    confirm_actions = ("write_file",)
 
     def __init__(self):
         self.home = Path.home().resolve()
 
     def execute(self, action: str, args: dict) -> SkillResult:
+        if action == "create_dir":
+            path = self._safe_path(args.get("path"))
+            if path is None:
+                return SkillResult(False, "Caminho de pasta inválido ou fora da sua home.")
+            try:
+                existed = path.exists()
+                if existed and not path.is_dir():
+                    return SkillResult(False, "Já existe um arquivo nesse caminho.")
+                path.mkdir(parents=bool(args.get("parents", True)), exist_ok=True)
+                return SkillResult(
+                    True,
+                    ("Pasta já existia: " if existed else "Pasta criada: ") + self._display_path(path),
+                    {"path": str(path), "created": not existed},
+                )
+            except Exception as exc:
+                return SkillResult(False, f"Não consegui criar a pasta: {exc}")
+
+        if action in {"create_text_file", "write_file"}:
+            path = self._safe_path(args.get("path"))
+            if path is None:
+                return SkillResult(False, "Caminho de arquivo inválido ou fora da sua home.")
+            content = str(args.get("content", ""))
+            if len(content.encode("utf-8")) > 1_000_000:
+                return SkillResult(False, "Conteúdo grande demais (>1 MB).")
+            if path.exists() and action == "create_text_file":
+                return SkillResult(False, "O arquivo já existe; use write_file com confirmação para sobrescrever.")
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content, encoding="utf-8")
+                return SkillResult(
+                    True,
+                    ("Arquivo criado: " if action == "create_text_file" else "Arquivo salvo: ")
+                    + self._display_path(path),
+                    {"path": str(path), "bytes": len(content.encode("utf-8"))},
+                )
+            except Exception as exc:
+                return SkillResult(False, f"Não consegui salvar o arquivo: {exc}")
+
+        if action == "count_items":
+            path = self._safe_path(args.get("path") or self.home)
+            if path is None or not path.is_dir():
+                return SkillResult(False, "Pasta não encontrada ou fora da sua home.")
+            recursive = bool(args.get("recursive", False))
+            pattern = str(args.get("pattern", "*")).strip() or "*"
+            try:
+                iterator = path.rglob("*") if recursive else path.iterdir()
+                files = folders = matched = 0
+                for item in iterator:
+                    if item.is_dir():
+                        folders += 1
+                    elif item.is_file():
+                        files += 1
+                    if fnmatch.fnmatch(item.name.lower(), pattern.lower()):
+                        matched += 1
+                return SkillResult(
+                    True,
+                    f"Contei {files} arquivo(s) e {folders} pasta(s); {matched} item(ns) combinam com {pattern}.",
+                    {
+                        "path": str(path), "files": files, "folders": folders,
+                        "matched": matched, "pattern": pattern, "recursive": recursive,
+                    },
+                )
+            except Exception as exc:
+                return SkillResult(False, f"Não consegui contar os itens: {exc}")
+
         if action == "list_dir":
             path = self._safe_path(args.get("path") or self.home)
             if path is None or not path.is_dir():
@@ -95,9 +166,21 @@ class FilesSkill(Skill):
                         found.append(str(path))
             except PermissionError:
                 pass
+            if found:
+                shown = [self._display_path(Path(item)) for item in found[:20]]
+                suffix = ""
+                if len(found) > len(shown):
+                    suffix = f"\n… e mais {len(found) - len(shown)} arquivo(s)."
+                message = (
+                    f"Encontrei {len(found)} arquivo(s):\n"
+                    + "\n".join(f"- {item}" for item in shown)
+                    + suffix
+                )
+            else:
+                message = "Encontrei 0 arquivo(s)."
             return SkillResult(
                 True,
-                f"Encontrei {len(found)} arquivo(s).",
+                message,
                 {"files": found},
             )
 

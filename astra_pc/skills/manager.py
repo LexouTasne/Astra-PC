@@ -45,11 +45,16 @@ class SkillManager:
             for skill in discover_skills(plugin_dir):
                 self.skills[skill.name] = skill
 
-    def describe(self) -> list[dict[str, str]]:
-        return [
-            {"name": skill.name, "description": skill.description}
-            for skill in self.skills.values()
-        ]
+    def describe(self) -> list[dict[str, object]]:
+        output = []
+        for skill in self.skills.values():
+            output.append({
+                "name": skill.name,
+                "description": skill.description,
+                "safe_actions": list(getattr(skill, "safe_actions", ())),
+                "confirm_actions": list(getattr(skill, "confirm_actions", ())),
+            })
+        return output
 
     def execute(
         self,

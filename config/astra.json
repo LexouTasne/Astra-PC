@@ -80,12 +80,15 @@
     "text_model": "qwen3-vl:2b-instruct",
     "vision_model": "qwen3-vl:2b-instruct",
     "timeout": 180,
-    "keep_alive": -1,
+    "keep_alive": "2m",
     "fast_context": 1536,
     "vision_context": 6144,
     "strong_model": "",
     "fast_model": "qwen3:0.6b",
-    "text_context": 6144
+    "text_context": 6144,
+    "text_keep_alive": "2m",
+    "vision_keep_alive": "45s",
+    "fast_keep_alive": -1
   },
   "voice": {
     "engine": "fast",
@@ -159,7 +162,8 @@
   "memory": {
     "embedding_model": "qwen3-embedding:0.6b",
     "embedding_timeout": 25,
-    "max_results": 6
+    "max_results": 6,
+    "embedding_keep_alive": 0
   },
   "skills": {
     "plugin_dir": "~/.local/share/astra-pc/skills"

@@ -123,6 +123,36 @@ class MissionTests(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.message, "Stopped by user.")
 
+    def test_direct_file_steps_accept_new_named_folder_and_file(self):
+        agent = object.__new__(MissionAgent)
+        steps = agent._direct_file_steps(
+            "Na pasta /tmp/astra-e2e crie uma pasta nova chamada created. "
+            "Dentro dela crie um arquivo novo chamado status.txt contendo exatamente ASTRA OK."
+        )
+        self.assertEqual(steps[0]["args"]["path"], "/tmp/astra-e2e/created")
+        self.assertEqual(steps[1]["args"]["path"], "/tmp/astra-e2e/created/status.txt")
+        self.assertEqual(steps[1]["args"]["content"], "ASTRA OK")
+
+    def test_direct_file_steps_cover_read_list_and_natural_search(self):
+        agent = object.__new__(MissionAgent)
+        read_steps = agent._direct_file_steps(
+            "Leia o arquivo /tmp/astra-e2e/status.txt e diga exatamente o conteúdo."
+        )
+        self.assertEqual(read_steps[0]["action"], "read_file")
+        self.assertEqual(read_steps[0]["args"]["path"], "/tmp/astra-e2e/status.txt")
+
+        list_steps = agent._direct_file_steps(
+            "Liste os arquivos e pastas em /tmp/astra-e2e e diga o que encontrou."
+        )
+        self.assertEqual(list_steps[0]["action"], "list_dir")
+        self.assertEqual(list_steps[0]["args"]["path"], "/tmp/astra-e2e")
+
+        search_steps = agent._direct_file_steps(
+            "Procure dentro de /tmp/astra-e2e por um arquivo cujo nome contenha data."
+        )
+        self.assertEqual(search_steps[0]["action"], "search_files")
+        self.assertEqual(search_steps[0]["args"]["pattern"], "*data*")
+
 
 if __name__ == "__main__":
     unittest.main()

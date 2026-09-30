@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 from .ollama_client import OllamaClient
@@ -46,7 +47,8 @@ class MissionAgent:
         self,
         client: OllamaClient,
         *,
-        skill_provider: Callable[[], list[dict[str, str]]],
+        fallback_client: OllamaClient | None = None,
+        skill_provider: Callable[[], list[dict[str, Any]]],
         context_provider: Callable[[], str],
         execute_skill: Callable[[dict[str, Any]], dict[str, Any]],
         execute_visual: Callable[[str], dict[str, Any]],
@@ -55,6 +57,7 @@ class MissionAgent:
         max_steps: int = 12,
     ) -> None:
         self.client = client
+        self.fallback_client = fallback_client
         self.skill_provider = skill_provider
         self.context_provider = context_provider
         self.execute_skill = execute_skill
@@ -62,6 +65,7 @@ class MissionAgent:
         self.execute_swarm = execute_swarm
         self.cancel_event = cancel_event
         self.max_steps = max(1, min(40, int(max_steps)))
+        self._active_skills: list[dict[str, Any]] = []
 
     def run(self, goal: str) -> MissionResult:
         goal = str(goal).strip()
@@ -69,8 +73,48 @@ class MissionAgent:
             return MissionResult(False, "Empty mission goal.", [])
 
         history: list[dict[str, Any]] = []
+        direct_steps = self._direct_file_steps(goal)
+        if direct_steps:
+            direct_messages: list[str] = []
+            for index, step in enumerate(direct_steps, 1):
+                if self._cancelled():
+                    return MissionResult(False, "Stopped by user.", history)
+                result = self.execute_skill(step)
+                history.append({
+                    "index": index,
+                    "type": "skill",
+                    "reason": "deterministic file fast-path",
+                    "request": self._compact_step(step),
+                    "result": self._compact_result(result),
+                })
+                if not result.get("ok"):
+                    return MissionResult(
+                        False,
+                        str(result.get("error") or result.get("message") or "Falha na ação."),
+                        history,
+                    )
+                message = str(result.get("message") or "").strip()
+                if str(step.get("action")) == "read_file":
+                    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+                    text = str(data.get("text") or "")
+                    if text:
+                        message = (message + " Conteúdo: " + text[:4000]).strip()
+                if message:
+                    direct_messages.append(message)
+            details = direct_messages or [
+                str(item.get("result", {}).get("message", "")).strip()
+                for item in history
+                if str(item.get("result", {}).get("message", "")).strip()
+            ]
+            return MissionResult(
+                True,
+                " ".join(details) or "Concluído. As ações foram verificadas.",
+                history,
+            )
+
         last_signature = ""
         repeated = 0
+        self._active_skills = self._skills_for_goal(goal)
 
         for step_index in range(1, self.max_steps + 1):
             if self._cancelled():
@@ -81,9 +125,9 @@ class MissionAgent:
                 "goal": goal,
                 "step": step_index,
                 "max_steps": self.max_steps,
-                "context": context[-7000:],
-                "skills": self.skill_provider(),
-                "history": history[-8:],
+                "context": context[-1800:],
+                "skills": self._active_skills,
+                "history": history[-5:],
                 "schema": {
                     "type": "skill|visual|swarm|answer",
                     "skill": "required when type=skill",
@@ -160,19 +204,207 @@ class MissionAgent:
             history,
         )
 
+    @staticmethod
+    def _explicit_path(text: str) -> str | None:
+        quoted = re.search(r'["\']((?:~|/|(?:var/)?home/)[^"\']+)["\']', text)
+        if quoted:
+            return quoted.group(1).rstrip(".,;:")
+        match = re.search(
+            r"(?<![A-Za-z0-9_])((?:~|/|(?:var/)?home/)[^\s,;]+)",
+            text,
+        )
+        return match.group(1).rstrip(".,;:") if match else None
+
+    def _direct_file_steps(self, goal: str) -> list[dict[str, Any]]:
+        base = self._explicit_path(goal)
+        if not base:
+            return []
+
+        steps: list[dict[str, Any]] = []
+        folder_match = re.search(
+            r"\b(?:crie|criar|cria)\s+(?:(?:uma|a)\s+)?pasta"
+            r"(?:\s+nova)?(?:\s+(?:chamada|com\s+o\s+nome\s+de))?\s+([\w.-]+)",
+            goal,
+            re.I,
+        )
+        folder_target: str | None = None
+        if folder_match:
+            folder_name = folder_match.group(1).rstrip(".,;:")
+            folder_target = str(Path(base).expanduser() / folder_name)
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "create_dir",
+                "args": {"path": folder_target, "parents": True},
+            })
+
+        file_match = re.search(
+            r"\b(?:crie|criar|cria)\s+(?:(?:um|o)\s+)?arquivo"
+            r"(?:\s+novo)?(?:\s+(?:chamado|com\s+o\s+nome\s+de))?\s+([\w.-]+)",
+            goal,
+            re.I,
+        )
+        if file_match:
+            quoted_content = re.search(
+                r"contendo(?:\s+exatamente)?\s+[\"']([^\"']*)[\"']",
+                goal,
+                re.I,
+            )
+            content_match = re.search(
+                r"contendo(?:\s+exatamente)?\s*:?[ \t]*(.+?)"
+                r"(?=\.\s*(?:depois|em\s+seguida|quando)\b|$)",
+                goal,
+                re.I,
+            )
+            content = (
+                quoted_content.group(1)
+                if quoted_content
+                else (content_match.group(1).strip().rstrip(".,;:") if content_match else "")
+            )
+            parent = folder_target or str(Path(base).expanduser())
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "create_text_file",
+                "args": {
+                    "path": str(Path(parent) / file_match.group(1).rstrip(".,;:")),
+                    "content": content,
+                },
+            })
+
+        q = goal.lower()
+
+        wants_read = bool(re.search(r"\b(?:leia|ler|lê|le)\b", q)) or (
+            ("conteúdo" in q or "conteudo" in q) and "arquivo" in q
+        )
+        if wants_read:
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "read_file",
+                "args": {"path": base},
+            })
+
+        if re.search(r"\b(?:liste|listar|lista)\b", q):
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "list_dir",
+                "args": {"path": base, "limit": 100},
+            })
+
+        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q) and (
+            "arquivo" in q or "item" in q or "pasta" in q
+        ):
+            glob = "*"
+            glob_match = re.search(r"(\*\.[A-Za-z0-9]+)", goal)
+            ext_match = re.search(r"arquivos?\s+(\.[A-Za-z0-9]+)", goal, re.I)
+            if glob_match:
+                glob = glob_match.group(1)
+            elif ext_match:
+                glob = "*" + ext_match.group(1)
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "count_items",
+                "args": {
+                    "path": base,
+                    "pattern": glob,
+                    "recursive": bool(re.search(r"recursiv|subpast", q)),
+                },
+            })
+
+        search_pattern: str | None = None
+        contains_match = re.search(
+            r"\b(?:cujo\s+nome|nome)\s+(?:contenha|contém|contem|tenha)\s+([\w*?.-]+)",
+            goal,
+            re.I,
+        )
+        if contains_match:
+            token = contains_match.group(1).rstrip(".,;:!?")
+            search_pattern = token if "*" in token or "?" in token else f"*{token}*"
+        else:
+            por_match = re.search(
+                r"\bpor\s+(?:(?:um|o)\s+arquivo\s+)?(?:chamado\s+)?([\w*?.-]+)",
+                goal,
+                re.I,
+            )
+            simple_match = re.search(
+                r"\b(?:localize|encontre|procure|buscar|busque)\s+"
+                r"(?:o\s+arquivo\s+|a\s+pasta\s+)?([\w*?.-]+)",
+                goal,
+                re.I,
+            )
+            candidate = por_match or simple_match
+            if candidate:
+                token = candidate.group(1).rstrip(".,;:!?")
+                if token.lower() not in {"dentro", "em", "na", "no", "por", "um", "uma"}:
+                    search_pattern = token
+
+        if search_pattern:
+            steps.append({
+                "type": "skill",
+                "skill": "files",
+                "action": "search_files",
+                "args": {
+                    "root": base,
+                    "pattern": search_pattern,
+                    "limit": 100,
+                },
+            })
+
+        return steps
+
+    def _skills_for_goal(self, goal: str) -> list[dict[str, Any]]:
+        all_skills = [
+            item for item in self.skill_provider()
+            if isinstance(item, dict) and item.get("name")
+        ]
+        q = " ".join(str(goal).lower().split())
+        aliases = {
+            "files": (
+                "arquivo", "arquivos", "pasta", "pastas", "diretório", "diretorio",
+                "caminho", "localiz", "procur", "buscar", "contar", "file", "folder",
+            ),
+            "apps": ("aplicativo", "app ", "abrir ", "abra ", "fechar ", "chrome", "firefox", "discord"),
+            "system": ("cpu", "ram", "memória", "memoria", "disco", "sistema", "processo"),
+            "git": ("git", "commit", "branch", "repositório", "repositorio"),
+            "coding": ("código", "codigo", "python", "projeto", "programa", "script"),
+            "terminal": ("terminal", "comando", "shell"),
+            "clipboard": ("clipboard", "área de transferência", "area de transferencia", "copiar", "colar"),
+            "windows": ("janela", "monitor", "minimizar", "maximizar"),
+            "input_control": ("mouse", "teclado", "clic", "digitar", "tecla"),
+            "viewport": ("zoom", "rotação", "rotacao"),
+            "notifications": ("notificação", "notificacao", "aviso"),
+        }
+        names = {
+            name for name, words in aliases.items()
+            if any(word in q for word in words)
+        }
+        if not names:
+            return all_skills[:8]
+        selected = [item for item in all_skills if str(item.get("name")) in names]
+        return selected or all_skills[:8]
+
     def _request_step(self, prompt: str, attempts: int = 3) -> dict[str, Any]:
         last_error = "invalid mission step"
         repair = ""
         for attempt in range(1, max(1, int(attempts)) + 1):
             if self._cancelled():
                 return {"type": "answer", "message": "Stopped by user."}
-            raw = self.client.chat(
+            use_fallback = (
+                self.fallback_client is not None
+                and attempt == max(1, int(attempts))
+            )
+            client = self.fallback_client if use_fallback else self.client
+            raw = client.chat(
                 prompt + repair,
                 system=MISSION_SYSTEM,
-                temperature=0.03 if attempt > 1 else 0.08,
-                num_ctx=8192,
-                num_predict=320,
+                temperature=0.02 if attempt > 1 else 0.05,
+                num_ctx=4096 if use_fallback else 2048,
+                num_predict=180 if use_fallback else 140,
                 think=False,
+                format="json",
             )
             try:
                 step = self._parse_json(raw)
@@ -204,9 +436,18 @@ class MissionAgent:
             action = str(step.get("action", "")).strip()
             if not skill or not action:
                 return "skill step requires skill and action"
-            names = {item.get("name") for item in self.skill_provider()}
-            if skill not in names:
+            source = self._active_skills or self.skill_provider()
+            described = {
+                str(item.get("name", "")): item
+                for item in source
+                if isinstance(item, dict)
+            }
+            if skill not in described:
                 return f"unknown skill: {skill}"
+            allowed_actions = set(described[skill].get("safe_actions") or ())
+            allowed_actions.update(described[skill].get("confirm_actions") or ())
+            if allowed_actions and action not in allowed_actions:
+                return f"unknown action for {skill}: {action}"
             if not isinstance(step.get("args", {}), dict):
                 return "skill args must be an object"
         if step_type in {"visual", "swarm"} and not str(step.get("goal", "")).strip():
