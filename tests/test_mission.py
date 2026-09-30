@@ -153,6 +153,54 @@ class MissionTests(unittest.TestCase):
         self.assertEqual(search_steps[0]["action"], "search_files")
         self.assertEqual(search_steps[0]["args"]["pattern"], "*data*")
 
+    def test_direct_file_steps_understand_natural_extension_counts(self):
+        agent = object.__new__(MissionAgent)
+        cases = {
+            "Quantos arquivos Python existem recursivamente em /tmp/astra-e2e?": "*.py",
+            "Conte os scripts Python em /tmp/astra-e2e e subpastas.": "*.py",
+            "Quantos JSON existem em /tmp/astra-e2e recursivamente?": "*.json",
+            "Quantos arquivos Markdown existem em /tmp/astra-e2e?": "*.md",
+            "Quantos arquivos de texto existem em /tmp/astra-e2e?": "*.txt",
+        }
+        for goal, expected in cases.items():
+            with self.subTest(goal=goal):
+                steps = agent._direct_file_steps(goal)
+                self.assertEqual(steps[0]["action"], "count_items")
+                self.assertEqual(steps[0]["args"]["pattern"], expected)
+
+    def test_direct_file_steps_understand_everyday_file_phrases(self):
+        agent = object.__new__(MissionAgent)
+
+        steps = agent._direct_file_steps("Me diga o que tem em /tmp/astra-e2e/docs.")
+        self.assertEqual(steps[0]["action"], "list_dir")
+
+        steps = agent._direct_file_steps("O que contém dentro de /tmp/astra-e2e/code/src?")
+        self.assertEqual(steps[0]["args"]["path"], "/tmp/astra-e2e/code/src")
+
+        steps = agent._direct_file_steps("Quantas coisas existem em /tmp/astra-e2e recursivamente?")
+        self.assertEqual(steps[0]["action"], "count_items")
+        self.assertTrue(steps[0]["args"]["recursive"])
+
+        steps = agent._direct_file_steps("Encontre report-alpha dentro de /tmp/astra-e2e.")
+        self.assertEqual(steps[0]["args"]["pattern"], "*report-alpha*")
+
+        steps = agent._direct_file_steps(
+            "Procure arquivos com report no nome dentro de /tmp/astra-e2e."
+        )
+        self.assertEqual(steps[0]["args"]["pattern"], "*report*")
+
+        steps = agent._direct_file_steps("Me mostra o conteúdo de /tmp/astra-e2e/docs.")
+        self.assertEqual(steps[0]["action"], "list_dir")
+
+        steps = agent._direct_file_steps("Quais arquivos tem em /tmp/astra-e2e/docs?")
+        self.assertEqual(steps[0]["action"], "list_dir")
+
+        for verb in ("Ache", "Acha", "Busca", "Procura"):
+            with self.subTest(verb=verb):
+                steps = agent._direct_file_steps(f"{verb} target.txt em /tmp/astra-e2e.")
+                self.assertEqual(steps[0]["action"], "search_files")
+                self.assertEqual(steps[0]["args"]["pattern"], "target.txt")
+
 
 if __name__ == "__main__":
     unittest.main()

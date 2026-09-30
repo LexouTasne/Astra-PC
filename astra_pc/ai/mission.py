@@ -208,12 +208,12 @@ class MissionAgent:
     def _explicit_path(text: str) -> str | None:
         quoted = re.search(r'["\']((?:~|/|(?:var/)?home/)[^"\']+)["\']', text)
         if quoted:
-            return quoted.group(1).rstrip(".,;:")
+            return quoted.group(1).rstrip(".,;:!?")
         match = re.search(
             r"(?<![A-Za-z0-9_])((?:~|/|(?:var/)?home/)[^\s,;]+)",
             text,
         )
-        return match.group(1).rstrip(".,;:") if match else None
+        return match.group(1).rstrip(".,;:!?") if match else None
 
     def _direct_file_steps(self, goal: str) -> list[dict[str, Any]]:
         base = self._explicit_path(goal)
@@ -285,7 +285,16 @@ class MissionAgent:
                 "args": {"path": base},
             })
 
-        if re.search(r"\b(?:liste|listar|lista)\b", q):
+        list_phrases = (
+            "o que tem", "o que contém", "o que contem", "o que existe",
+            "me diga o que tem", "mostre o que tem", "mostra o que tem",
+            "mostre o conteúdo de", "mostra o conteúdo de",
+            "mostre o conteudo de", "mostra o conteudo de",
+            "quais arquivos tem", "quais pastas tem", "quais itens tem",
+        )
+        if re.search(r"\b(?:liste|listar|lista)\b", q) or any(
+            phrase in q for phrase in list_phrases
+        ):
             steps.append({
                 "type": "skill",
                 "skill": "files",
@@ -293,16 +302,33 @@ class MissionAgent:
                 "args": {"path": base, "limit": 100},
             })
 
-        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q) and (
-            "arquivo" in q or "item" in q or "pasta" in q
+        count_terms = (
+            "arquivo", "item", "pasta", "coisa", "script", "python", "json",
+            "markdown", "texto", "txt", "png", "jpg", "jpeg",
+        )
+        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q) and any(
+            term in q for term in count_terms
         ):
             glob = "*"
             glob_match = re.search(r"(\*\.[A-Za-z0-9]+)", goal)
             ext_match = re.search(r"arquivos?\s+(\.[A-Za-z0-9]+)", goal, re.I)
+            extension_aliases = (
+                (r"\b(?:python|scripts?\s+python|arquivos?\s+py)\b", "*.py"),
+                (r"\bjson\b", "*.json"),
+                (r"\b(?:markdown|arquivos?\s+md)\b", "*.md"),
+                (r"\b(?:texto|textos|arquivos?\s+txt)\b", "*.txt"),
+                (r"\bpng\b", "*.png"),
+                (r"\b(?:jpg|jpeg)\b", "*.jpg"),
+            )
             if glob_match:
                 glob = glob_match.group(1)
             elif ext_match:
                 glob = "*" + ext_match.group(1)
+            else:
+                for pattern, alias_glob in extension_aliases:
+                    if re.search(pattern, q, re.I):
+                        glob = alias_glob
+                        break
             steps.append({
                 "type": "skill",
                 "skill": "files",
@@ -324,22 +350,34 @@ class MissionAgent:
             token = contains_match.group(1).rstrip(".,;:!?")
             search_pattern = token if "*" in token or "?" in token else f"*{token}*"
         else:
+            name_match = re.search(
+                r"\b(?:arquivos?|pastas?)\s+com\s+([\w*?.-]+)\s+no\s+nome\b",
+                goal,
+                re.I,
+            )
             por_match = re.search(
                 r"\bpor\s+(?:(?:um|o)\s+arquivo\s+)?(?:chamado\s+)?([\w*?.-]+)",
                 goal,
                 re.I,
             )
             simple_match = re.search(
-                r"\b(?:localize|encontre|procure|buscar|busque)\s+"
+                r"\b(?:localize|encontre|procure|procura|buscar|busque|busca|ache|acha|achar)\s+"
                 r"(?:o\s+arquivo\s+|a\s+pasta\s+)?([\w*?.-]+)",
                 goal,
                 re.I,
             )
-            candidate = por_match or simple_match
+            candidate = name_match or por_match or simple_match
             if candidate:
                 token = candidate.group(1).rstrip(".,;:!?")
-                if token.lower() not in {"dentro", "em", "na", "no", "por", "um", "uma"}:
-                    search_pattern = token
+                generic = {
+                    "dentro", "em", "na", "no", "por", "um", "uma",
+                    "arquivo", "arquivos", "pasta", "pastas",
+                }
+                if token.lower() not in generic:
+                    if "*" not in token and "?" not in token and "." not in token:
+                        search_pattern = f"*{token}*"
+                    else:
+                        search_pattern = token
 
         if search_pattern:
             steps.append({

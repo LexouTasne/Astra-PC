@@ -77,9 +77,19 @@ class FilesSkill(Skill):
                         files += 1
                     if fnmatch.fnmatch(item.name.lower(), pattern.lower()):
                         matched += 1
+                if pattern == "*":
+                    message = (
+                        f"No total, encontrei {files + folders} item(ns): "
+                        f"{files} arquivo(s) e {folders} pasta(s)."
+                    )
+                else:
+                    message = (
+                        f"Encontrei {matched} item(ns) que combinam com {pattern}. "
+                        f"No total, são {files} arquivo(s) e {folders} pasta(s)."
+                    )
                 return SkillResult(
                     True,
-                    f"Contei {files} arquivo(s) e {folders} pasta(s); {matched} item(ns) combinam com {pattern}.",
+                    message,
                     {
                         "path": str(path), "files": files, "folders": folders,
                         "matched": matched, "pattern": pattern, "recursive": recursive,
