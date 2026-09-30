@@ -302,24 +302,51 @@ class MissionAgent:
                 "args": {"path": base, "limit": 100},
             })
 
-        count_terms = (
-            "arquivo", "item", "pasta", "coisa", "script", "python", "json",
-            "markdown", "texto", "txt", "png", "jpg", "jpeg",
+        extension_aliases = (
+            (r"\b(?:python|scripts?\s+python|arquivos?\s+py)\b", "*.py"),
+            (r"\b(?:javascript|java\s*script|node(?:\.js)?|js)\b", "*.js"),
+            (r"\b(?:typescript|type\s*script|ts)\b", "*.ts"),
+            (r"\b(?:jsx|react\s+jsx)\b", "*.jsx"),
+            (r"\b(?:tsx|react\s+tsx)\b", "*.tsx"),
+            (r"\bjava\b", "*.java"),
+            (r"(?<!\w)(?:c\+\+|cpp)(?!\w)", "*.cpp"),
+            (r"\bcxx\b", "*.cxx"),
+            (r"(?<!\w)cc(?!\w)", "*.cc"),
+            (r"\b(?:hpp|header\s+c\+\+|headers\s+c\+\+)\b", "*.hpp"),
+            (r"\b(?:linguagem\s+c|arquivos?\s+c)\b", "*.c"),
+            (r"\b(?:header\s+c|headers\s+c|arquivos?\s+h)\b", "*.h"),
+            (r"\b(?:csharp|c\s*sharp)\b|(?<!\w)c#(?!\w)", "*.cs"),
+            (r"\brust\b", "*.rs"),
+            (r"\bgolang\b|\blinguagem\s+go\b|\barquivos?\s+go\b", "*.go"),
+            (r"\bkotlin\b", "*.kt"),
+            (r"\bswift\b", "*.swift"),
+            (r"\bphp\b", "*.php"),
+            (r"\bruby\b", "*.rb"),
+            (r"\blua\b", "*.lua"),
+            (r"\bdart\b", "*.dart"),
+            (r"\bsql\b", "*.sql"),
+            (r"\bhtml\b", "*.html"),
+            (r"\bcss\b", "*.css"),
+            (r"\b(?:shell|bash)\b", "*.sh"),
+            (r"\bjson\b", "*.json"),
+            (r"\byaml\b", "*.yaml"),
+            (r"\byml\b", "*.yml"),
+            (r"\bxml\b", "*.xml"),
+            (r"\b(?:markdown|arquivos?\s+md)\b", "*.md"),
+            (r"\b(?:texto|textos|arquivos?\s+txt)\b", "*.txt"),
+            (r"\bpng\b", "*.png"),
+            (r"\b(?:jpg|jpeg)\b", "*.jpg"),
         )
-        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q) and any(
-            term in q for term in count_terms
+        count_terms = ("arquivo", "item", "pasta", "coisa", "script", "texto")
+        natural_extension_hint = any(
+            re.search(pattern, q, re.I) for pattern, _ in extension_aliases
+        )
+        if re.search(r"\b(?:conte|contar|quantos|quantas)\b", q) and (
+            any(term in q for term in count_terms) or natural_extension_hint
         ):
             glob = "*"
             glob_match = re.search(r"(\*\.[A-Za-z0-9]+)", goal)
             ext_match = re.search(r"arquivos?\s+(\.[A-Za-z0-9]+)", goal, re.I)
-            extension_aliases = (
-                (r"\b(?:python|scripts?\s+python|arquivos?\s+py)\b", "*.py"),
-                (r"\bjson\b", "*.json"),
-                (r"\b(?:markdown|arquivos?\s+md)\b", "*.md"),
-                (r"\b(?:texto|textos|arquivos?\s+txt)\b", "*.txt"),
-                (r"\bpng\b", "*.png"),
-                (r"\b(?:jpg|jpeg)\b", "*.jpg"),
-            )
             if glob_match:
                 glob = glob_match.group(1)
             elif ext_match:
