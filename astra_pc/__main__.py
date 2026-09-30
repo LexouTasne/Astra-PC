@@ -22,7 +22,7 @@ def _brain(config):
     fast_keep = ai.get("fast_keep_alive", -1)
 
     text_client = OllamaClient(
-        model=ai.get("text_model", "qwen3-vl:2b-instruct"),
+        model=ai.get("text_model", "qwen3:1.7b"),
         host=host,
         timeout=timeout,
         keep_alive=text_keep,

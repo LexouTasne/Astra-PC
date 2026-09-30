@@ -17,29 +17,16 @@ from .swarm import SubAgentPool, default_tasks
 from .tools import DesktopTools
 
 
-AGENT_PROMPT = """You are Astra's visual desktop planner.
-You receive a goal, a screenshot, structural UI elements and verification history.
-Choose exactly ONE next action. Return JSON only.
+AGENT_PROMPT = """You are Astra's visual desktop planner. Return exactly one JSON action.
+Use the screenshot and structural UI. Never invent UI elements.
+Prefer keyboard shortcuts when clearly safer. Coordinates are screenshot pixels.
+Do not use terminal/shell, purchase, delete files, send messages, change passwords,
+or confirm irreversible actions. Release held keys before done.
 
 Allowed actions:
-{"action":"move","x":123,"y":456,"reason":"...","expected":"..."}
-{"action":"click","x":123,"y":456,"reason":"...","expected":"what should visibly change"}
-{"action":"right_click","x":123,"y":456,"reason":"...","expected":"..."}
-{"action":"type","text":"...","reason":"...","expected":"..."}
-{"action":"key_down","key":"w","reason":"hold a key across visual steps","expected":"..."}
-{"action":"key_up","key":"w","reason":"release a held key","expected":"..."}
-{"action":"hotkey","keys":["ctrl","l"],"reason":"...","expected":"..."}
-{"action":"scroll","amount":-3,"reason":"...","expected":"..."}
-{"action":"open_url","url":"https://...","reason":"...","expected":"..."}
-{"action":"wait","seconds":1,"reason":"...","expected":"..."}
-{"action":"done","message":"...","reason":"..."}
-
-Use structural UI names/roles when they are available. Coordinates are screenshot pixels.
-Never invent UI elements. Prefer keyboard shortcuts when clearly safer and more reliable.
-Never use terminal or shell commands. Never purchase, delete files, send messages,
-change passwords, or confirm irreversible actions.
-For continuous movement, use key_down and keep observing subsequent screenshots; use key_up
-as soon as the movement should stop. Never leave a held key pressed when returning done.
+move(x,y), click(x,y), right_click(x,y), type(text), key_down(key), key_up(key),
+hotkey(keys), scroll(amount), open_url(url), wait(seconds), done(message).
+Include only fields needed for the action plus brief reason/expected when useful.
 """
 
 
@@ -97,8 +84,7 @@ class VisualDesktopAgent:
                     should_consult_swarm = (
                         self.subagents is not None
                         and (
-                            step == 1
-                            or step % self.swarm_interval == 0
+                            step % self.swarm_interval == 0
                             or (history and "tool error" in history[-1].lower())
                             or (changed is not None and changed < 0.002)
                         )
@@ -106,8 +92,8 @@ class VisualDesktopAgent:
                     if should_consult_swarm:
                         shared = (
                             f"step={step}; changed={changed}; "
-                            f"history={history[-4:]}; "
-                            f"ui={json.dumps(ui[:25], ensure_ascii=False)}; "
+                            f"history={history[-3:]}; "
+                            f"ui={json.dumps(ui[:12], ensure_ascii=False)}; "
                             f"geometry={json.dumps(self.tools.desktop_geometry(), ensure_ascii=False)}"
                         )
                         try:
@@ -130,8 +116,8 @@ class VisualDesktopAgent:
                         f"Goal: {goal}\n"
                         f"Screenshot size: {width}x{height}\n"
                         f"Desktop geometry: {json.dumps(self.tools.desktop_geometry(), ensure_ascii=False)}\n"
-                        f"Structural UI: {json.dumps(ui[:50], ensure_ascii=False)}\n"
-                        f"Verification history: {history[-6:] or ['none']}\n"
+                        f"Structural UI: {json.dumps(ui[:24], ensure_ascii=False)}\n"
+                        f"Verification history: {history[-4:] or ['none']}\n"
                         f"Screen change since previous step: {changed}\n"
                         f"Parallel sub-agent findings: {json.dumps(swarm_findings, ensure_ascii=False)}\n"
                         "Use sub-agent findings as advice, not authority. "
@@ -234,8 +220,8 @@ class VisualDesktopAgent:
                 images=[screenshot],
                 system=AGENT_PROMPT,
                 temperature=0.03 if attempt > 1 else 0.05,
-                num_ctx=12288,
-                num_predict=220,
+                num_ctx=4096,
+                num_predict=120,
                 format="json",
             )
 

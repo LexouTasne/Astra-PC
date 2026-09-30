@@ -9,26 +9,19 @@ from typing import Any, Callable
 from .ollama_client import OllamaClient
 
 
-MISSION_SYSTEM = """You are Astra's mission orchestrator.
-You coordinate existing safe capabilities to complete a multi-step user goal.
-Choose exactly ONE next step and return JSON only.
+MISSION_SYSTEM = """You are Astra's tool planner. Return exactly one JSON object and nothing else.
+Use only listed skills/actions. Prefer a skill over visual clicking.
+When the goal contains an explicit file path, copy that exact path into path/root.
+Never claim success before a tool result confirms it.
 
-Allowed step types:
-{"type":"skill","skill":"name","action":"name","args":{},"reason":"..."}
-{"type":"visual","goal":"subgoal that requires seeing/using the desktop","reason":"..."}
-{"type":"swarm","goal":"question/subproblem","count":4,"vision":false,"reason":"..."}
-{"type":"answer","message":"final answer","reason":"goal complete"}
+Valid shapes:
+{"type":"skill","skill":"name","action":"name","args":{},"reason":"brief"}
+{"type":"visual","goal":"subgoal","reason":"brief"}
+{"type":"swarm","goal":"subgoal","count":4,"vision":false,"reason":"brief"}
+{"type":"answer","message":"final answer","reason":"done"}
 
-Rules:
-- Use only skills explicitly listed in the prompt.
-- Prefer a skill over visual clicking when a matching skill exists.
-- Use swarm for analysis, alternatives, review or decomposition; swarm never executes actions.
-- Use visual only for screen-dependent interaction.
-- Never claim a step succeeded until its returned result says so.
-- If a step fails, inspect the failure and choose a different safe strategy.
-- Do not purchase, send messages, change passwords or perform irreversible/destructive actions.
-- If a skill reports confirmation required, stop and return an answer explaining what needs confirmation.
-- Keep each step minimal and reversible.
+If history already proves the goal is complete, answer from that result.
+If a tool failed, choose a different safe step. If confirmation is required, stop and explain it.
 """
 
 
@@ -120,43 +113,66 @@ class MissionAgent:
             if self._cancelled():
                 return MissionResult(False, "Stopped by user.", history)
 
-            context = self.context_provider()
+            # Explicit paths make desktop/chat context unnecessary and expensive.
+            # Keep context only for referential goals such as "essa pasta" or "lá".
+            context = "" if self._explicit_path(goal) else self.context_provider()
+            planner_skills = [
+                {
+                    "name": str(item.get("name", "")),
+                    "safe": list(item.get("safe_actions") or ()),
+                    "confirm": list(item.get("confirm_actions") or ()),
+                }
+                for item in self._active_skills
+            ]
+            planner_history = []
+            for item in history[-3:]:
+                result = item.get("result") if isinstance(item.get("result"), dict) else {}
+                planner_history.append({
+                    "request": item.get("request"),
+                    "ok": bool(result.get("ok")),
+                    "message": str(result.get("message") or result.get("error") or "")[:500],
+                })
+
             prompt = {
                 "goal": goal,
                 "step": step_index,
-                "max_steps": self.max_steps,
-                "context": context[-1800:],
-                "skills": self._active_skills,
-                "history": history[-5:],
-                "schema": {
-                    "type": "skill|visual|swarm|answer",
-                    "skill": "required when type=skill",
-                    "action": "required when type=skill",
-                    "args": {},
-                    "goal": "subgoal for visual/swarm",
-                    "count": "1..100 for swarm",
-                    "vision": "boolean for swarm",
-                    "message": "final response for answer",
-                    "reason": "brief reason",
-                },
+                "skills": planner_skills,
             }
+            if context:
+                prompt["context"] = context[-320:]
+            if planner_history:
+                prompt["history"] = planner_history
 
-            step = self._request_step(
-                "Mission state:\n" + json.dumps(prompt, ensure_ascii=False)
+            encoded_prompt = json.dumps(
+                prompt,
+                ensure_ascii=False,
+                separators=(",", ":"),
             )
+            step = self._request_step("State:" + encoded_prompt)
+            step = self._fill_file_args_from_goal(goal, step)
             signature = self._step_signature(step)
             if signature and signature == last_signature:
                 repeated += 1
+                if (
+                    history
+                    and str(step.get("type", "")).lower() == "skill"
+                    and bool(history[-1].get("result", {}).get("ok"))
+                ):
+                    previous = history[-1]
+                    return MissionResult(
+                        True,
+                        str(previous.get("result", {}).get("message") or "Concluído."),
+                        history,
+                    )
             else:
                 repeated = 0
             last_signature = signature
 
             if repeated >= 2 and step.get("type") != "answer":
                 step = self._request_step(
-                    "Mission state:\n"
-                    + json.dumps(prompt, ensure_ascii=False)
-                    + "\nThe previous plan repeated the same step multiple times. "
-                    "Choose a different valid strategy or finish with answer."
+                    "State:"
+                    + encoded_prompt
+                    + "\nDo not repeat the previous step. Choose a different safe step or answer."
                 )
                 last_signature = self._step_signature(step)
                 repeated = 0
@@ -189,6 +205,13 @@ class MissionAgent:
                 "result": self._compact_result(result),
             }
             history.append(record)
+
+            if result.get("ok") and self._tool_result_completes_goal(goal, step):
+                return MissionResult(
+                    True,
+                    self._tool_result_message(step, result),
+                    history,
+                )
 
             error_text = str(result.get("error") or result.get("message") or "").lower()
             if not result.get("ok") and "confirmation required" in error_text:
@@ -420,6 +443,94 @@ class MissionAgent:
 
         return steps
 
+    def _fill_file_args_from_goal(
+        self,
+        goal: str,
+        step: dict[str, Any],
+    ) -> dict[str, Any]:
+        if str(step.get("skill", "")).lower() != "files":
+            return step
+
+        base = self._explicit_path(goal)
+        if not base:
+            return step
+
+        normalized = dict(step)
+        args = dict(normalized.get("args") or {})
+        action = str(normalized.get("action", "")).lower()
+        if action in {"list_dir", "read_file", "count_items"} and not args.get("path"):
+            args["path"] = base
+        elif action == "search_files" and not args.get("root"):
+            args["root"] = base
+        normalized["args"] = args
+        return normalized
+
+    @staticmethod
+    def _tool_result_completes_goal(goal: str, step: dict[str, Any]) -> bool:
+        if str(step.get("skill", "")).lower() != "files":
+            return False
+
+        q = " ".join(str(goal).lower().split())
+        action = str(step.get("action", "")).lower()
+        cues = {
+            "list_dir": (
+                "liste", "listar", "lista", "o que tem", "o que existe",
+                "o que contém", "o que contem", "quais arquivos", "quais pastas",
+                "examine", "examinar", "descreva o que encontrar",
+            ),
+            "read_file": (
+                "leia", "ler", "conteúdo", "conteudo", "mostra o conteúdo",
+                "mostre o conteúdo",
+            ),
+            "search_files": (
+                "localize", "encontre", "procure", "busca", "buscar", "ache",
+                "acha", "onde está", "onde esta",
+            ),
+            "count_items": (
+                "conte", "contar", "quantos", "quantas",
+            ),
+        }
+        return any(cue in q for cue in cues.get(action, ()))
+
+    @staticmethod
+    def _tool_result_message(step: dict[str, Any], result: dict[str, Any]) -> str:
+        message = str(result.get("message") or "").strip()
+        if (
+            str(step.get("skill", "")).lower() == "files"
+            and str(step.get("action", "")).lower() == "read_file"
+        ):
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            text = str(data.get("text") or "")
+            if text:
+                message = (message + " Conteúdo: " + text[:4000]).strip()
+        return message or "Concluído."
+
+    @staticmethod
+    def _normalize_step(step: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(step, dict):
+            return step
+        normalized = dict(step)
+        if str(normalized.get("skill", "")).lower() != "files":
+            return normalized
+
+        args = normalized.get("args")
+        if not isinstance(args, dict):
+            return normalized
+        allowed = {
+            "list_dir": {"path", "limit"},
+            "search_files": {"root", "pattern", "limit"},
+            "read_file": {"path"},
+            "count_items": {"path", "pattern", "recursive"},
+            "create_dir": {"path", "parents"},
+            "create_text_file": {"path", "content"},
+            "write_file": {"path", "content"},
+        }
+        action = str(normalized.get("action", "")).lower()
+        keys = allowed.get(action)
+        if keys is not None:
+            normalized["args"] = {key: value for key, value in args.items() if key in keys}
+        return normalized
+
     def _skills_for_goal(self, goal: str) -> list[dict[str, Any]]:
         all_skills = [
             item for item in self.skill_provider()
@@ -466,13 +577,13 @@ class MissionAgent:
                 prompt + repair,
                 system=MISSION_SYSTEM,
                 temperature=0.02 if attempt > 1 else 0.05,
-                num_ctx=4096 if use_fallback else 2048,
-                num_predict=180 if use_fallback else 140,
+                num_ctx=2048 if use_fallback else 1024,
+                num_predict=140 if use_fallback else 96,
                 think=False,
                 format="json",
             )
             try:
-                step = self._parse_json(raw)
+                step = self._normalize_step(self._parse_json(raw))
                 error = self._validate_step(step)
                 if error is None:
                     return step

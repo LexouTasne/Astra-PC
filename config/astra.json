@@ -77,7 +77,7 @@
   "ai": {
     "provider": "ollama",
     "host": "http://127.0.0.1:11434",
-    "text_model": "qwen3-vl:2b-instruct",
+    "text_model": "qwen3:1.7b",
     "vision_model": "qwen3-vl:2b-instruct",
     "timeout": 180,
     "keep_alive": "2m",
@@ -86,7 +86,7 @@
     "strong_model": "",
     "fast_model": "qwen3:0.6b",
     "text_context": 6144,
-    "text_keep_alive": "2m",
+    "text_keep_alive": -1,
     "vision_keep_alive": "45s",
     "fast_keep_alive": -1
   },

@@ -26,7 +26,12 @@ from astra_pc.core.proactive import ProactiveMonitor
 from astra_pc.core.routines import RoutineManager
 from astra_pc.core.routine_suggestions import RoutineSuggestionEngine
 from astra_pc.core.semantic_memory import SemanticMemory
-from astra_pc.gestures.control import FEATURE_LABELS, GestureControlState, apply_gesture_control
+from astra_pc.gestures.control import (
+    FEATURE_LABELS,
+    GestureControlState,
+    apply_gesture_control,
+    parse_gesture_control,
+)
 from astra_pc.perception.fusion import PerceptionFusion
 from astra_pc.perception.monitors import get_monitors
 from astra_pc.perception.reference import ReferenceResolver
@@ -47,7 +52,7 @@ class AstraDaemon:
         fast_keep = ai.get("fast_keep_alive", -1)
 
         self.text_client = OllamaClient(
-            ai.get("text_model", "qwen3-vl:2b-instruct"),
+            ai.get("text_model", "qwen3:1.7b"),
             host,
             timeout,
             text_keep,
@@ -293,6 +298,7 @@ class AstraDaemon:
                     whisper_model=whisper_model,
                     language=language,
                     request_handler=self._voice_request,
+                    stream_handler=self._voice_stream,
                     preview_handler=self._voice_preview,
                     cancel_handler=self._cancel_active_work,
                     conversation_window=float(
@@ -541,13 +547,75 @@ class AstraDaemon:
         result = self.handle({"type": kind, "text": text, "voice": True})
         return str(result.get("message") or result.get("error") or "")
 
+    def _voice_stream(self, text: str):
+        """Stream ordinary voice chat while preserving action/tool routing."""
+        q = text.lower()
+        screen_phrases = (
+            "minha tela",
+            "na tela",
+            "tela agora",
+            "o que estou vendo",
+            "essa janela",
+        )
+
+        must_use_full_path = (
+            self._wants_mission(text)
+            or self._wants_swarm(text)
+            or self._wants_visual_agent(text)
+            or any(phrase in q for phrase in screen_phrases)
+            or CommandRouter._time(text) is not None
+            or CommandRouter._math(text) is not None
+            or CommandRouter._instant_reply(text) is not None
+            or parse_gesture_control(text) is not None
+            or self.planner.needs_planning(text)
+        )
+
+        if not must_use_full_path:
+            last_listing = self.memory.get("last_files_listing", None)
+            direct_plan = (
+                self.planner.file_followup_plan(text, last_listing)
+                or self.planner._fast_plan(text, self.context.current)
+            )
+            must_use_full_path = bool(direct_plan)
+
+        if must_use_full_path:
+            yield self._voice_request(text)
+            return
+
+        context = self._voice_context()
+        stream = (
+            self.brain.ask_fast_stream(text, extra_context=context)
+            if self._use_fast_voice(text)
+            else self.brain.ask_voice_stream(text, extra_context=context)
+        )
+        chunks: list[str] = []
+        for piece in stream:
+            piece = str(piece or "")
+            if not piece:
+                continue
+            chunks.append(piece)
+            yield piece
+
+        answer = "".join(chunks).strip()
+        if answer:
+            self._record_chat(text, answer)
+
     def _warm_text(self) -> None:
+        # Warm sequentially: make the fast planner ready first, then the
+        # stronger text model. Parallel Ollama loads can stall on 4 GB GPUs.
         try:
             self.brain.preload_fast()
             self.bus.publish("model.ready", model="fast")
         except Exception as exc:
             self.bus.publish("model.error", model="fast", error=str(exc))
             print(f"[model:fast] warmup failed: {exc}")
+
+        try:
+            self.brain.preload()
+            self.bus.publish("model.ready", model="text")
+        except Exception as exc:
+            self.bus.publish("model.error", model="text", error=str(exc))
+            print(f"[model:text] warmup failed: {exc}")
 
     def _warm_vision(self) -> None:
         try:
@@ -710,6 +778,42 @@ class AstraDaemon:
                 )
         return "\n\n".join(parts)
 
+    def _voice_context(self) -> str:
+        current = self.context.current
+        with self._chat_lock:
+            recent = list(self._chat_history[-2:])
+        parts = [
+            f"Perfil: {current.profile}",
+            f"Janela: {current.active_window or 'desconhecida'}",
+        ]
+        if recent:
+            parts.append(
+                "Conversa recente:\n"
+                + "\n".join(
+                    f"U: {user}\nA: {answer[:320]}"
+                    for user, answer in recent
+                )
+            )
+        last_path = self.memory.get("last_files_path", None)
+        if last_path:
+            parts.append(f"Último caminho: {last_path}")
+        return "\n".join(parts)
+
+    @staticmethod
+    def _use_fast_voice(text: str) -> bool:
+        q = " ".join(str(text).lower().split())
+        if not q or len(q.split()) > 10:
+            return False
+        heavy = (
+            "diferença", "diferenca", "compare", "comparar", "como funciona",
+            "por que", "porque", "código", "codigo", "programação", "programacao",
+            "java", "javascript", "python", "erro", "bug", "arquivo", "pasta",
+            "diretório", "diretorio", "sistema", "computador", "tela", "processo",
+            "atual", "hoje", "notícia", "noticia", "quem é", "quem e", "quem foi",
+            "quando", "onde", "explique em detalhes", "passo a passo",
+        )
+        return not any(term in q for term in heavy)
+
     def _semantic_context(
         self,
         text: str,
@@ -791,13 +895,19 @@ class AstraDaemon:
                         },
                     )
 
-        self._record_chat(text, result.message)
-        self._background(
-            self.semantic.remember,
-            f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
-            kind="action",
-            metadata={"ok": result.ok, "profile": self.context.current.profile},
-        )
+        # Mission steps are latency-sensitive. Recording every intermediate
+        # tool result would duplicate the same user goal in recent chat and, more
+        # importantly, semantic.remember would enqueue an embedding request on the
+        # same single-lane Ollama runtime used by the planner. Keep mission steps
+        # out of that path; the mission handler records the final result once.
+        if not self._mission_lock.locked():
+            self._record_chat(text, result.message)
+            self._background(
+                self.semantic.remember,
+                f"Pedido: {text}\nAção: {plan}\nResultado: {result.message}",
+                kind="action",
+                metadata={"ok": result.ok, "profile": self.context.current.profile},
+            )
         return reply
 
     def _handle_connection(self, conn: socket.socket) -> None:
@@ -1316,7 +1426,8 @@ class AstraDaemon:
                 )
                 user_turn = f"{text} [imagem: {image_path.name}]"
                 self._record_chat(user_turn, answer)
-                self._background(self._remember_conversation, user_turn, answer)
+                if not voice_mode:
+                    self._background(self._remember_conversation, user_turn, answer)
                 return {
                     "ok": True,
                     "message": answer,
@@ -1471,21 +1582,33 @@ class AstraDaemon:
         # Voice keeps the shorter spoken-generation budget, but receives the
         # exact same recent chat, memory, files and desktop context.
         if not planning_needed:
-            memories = self._semantic_context(text)
-            context = self._assistant_context(memories)
-            answer = (
-                self.brain.ask_voice(text, extra_context=context)
-                if voice_mode
-                else self.brain.ask(text, extra_context=context)
-            )
+            memories = self._semantic_context(text, eager=not voice_mode)
+            if voice_mode:
+                context = self._voice_context()
+                answer = (
+                    self.brain.ask_fast(text, extra_context=context)
+                    if self._use_fast_voice(text)
+                    else self.brain.ask_voice(text, extra_context=context)
+                )
+            else:
+                context = self._assistant_context(memories)
+                answer = self.brain.ask(text, extra_context=context)
             if cacheable and answer:
                 self.cache.put(cache_key, answer)
             self._record_chat(text, answer)
-            self._background(self._remember_conversation, text, answer)
+            if not voice_mode:
+                self._background(self._remember_conversation, text, answer)
             return {
                 "ok": True,
                 "message": answer,
-                "plan": {"type": "answer", "path": "2b-contextual"},
+                "plan": {
+                    "type": "answer",
+                    "path": (
+                        "voice-fast"
+                        if voice_mode and self._use_fast_voice(text)
+                        else ("voice-2b" if voice_mode else "2b-contextual")
+                    ),
+                },
             }
 
         planner_text = text
@@ -1543,7 +1666,8 @@ class AstraDaemon:
             )
         )
         self._record_chat(text, answer)
-        self._background(self._remember_conversation, text, answer)
+        if not voice_mode:
+            self._background(self._remember_conversation, text, answer)
         if cacheable and answer:
             self.cache.put(cache_key, answer)
         return {"ok": True, "message": answer, "plan": plan}

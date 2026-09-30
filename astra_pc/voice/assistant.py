@@ -7,7 +7,7 @@ import subprocess
 import threading
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 from astra_pc.ai.agent import AstraBrain
 from astra_pc.screen.capture import capture_screen
@@ -182,6 +182,7 @@ class AstraVoiceAssistant:
         whisper_model: str = "base",
         language: str = "pt",
         request_handler: Callable[[str], str] | None = None,
+        stream_handler: Callable[[str], Iterable[str]] | None = None,
         preview_handler: Callable[[str], None] | None = None,
         cancel_handler: Callable[[], None] | None = None,
         conversation_window: float = 9.0,
@@ -203,6 +204,7 @@ class AstraVoiceAssistant:
         self.wake_word = wake_word.lower()
         self.router = CommandRouter()
         self.request_handler = request_handler
+        self.stream_handler = stream_handler
         self.preview_handler = preview_handler
         self.cancel_handler = cancel_handler
         self.conversation_window = max(0.0, float(conversation_window))
@@ -434,11 +436,15 @@ class AstraVoiceAssistant:
         already_spoken = False
 
         if self.request_handler is not None:
-            # Resident voice sends every useful turn through the daemon so even
-            # instant answers participate in the same shared conversation state.
+            # Resident voice keeps daemon context, but ordinary conversation can
+            # now stream tokens to TTS instead of waiting for the full answer.
             try:
-                answer = self.request_handler(request)
-                path = "daemon-context"
+                if getattr(self, "stream_handler", None) is not None:
+                    answer, already_spoken = self._stream_daemon(request)
+                    path = "daemon-stream"
+                else:
+                    answer = self.request_handler(request)
+                    path = "daemon-context"
             except Exception as exc:
                 print(f"[voice] daemon context failed, local fallback: {exc}")
                 answer = self.brain.ask_voice(self._short_prompt(request))
@@ -472,6 +478,41 @@ class AstraVoiceAssistant:
         self._conversation_until = time.monotonic() + self.conversation_window
         if not already_spoken:
             self._speak(answer)
+
+    def _stream_daemon(self, request: str) -> tuple[str, bool]:
+        if self.stream_handler is None:
+            return self.request_handler(request) if self.request_handler else "", False
+
+        full = ""
+        speech_buffer = ""
+        spoke = False
+        try:
+            for piece in self.stream_handler(request):
+                piece = str(piece or "")
+                if not piece:
+                    continue
+                full += piece
+                speech_buffer += piece
+                if self.speaker and self._speech_chunk_ready(speech_buffer):
+                    chunk = speech_buffer.strip()
+                    if chunk:
+                        self.speaker.say(chunk)
+                        spoke = True
+                    speech_buffer = ""
+
+            if self.speaker and speech_buffer.strip():
+                self.speaker.say(speech_buffer.strip())
+                spoke = True
+        except Exception as exc:
+            if spoke:
+                print(f"[voice] daemon stream ended after speech began: {exc}")
+                return full.strip(), True
+            print(f"[voice] daemon stream fallback: {exc}")
+            if self.request_handler is not None:
+                return self.request_handler(request), False
+            raise
+
+        return full.strip(), spoke
 
     def _stream_conversation(self, request: str) -> tuple[str, bool]:
         full = ""

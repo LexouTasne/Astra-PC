@@ -6,6 +6,10 @@ from .ollama_client import OllamaClient
 from .router import ModelRouter
 
 
+VOICE_SYSTEM_PROMPT = """Você é Astra, uma assistente local. Responda em português do Brasil.
+Seja curta e natural para voz. Não invente fatos do computador; use apenas contexto confiável fornecido.
+Nunca diga que executou algo se nenhuma ferramenta executou."""
+
 SYSTEM_PROMPT = """Você é Astra, uma assistente local para computador.
 RESPONDA SEMPRE EM PORTUGUÊS DO BRASIL, exceto quando o usuário pedir explicitamente outro idioma.
 Se o usuário falar português, nunca responda em inglês.
@@ -78,13 +82,23 @@ class AstraBrain:
             think=False,
         )
 
+    @staticmethod
+    def _voice_system(extra_context: str | None = None) -> str:
+        if not extra_context:
+            return VOICE_SYSTEM_PROMPT
+        return (
+            VOICE_SYSTEM_PROMPT
+            + "\nContexto confiável:\n"
+            + extra_context.strip()
+        )
+
     def ask_voice(self, text: str, extra_context: str | None = None) -> str:
-        """Primary 2B path tuned for short spoken replies."""
+        """Primary 2B voice path with a compact speech-oriented prompt."""
         return self.text_client.chat(
             text,
-            system=self._system(extra_context),
-            num_ctx=3072,
-            num_predict=96,
+            system=self._voice_system(extra_context),
+            num_ctx=1536,
+            num_predict=72,
             temperature=0.10,
             think=False,
         )
@@ -92,20 +106,20 @@ class AstraBrain:
     def ask_voice_stream(self, text: str, extra_context: str | None = None):
         yield from self.text_client.chat_stream(
             text,
-            system=self._system(extra_context),
-            num_ctx=3072,
-            num_predict=96,
+            system=self._voice_system(extra_context),
+            num_ctx=1536,
+            num_predict=72,
             temperature=0.10,
             think=False,
         )
 
     def ask_fast(self, text: str, extra_context: str | None = None) -> str:
-        """Fast path reserved for voice/lightweight conversational replies."""
+        """0.6B path for lightweight spoken conversation."""
         return self.fast_client.chat(
             text,
-            system=self._system(extra_context),
-            num_ctx=2048,
-            num_predict=80,
+            system=self._voice_system(extra_context),
+            num_ctx=768,
+            num_predict=56,
             temperature=0.10,
             think=False,
         )
@@ -113,9 +127,9 @@ class AstraBrain:
     def ask_fast_stream(self, text: str, extra_context: str | None = None):
         yield from self.fast_client.chat_stream(
             text,
-            system=self._system(extra_context),
-            num_ctx=2048,
-            num_predict=80,
+            system=self._voice_system(extra_context),
+            num_ctx=768,
+            num_predict=56,
             temperature=0.10,
             think=False,
         )
