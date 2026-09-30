@@ -891,6 +891,36 @@ class MissionAgent:
         skill_name = str(normalized.get("skill", "")).lower()
         action_name = str(normalized.get("action", "")).lower()
 
+        natural_file_aliases = {
+            "list": "list_dir", "liste": "list_dir", "listar": "list_dir",
+            "read": "read_file", "leia": "read_file", "ler": "read_file",
+            "count": "count_items", "conte": "count_items", "quantos": "count_items",
+            "search": "search_files", "procure": "search_files", "encontre": "search_files",
+            "delete": "delete_file", "apague": "delete_file", "deletar": "delete_file",
+            "create folder": "create_dir", "pasta": "create_dir",
+            "create file": "create_text_file", "arquivo": "create_text_file",
+        }
+        if skill_name not in {"files", *file_actions}:
+            alias_tokens = {
+                token.strip()
+                for token in re.split(r"[/|,;]+", skill_name)
+                if token.strip()
+            }
+            alias_action = next(
+                (
+                    natural_file_aliases[token]
+                    for token in alias_tokens
+                    if token in natural_file_aliases
+                ),
+                None,
+            )
+            if alias_action:
+                normalized["skill"] = "files"
+                skill_name = "files"
+                if action_name not in file_actions:
+                    normalized["action"] = alias_action
+                    action_name = alias_action
+
         # Small local models sometimes use "files" as the step type. Repair that
         # common schema slip before validation instead of wasting another inference.
         if step_type == "files":

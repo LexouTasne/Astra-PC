@@ -44,3 +44,30 @@ SOUL.md é carregado pelo modelo de texto/visão. Voz e planners recebem uma ver
 preservar latência. Um caminho alternativo pode ser usado com ASTRA_SOUL_PATH=/caminho/SOUL.md.
 
 Mudanças no Soul entram no próximo processo do Astra, pois o conteúdo é cacheado em memória.
+
+## Matriz de 100.000 casos
+
+`tests/test_100k_generated.py` adiciona exatamente 100.000 casos parametrizados sem copiar
+100 mil funções para o repositório. A matriz cobre:
+
+- 45.000 operações matemáticas;
+- 8.000 movimentos de mouse;
+- 6.000 comandos de digitação, inclusive texto parecido com paths/comandos;
+- 6.000 comandos de abrir/fechar aplicativos;
+- 8.000 variações de caminhos e leitura/listagem;
+- 8.000 gerações de código em várias linguagens;
+- 6.000 buscas e contagens de arquivos;
+- 5.000 ações desconhecidas verificando fail-closed de permissões;
+- 4.000 decisões de complexidade para roteamento de modelo;
+- 2.000 URLs;
+- 2.000 schemas imperfeitos de tool calls para normalização.
+
+Comando isolado:
+
+    pytest -q tests/test_100k_generated.py
+
+A suíte rápida completa coleta atualmente mais de 103 mil testes. Os testes que chamam Ollama
+continuam separados para que a suíte normal não dependa de GPU/modelos carregados.
+
+Os evals locais atuais usam 30 casos de planner no Qwen3 0.6B, 30 casos de
+programação/Soul no Qwen3 1.7B e 2 smoke tests pesados no Qwen3-VL 2B.

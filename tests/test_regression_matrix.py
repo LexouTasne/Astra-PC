@@ -420,3 +420,24 @@ def test_create_explicit_python_path_without_word_arquivo():
             "content": "print('ok')",
         },
     }]
+
+
+@pytest.mark.parametrize(
+    "skill,action",
+    [
+        ("delete/apague", "delete_file"),
+        ("count/conte", "count_items"),
+        ("search/procure", "search_files"),
+        ("read/leia", "read_file"),
+        ("list/liste", "list_dir"),
+    ],
+)
+def test_natural_file_skill_aliases_normalize(skill, action):
+    step = MissionAgent._normalize_step({
+        "type": "skill",
+        "skill": skill,
+        "action": skill,
+        "args": {"path": "/tmp/x"},
+    })
+    assert step["skill"] == "files"
+    assert step["action"] == action
