@@ -86,7 +86,7 @@
     "strong_model": "",
     "fast_model": "qwen3:0.6b",
     "text_context": 6144,
-    "text_keep_alive": -1,
+    "text_keep_alive": "2m",
     "vision_keep_alive": "45s",
     "fast_keep_alive": -1
   },

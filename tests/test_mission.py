@@ -217,6 +217,115 @@ class MissionTests(unittest.TestCase):
                 self.assertEqual(steps[0]["action"], "search_files")
                 self.assertEqual(steps[0]["args"]["pattern"], "target.txt")
 
+    def test_multi_file_creation_and_delete_use_model_planner(self):
+        agent = object.__new__(MissionAgent)
+        self.assertEqual(
+            agent._direct_file_steps(
+                "Em /tmp/astra-e2e crie um arquivo a.py e crie um arquivo b.js."
+            ),
+            [],
+        )
+        delete_steps = agent._direct_file_steps("Apague /tmp/astra-e2e/a.py.")
+        self.assertEqual(delete_steps[0]["action"], "delete_file")
+        self.assertEqual(delete_steps[0]["args"]["path"], "/tmp/astra-e2e/a.py")
+
+    def test_explicit_multifile_code_generation_uses_direct_tools(self):
+        agent = object.__new__(MissionAgent)
+        steps = agent._direct_file_steps(
+            "Em /tmp/astra-e2e monte a.py que imprima A OK; b.js que imprima B OK."
+        )
+        self.assertEqual([step["args"]["path"] for step in steps], [
+            "/tmp/astra-e2e/a.py", "/tmp/astra-e2e/b.js"
+        ])
+        self.assertIn('print("A OK")', steps[0]["args"]["content"])
+        self.assertIn('console.log("B OK")', steps[1]["args"]["content"])
+
+    def test_file_action_used_as_skill_name_is_normalized(self):
+        step = MissionAgent._normalize_step({
+            "type": "skill",
+            "skill": "create_dir",
+            "action": "create_dir",
+            "args": {"path": "/tmp/x"},
+        })
+        self.assertEqual(step["skill"], "files")
+        self.assertEqual(step["action"], "create_dir")
+
+    def test_delete_file_step_keeps_only_path_argument(self):
+        step = MissionAgent._normalize_step({
+            "type": "skill",
+            "skill": "files",
+            "action": "delete_file",
+            "args": {"path": "/tmp/a.py", "reason": "extra"},
+        })
+        self.assertEqual(step["args"], {"path": "/tmp/a.py"})
+
+    def test_file_step_repair_fixes_subfolder_multifile_and_delete(self):
+        agent = object.__new__(MissionAgent)
+        sub_goal = "Prepare uma subpasta chamada codigo dentro de /tmp/astra-e2e."
+        repaired = agent._repair_file_step_from_goal(
+            sub_goal,
+            {"type": "skill", "skill": "files", "action": "create_dir", "args": {"path": "/tmp/astra-e2e"}},
+            [],
+        )
+        self.assertEqual(repaired["args"]["path"], "/tmp/astra-e2e/codigo")
+
+        multi_goal = (
+            "Em /tmp/astra-e2e/codigo monte main.py com Python que imprima ASTRA PY OK; "
+            "app.js com JavaScript que imprima ASTRA JS OK."
+        )
+        first = agent._repair_file_step_from_goal(
+            multi_goal,
+            {"type": "skill", "skill": "files", "action": "create_text_file", "args": {"path": "/tmp/astra-e2e/codigo", "content": "wrong"}},
+            [],
+        )
+        self.assertEqual(first["args"]["path"], "/tmp/astra-e2e/codigo/main.py")
+        self.assertIn("ASTRA PY OK", first["args"]["content"])
+
+        history = [{
+            "request": first,
+            "result": {"ok": True, "message": "created"},
+        }]
+        second = agent._repair_file_step_from_goal(
+            multi_goal,
+            {"type": "skill", "skill": "files", "action": "create_text_file", "args": {"path": "/tmp/astra-e2e/codigo", "content": "wrong"}},
+            history,
+        )
+        self.assertEqual(second["args"]["path"], "/tmp/astra-e2e/codigo/app.js")
+        self.assertIn("console.log", second["args"]["content"])
+        self.assertIn("ASTRA JS OK", second["args"]["content"])
+
+        delete = agent._repair_file_step_from_goal(
+            "Apague /tmp/astra-e2e/codigo/main.py.",
+            {"type": "skill", "skill": "files", "action": "write_file", "args": {"path": "/tmp/astra-e2e/codigo/main.py", "content": "fake delete"}},
+            [],
+        )
+        self.assertEqual(delete["action"], "delete_file")
+        self.assertEqual(delete["args"], {"path": "/tmp/astra-e2e/codigo/main.py"})
+
+    def test_list_and_count_followup_gets_both_fast_steps(self):
+        agent = object.__new__(MissionAgent)
+        steps = agent._direct_file_steps(
+            "Confira /tmp/astra-e2e e diga quais arquivos sobraram e quantos são."
+        )
+        self.assertEqual([step["action"] for step in steps], ["list_dir", "count_items"])
+
+    def test_simple_creation_result_finishes_but_multifile_does_not(self):
+        create_dir = {"skill": "files", "action": "create_dir"}
+        self.assertTrue(MissionAgent._tool_result_completes_goal(
+            "Crie a pasta /tmp/astra-e2e.", create_dir
+        ))
+        self.assertFalse(MissionAgent._tool_result_completes_goal(
+            "Em /tmp/astra-e2e monte a.py e b.js.", create_dir
+        ))
+
+        create_file = {"skill": "files", "action": "create_text_file"}
+        self.assertTrue(MissionAgent._tool_result_completes_goal(
+            "Crie /tmp/astra-e2e/a.py.", create_file
+        ))
+        self.assertFalse(MissionAgent._tool_result_completes_goal(
+            "Em /tmp/astra-e2e monte a.py e b.js.", create_file
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

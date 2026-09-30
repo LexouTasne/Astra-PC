@@ -10,14 +10,14 @@ class FilesSkill(Skill):
     name = "files"
     description = (
         "List/search/read files, count folder contents, create folders and create new "
-        "text files inside the user's home directory. Overwriting an existing file "
-        "requires confirmation."
+        "text files inside the user's home directory. Overwriting or deleting an "
+        "existing file requires confirmation."
     )
     safe_actions = (
         "list_dir", "search_files", "read_file", "count_items",
         "create_dir", "create_text_file",
     )
-    confirm_actions = ("write_file",)
+    confirm_actions = ("write_file", "delete_file")
 
     def __init__(self):
         self.home = Path.home().resolve()
@@ -60,6 +60,25 @@ class FilesSkill(Skill):
                 )
             except Exception as exc:
                 return SkillResult(False, f"Não consegui salvar o arquivo: {exc}")
+
+        if action == "delete_file":
+            path = self._safe_path(args.get("path"))
+            if path is None:
+                return SkillResult(False, "Caminho de arquivo inválido ou fora da sua home.")
+            if not path.exists():
+                return SkillResult(False, "Arquivo não encontrado.")
+            if not path.is_file():
+                return SkillResult(False, "A exclusão automática só aceita arquivos, não pastas.")
+            try:
+                display = self._display_path(path)
+                path.unlink()
+                return SkillResult(
+                    True,
+                    f"Arquivo apagado: {display}",
+                    {"path": str(path), "deleted": True},
+                )
+            except Exception as exc:
+                return SkillResult(False, f"Não consegui apagar o arquivo: {exc}")
 
         if action == "count_items":
             path = self._safe_path(args.get("path") or self.home)

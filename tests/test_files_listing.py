@@ -27,3 +27,15 @@ def test_list_dir_returns_real_entries(tmp_path):
     assert names == ["Projetos", "foto.png"]
     assert "Projetos/" in result.message
     assert "foto.png" in result.message
+
+
+def test_delete_file_removes_only_file(tmp_path):
+    skill = FilesSkill()
+    skill.home = tmp_path.resolve()
+    target = tmp_path / "delete-me.py"
+    target.write_text("print('bye')\n", encoding="utf-8")
+
+    result = skill.execute("delete_file", {"path": str(target)})
+    assert result.ok
+    assert not target.exists()
+    assert result.data == {"path": str(target.resolve()), "deleted": True}

@@ -11,7 +11,12 @@ from .ollama_client import OllamaClient
 
 MISSION_SYSTEM = """You are Astra's tool planner. Return exactly one JSON object and nothing else.
 Use only listed skills/actions. Prefer a skill over visual clicking.
-When the goal contains an explicit file path, copy that exact path into path/root.
+When the goal contains an explicit file path, use it as the base path/root.
+For file operations, skill MUST be "files" and action is the file action such as create_dir or list_dir.
+For create_dir, include the requested new folder name in path.
+For create_text_file/write_file, path MUST include the requested filename and extension, never only a directory.
+For deletion requests, use files.delete_file only; never simulate deletion with write_file.
+If the goal names multiple files, handle one file per step and continue until every requested file is verified.
 Never claim success before a tool result confirms it.
 
 Valid shapes:
@@ -150,6 +155,7 @@ class MissionAgent:
             )
             step = self._request_step("State:" + encoded_prompt)
             step = self._fill_file_args_from_goal(goal, step)
+            step = self._repair_file_step_from_goal(goal, step, history)
             signature = self._step_signature(step)
             if signature and signature == last_signature:
                 repeated += 1
@@ -157,6 +163,7 @@ class MissionAgent:
                     history
                     and str(step.get("type", "")).lower() == "skill"
                     and bool(history[-1].get("result", {}).get("ok"))
+                    and self._tool_result_completes_goal(goal, step)
                 ):
                     previous = history[-1]
                     return MissionResult(
@@ -206,6 +213,20 @@ class MissionAgent:
             }
             history.append(record)
 
+            if result.get("ok") and self._requested_file_creation_complete(goal, history):
+                messages = [
+                    str((item.get("result") or {}).get("message") or "").strip()
+                    for item in history
+                    if bool((item.get("result") or {}).get("ok"))
+                    and str((item.get("request") or {}).get("action", "")).lower()
+                    in {"create_text_file", "write_file"}
+                ]
+                return MissionResult(
+                    True,
+                    " ".join(message for message in messages if message) or "Arquivos criados.",
+                    history,
+                )
+
             if result.get("ok") and self._tool_result_completes_goal(goal, step):
                 return MissionResult(
                     True,
@@ -242,6 +263,68 @@ class MissionAgent:
         base = self._explicit_path(goal)
         if not base:
             return []
+
+        named_files = self._named_file_mentions(goal)
+        creation_intent = bool(re.search(
+            r"\b(?:crie|criar|cria|monte|montar|prepare|preparar|gere|gerar)\b",
+            goal,
+            re.I,
+        ))
+        delete_intent = bool(re.search(
+            r"\b(?:apague|apagar|delete|deletar|exclua|excluir|remova|remover)\b",
+            goal,
+            re.I,
+        ))
+
+        # Explicit destructive action: keep confirmation in the skill layer, but
+        # skip LLM planning when the target path is already unambiguous.
+        if delete_intent and not re.search(
+            r"\b(?:liste|listar|quantos|quantas|conte|leia|procure|encontre|localize)\b",
+            goal,
+            re.I,
+        ):
+            target = base
+            if not Path(base).suffix and named_files:
+                target = str(Path(base).expanduser() / named_files[0])
+            return [{
+                "type": "skill", "skill": "files", "action": "delete_file",
+                "args": {"path": target},
+            }]
+
+        # Explicit multi-file code generation can be compiled directly into file
+        # tool calls. Ambiguous requests still fall back to the model planner.
+        if creation_intent and len(named_files) >= 2:
+            generated: list[dict[str, Any]] = []
+            for filename in named_files:
+                content = self._code_content_for_file(goal, filename, "")
+                if not content:
+                    generated = []
+                    break
+                generated.append({
+                    "type": "skill", "skill": "files", "action": "create_text_file",
+                    "args": {
+                        "path": str(Path(base).expanduser() / filename),
+                        "content": content,
+                    },
+                })
+            if generated:
+                return generated
+            return []
+
+        # Creating an explicit absolute folder or a named subfolder is also
+        # deterministic and should not spend a model round-trip.
+        if creation_intent and not named_files:
+            folder_name = self._requested_folder_name(goal)
+            if folder_name and Path(base).name != folder_name:
+                return [{
+                    "type": "skill", "skill": "files", "action": "create_dir",
+                    "args": {"path": str(Path(base).expanduser() / folder_name), "parents": True},
+                }]
+            if re.search(r"\bpasta\b[^\n]{0,80}?(?:/|~)", goal, re.I):
+                return [{
+                    "type": "skill", "skill": "files", "action": "create_dir",
+                    "args": {"path": base, "parents": True},
+                }]
 
         steps: list[dict[str, Any]] = []
         folder_match = re.search(
@@ -313,6 +396,7 @@ class MissionAgent:
             "me diga o que tem", "mostre o que tem", "mostra o que tem",
             "mostre o conteúdo de", "mostra o conteúdo de",
             "mostre o conteudo de", "mostra o conteudo de",
+            "quais arquivos", "quais pastas", "quais itens", "inventário", "inventario",
             "quais arquivos tem", "quais pastas tem", "quais itens tem",
         )
         if re.search(r"\b(?:liste|listar|lista)\b", q) or any(
@@ -458,12 +542,217 @@ class MissionAgent:
         normalized = dict(step)
         args = dict(normalized.get("args") or {})
         action = str(normalized.get("action", "")).lower()
-        if action in {"list_dir", "read_file", "count_items"} and not args.get("path"):
+        if action in {"list_dir", "read_file", "count_items", "delete_file"} and not args.get("path"):
             args["path"] = base
         elif action == "search_files" and not args.get("root"):
             args["root"] = base
         normalized["args"] = args
         return normalized
+
+    @staticmethod
+    def _named_file_mentions(goal: str) -> list[str]:
+        extensions = (
+            "py|js|ts|jsx|tsx|java|cpp|cxx|cc|c|h|hpp|cs|rs|go|kt|swift|"
+            "php|rb|lua|dart|sql|html|css|sh|json|yaml|yml|xml|md|txt"
+        )
+        found = re.findall(
+            rf"(?<![A-Za-z0-9_.-])([A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:{extensions}))(?![A-Za-z0-9_-])",
+            goal,
+            re.I,
+        )
+        return list(dict.fromkeys(found))
+
+    @staticmethod
+    def _requested_folder_name(goal: str) -> str | None:
+        match = re.search(
+            r"\b(?:subpasta|pasta)\b[^.!?\n]{0,60}?\b(?:chamada|nome\s+de)\s+([\w.-]+)",
+            goal,
+            re.I,
+        )
+        return match.group(1).rstrip(".,;:!?") if match else None
+
+    @staticmethod
+    def _code_content_for_file(goal: str, filename: str, fallback: str) -> str:
+        lower = goal.lower()
+        pos = lower.find(filename.lower())
+        if pos < 0:
+            return fallback
+        segment = goal[pos:pos + 260].split(";", 1)[0]
+        marker_match = re.search(r"\bimprima\s+(.+)$", segment, re.I)
+        if not marker_match:
+            return fallback
+        marker = marker_match.group(1).strip().strip("\"'").rstrip(".,;:!?")
+        for stop in (" Só finalize", " Use a ferramenta", " Depois", " Em seguida"):
+            marker = marker.split(stop, 1)[0].strip().rstrip(".,;:!?")
+        if not marker:
+            return fallback
+        escaped = marker.replace("\\", "\\\\").replace('"', '\\"')
+        suffix = Path(filename).suffix.lower()
+        stem = re.sub(r"\W+", "_", Path(filename).stem) or "Main"
+        if suffix == ".py":
+            return f'print("{escaped}")\n'
+        if suffix in {".js", ".ts", ".jsx", ".tsx"}:
+            return f'console.log("{escaped}");\n'
+        if suffix == ".java":
+            return (
+                f"public class {stem} {{\n"
+                "    public static void main(String[] args) {\n"
+                f'        System.out.println("{escaped}");\n'
+                "    }\n"
+                "}\n"
+            )
+        if suffix in {".cpp", ".cxx", ".cc"}:
+            return (
+                "#include <iostream>\n"
+                "int main() {\n"
+                f'    std::cout << "{escaped}" << std::endl;\n'
+                "    return 0;\n"
+                "}\n"
+            )
+        if suffix == ".c":
+            return (
+                "#include <stdio.h>\n"
+                "int main(void) {\n"
+                f'    puts("{escaped}");\n'
+                "    return 0;\n"
+                "}\n"
+            )
+        if suffix == ".cs":
+            return (
+                "using System;\n"
+                "class Program {\n"
+                f'    static void Main() => Console.WriteLine("{escaped}");\n'
+                "}\n"
+            )
+        if suffix in {".h", ".hpp"}:
+            return f'#pragma once\n#define ASTRA_MESSAGE "{escaped}"\n'
+        if suffix == ".rs":
+            return f'fn main() {{ println!("{escaped}"); }}\n'
+        if suffix == ".go":
+            return (
+                'package main\n\nimport "fmt"\n\n'
+                f'func main() {{ fmt.Println("{escaped}") }}\n'
+            )
+        if suffix == ".kt":
+            return f'fun main() {{ println("{escaped}") }}\n'
+        if suffix == ".swift":
+            return f'print("{escaped}")\n'
+        if suffix == ".php":
+            return f'<?php\necho "{escaped}\\n";\n'
+        if suffix == ".rb":
+            return f'puts "{escaped}"\n'
+        if suffix == ".lua":
+            return f'print("{escaped}")\n'
+        if suffix == ".dart":
+            return f'void main() {{ print("{escaped}"); }}\n'
+        if suffix == ".sql":
+            return "SELECT '" + marker.replace("'", "''") + "';\n"
+        if suffix == ".html":
+            return f'<p>{marker}</p>\n'
+        if suffix == ".css":
+            return f'/* {marker} */\n'
+        if suffix == ".sh":
+            return f'#!/usr/bin/env bash\nprintf \'%s\\n\' "{escaped}"\n'
+        if suffix == ".json":
+            return json.dumps({"message": marker}, ensure_ascii=False, indent=2) + "\n"
+        if suffix in {".yaml", ".yml"}:
+            return f'message: "{escaped}"\n'
+        if suffix == ".xml":
+            return f'<message>{marker}</message>\n'
+        if suffix == ".md":
+            return f'# {marker}\n'
+        if suffix == ".txt":
+            return marker + "\n"
+        return fallback
+
+    def _repair_file_step_from_goal(
+        self,
+        goal: str,
+        step: dict[str, Any],
+        history: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        if str(step.get("type", "")).lower() != "skill" or str(step.get("skill", "")).lower() != "files":
+            return step
+
+        normalized = dict(step)
+        args = dict(normalized.get("args") or {})
+        base = self._explicit_path(goal)
+        action = str(normalized.get("action", "")).lower()
+        mentions = self._named_file_mentions(goal)
+
+        delete_intent = bool(re.search(
+            r"\b(?:apague|apagar|delete|deletar|exclua|excluir|remova|remover)\b",
+            goal,
+            re.I,
+        ))
+        deleted_already = any(
+            str((item.get("request") or {}).get("action", "")).lower() == "delete_file"
+            and bool((item.get("result") or {}).get("ok"))
+            for item in history
+        )
+        if delete_intent and not deleted_already and base:
+            target = base
+            if not Path(base).suffix and mentions:
+                target = str(Path(base).expanduser() / mentions[0])
+            normalized["action"] = "delete_file"
+            normalized["args"] = {"path": target}
+            return normalized
+
+        if action == "create_dir" and base:
+            folder_name = self._requested_folder_name(goal)
+            current = str(args.get("path") or "")
+            if folder_name and Path(base).name != folder_name and (
+                not current or Path(current).expanduser() == Path(base).expanduser()
+            ):
+                args["path"] = str(Path(base).expanduser() / folder_name)
+                normalized["args"] = args
+                return normalized
+
+        if action in {"create_text_file", "write_file"} and base and mentions:
+            completed = {
+                Path(str((item.get("request") or {}).get("args", {}).get("path", ""))).name
+                for item in history
+                if bool((item.get("result") or {}).get("ok"))
+                and str((item.get("request") or {}).get("action", "")).lower()
+                in {"create_text_file", "write_file"}
+            }
+            remaining = [name for name in mentions if name not in completed]
+            current_path = str(args.get("path") or "")
+            current_name = Path(current_path).name if current_path else ""
+            chosen = current_name if current_name in remaining else (remaining[0] if remaining else None)
+            if chosen:
+                base_path = Path(base).expanduser()
+                target = base_path if base_path.name == chosen else base_path / chosen
+                args["path"] = str(target)
+                args["content"] = self._code_content_for_file(
+                    goal,
+                    chosen,
+                    str(args.get("content") or ""),
+                )
+                normalized["args"] = args
+
+        return normalized
+
+    def _requested_file_creation_complete(
+        self,
+        goal: str,
+        history: list[dict[str, Any]],
+    ) -> bool:
+        requested = self._named_file_mentions(goal)
+        if not requested or not re.search(
+            r"\b(?:crie|criar|cria|monte|montar|prepare|preparar|gere|gerar)\b",
+            goal,
+            re.I,
+        ):
+            return False
+        completed = {
+            Path(str((item.get("request") or {}).get("args", {}).get("path", ""))).name
+            for item in history
+            if bool((item.get("result") or {}).get("ok"))
+            and str((item.get("request") or {}).get("action", "")).lower()
+            in {"create_text_file", "write_file"}
+        }
+        return set(requested).issubset(completed)
 
     @staticmethod
     def _tool_result_completes_goal(goal: str, step: dict[str, Any]) -> bool:
@@ -472,6 +761,38 @@ class MissionAgent:
 
         q = " ".join(str(goal).lower().split())
         action = str(step.get("action", "")).lower()
+        creation_requested = bool(re.search(
+            r"\b(?:crie|criar|cria|monte|montar|prepare|preparar|gere|gerar)\b",
+            q,
+            re.I,
+        ))
+        followup_requested = any(
+            cue in q
+            for cue in (
+                "liste", "listar", "quantos", "quantas", "conte", "leia", "ler",
+                "procure", "encontre", "localize", "apague", "delete", "exclua", "remova",
+            )
+        )
+        named_files = MissionAgent._named_file_mentions(goal)
+        if action == "create_dir":
+            return creation_requested and not named_files and not followup_requested
+        if action in {"create_text_file", "write_file"}:
+            return creation_requested and len(named_files) == 1 and not followup_requested
+        if action == "delete_file":
+            delete_requested = bool(re.search(
+                r"\b(?:apague|apagar|delete|deletar|exclua|excluir|remova|remover)\b",
+                q,
+                re.I,
+            ))
+            followup_requested = any(
+                cue in q
+                for cue in (
+                    "liste", "listar", "quantos", "quantas", "conte", "leia",
+                    "procure", "encontre", "localize", "quais arquivos sobraram",
+                )
+            )
+            return delete_requested and not followup_requested
+
         cues = {
             "list_dir": (
                 "liste", "listar", "lista", "o que tem", "o que existe",
@@ -510,6 +831,16 @@ class MissionAgent:
         if not isinstance(step, dict):
             return step
         normalized = dict(step)
+        file_actions = {
+            "list_dir", "search_files", "read_file", "count_items", "create_dir",
+            "create_text_file", "write_file", "delete_file",
+        }
+        skill_name = str(normalized.get("skill", "")).lower()
+        action_name = str(normalized.get("action", "")).lower()
+        if skill_name in file_actions:
+            normalized["skill"] = "files"
+            if not action_name:
+                normalized["action"] = skill_name
         if str(normalized.get("skill", "")).lower() != "files":
             return normalized
 
@@ -524,6 +855,7 @@ class MissionAgent:
             "create_dir": {"path", "parents"},
             "create_text_file": {"path", "content"},
             "write_file": {"path", "content"},
+            "delete_file": {"path"},
         }
         action = str(normalized.get("action", "")).lower()
         keys = allowed.get(action)
@@ -540,7 +872,8 @@ class MissionAgent:
         aliases = {
             "files": (
                 "arquivo", "arquivos", "pasta", "pastas", "diretório", "diretorio",
-                "caminho", "localiz", "procur", "buscar", "contar", "file", "folder",
+                "caminho", "localiz", "procur", "buscar", "contar", "apag", "exclu",
+                "delet", "remov", "file", "folder",
             ),
             "apps": ("aplicativo", "app ", "abrir ", "abra ", "fechar ", "chrome", "firefox", "discord"),
             "system": ("cpu", "ram", "memória", "memoria", "disco", "sistema", "processo"),

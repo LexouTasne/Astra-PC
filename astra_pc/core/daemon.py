@@ -1140,7 +1140,10 @@ class AstraDaemon:
                 return self._execute_skill_plan(
                     goal,
                     plan,
-                    {"confirmed": False, "voice": bool(request.get("voice", False))},
+                    {
+                        "confirmed": bool(request.get("confirmed", False)),
+                        "voice": bool(request.get("voice", False)),
+                    },
                 )
 
             def execute_visual(subgoal):

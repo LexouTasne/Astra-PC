@@ -13,6 +13,7 @@ def test_confirmed_class():
     assert d.needs_confirmation
 
 
-def test_blocked_action():
+def test_delete_file_requires_confirmation():
     d = PermissionLayer().evaluate("delete_file")
-    assert not d.allowed
+    assert d.allowed
+    assert d.needs_confirmation

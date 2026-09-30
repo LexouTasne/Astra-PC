@@ -8,5 +8,5 @@ def test_text_brain_is_17b_fast_is_06b_and_vision_stays_vl():
     assert ai["text_model"] == "qwen3:1.7b"
     assert ai["vision_model"] == "qwen3-vl:2b-instruct"
     assert ai["fast_model"] == "qwen3:0.6b"
-    assert ai["text_keep_alive"] == -1
+    assert ai["text_keep_alive"] == "2m"
     assert ai["strong_model"] == ""

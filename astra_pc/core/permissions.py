@@ -27,12 +27,12 @@ class PermissionLayer:
         "rotate_left", "rotate_right", "rotation_reset",
     }
     CONFIRM = {
-        "write_file", "rename_file", "move_file", "install_package",
+        "write_file", "rename_file", "move_file", "delete_file", "install_package",
         "shutdown", "reboot", "send_message", "git_commit",
         "terminal_run", "run_tests",
     }
     BLOCKED_AUTONOMOUS = {
-        "delete_file", "format_disk", "change_password", "purchase",
+        "format_disk", "change_password", "purchase",
         "disable_security",
     }
 
