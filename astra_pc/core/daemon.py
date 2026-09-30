@@ -131,6 +131,9 @@ class AstraDaemon:
         self._accessibility_cache: list[dict[str, Any]] = []
         self.voice_assistant = None
         self._voice_lock = threading.RLock()
+        self._voice_preview_lock = threading.RLock()
+        self._voice_preview_state = {"text": "", "kind": "", "at": 0.0}
+        self._voice_preview_warm_at = {"text": 0.0, "vision": 0.0}
         self.mesh_server = None
         self.mesh_sensor_state: dict[str, dict[str, Any]] = {}
         self._chat_lock = threading.RLock()
@@ -272,6 +275,7 @@ class AstraDaemon:
                     whisper_model=whisper_model,
                     language=language,
                     request_handler=self._voice_request,
+                    preview_handler=self._voice_preview,
                     conversation_window=float(
                         voice_cfg.get("conversation_window", 9.0)
                     ),
@@ -325,6 +329,12 @@ class AstraDaemon:
                     ),
                     adaptive_retry=bool(
                         voice_state.get("adaptive_retry", True)
+                    ),
+                    partial_interval_ms=int(
+                        voice_state.get(
+                            "partial_interval_ms",
+                            voice_cfg.get("partial_interval_ms", 850),
+                        )
                     ),
                 )
                 self.voice_assistant = assistant
@@ -400,6 +410,40 @@ class AstraDaemon:
         return explicit or (action and visual) or direct_visual_action or (
             visual_object and any(v in q for v in ("acha", "encontra", "procura"))
         )
+
+    def _voice_preview(self, text: str) -> None:
+        """Speculative, side-effect-free preparation for partial speech."""
+        q = " ".join(str(text).lower().strip().split())
+        if not q:
+            return
+
+        screenish = any(
+            phrase in q
+            for phrase in (
+                "tela", "janela", "botão", "botao", "ícone", "icone",
+                "aba", "campo", "menu", "ali", "aí", "ai",
+            )
+        )
+        visual_agent = self._wants_visual_agent(text)
+        kind = "agent" if visual_agent else ("screen" if screenish else "ask")
+        warm_key = "vision" if kind in {"agent", "screen"} else "text"
+        now = time.monotonic()
+
+        with self._voice_preview_lock:
+            self._voice_preview_state = {
+                "text": text[-240:],
+                "kind": kind,
+                "at": now,
+            }
+            should_warm = now - float(self._voice_preview_warm_at.get(warm_key, 0.0)) >= 2.0
+            if should_warm:
+                self._voice_preview_warm_at[warm_key] = now
+
+        if should_warm:
+            self._background(
+                self.brain.preload_vision if warm_key == "vision" else self.brain.preload_fast
+            )
+        print(f"[voice:preview] kind={kind} text={text}")
 
     def _voice_request(self, text: str) -> str:
         q = text.lower()

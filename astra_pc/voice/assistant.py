@@ -182,7 +182,9 @@ class AstraVoiceAssistant:
         whisper_model: str = "base",
         language: str = "pt",
         request_handler: Callable[[str], str] | None = None,
+        preview_handler: Callable[[str], None] | None = None,
         conversation_window: float = 9.0,
+        partial_interval_ms: int = 850,
         wakeword_model: str | Path | None = None,
         wakeword_threshold: float = 0.55,
         piper_model: str | Path | None = None,
@@ -200,10 +202,15 @@ class AstraVoiceAssistant:
         self.wake_word = wake_word.lower()
         self.router = CommandRouter()
         self.request_handler = request_handler
+        self.preview_handler = preview_handler
         self.conversation_window = max(0.0, float(conversation_window))
+        self.partial_interval_ms = max(400, int(partial_interval_ms))
         self._conversation_until = 0.0
         self.speaker = FastSpeaker(piper_model=piper_model) if speak else None
         self._requests: queue.Queue[tuple[str, float]] = queue.Queue(maxsize=4)
+        self._previews: queue.Queue[str] = queue.Queue(maxsize=1)
+        self._last_preview = ""
+        self._preview_thread: threading.Thread | None = None
         self._stop = threading.Event()
         self._dedicated_wake_until = 0.0
         self._dictation_lock = threading.Lock()
@@ -223,6 +230,8 @@ class AstraVoiceAssistant:
         if engine == "fast":
             self._voice = FastWhisperVoiceEngine(
                 self._on_text,
+                on_partial=self._on_partial,
+                partial_interval_ms=self.partial_interval_ms,
                 model_size=whisper_model,
                 language=language,
                 silence_ms=silence_ms,
@@ -266,6 +275,13 @@ class AstraVoiceAssistant:
             print("[warmup] resident text model already managed by daemon")
         # Do not preload the vision model in voice-only mode. It can contend
         # with the fast text model and is loaded lazily if a screen request occurs.
+        if self.preview_handler is not None:
+            self._preview_thread = threading.Thread(
+                target=self._preview_loop,
+                name="astra-voice-preview",
+                daemon=True,
+            )
+            self._preview_thread.start()
         self._voice.start()
         try:
             while not self._stop.is_set():
@@ -278,8 +294,23 @@ class AstraVoiceAssistant:
             pass
         finally:
             self._voice.stop()
+            if self._preview_thread:
+                self._preview_thread.join(timeout=0.8)
             if self.speaker:
                 self.speaker.stop()
+
+    def _preview_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                text = self._previews.get(timeout=0.15)
+            except queue.Empty:
+                continue
+            if not text or self.preview_handler is None:
+                continue
+            try:
+                self.preview_handler(text)
+            except Exception as exc:
+                print(f"[voice:preview] ignored error: {exc}")
 
     def _warm_vision(self) -> None:
         try:
@@ -302,7 +333,40 @@ class AstraVoiceAssistant:
             aliases.append("asta")
         return re.search(r"\b(?:" + "|".join(aliases) + r")\b", text, re.I)
 
+    def _on_partial(self, text: str) -> None:
+        if self.preview_handler is None:
+            return
+        with self._dictation_lock:
+            if self._dictation_target is not None:
+                return
+
+        normalized = str(text).strip()
+        if not normalized:
+            return
+
+        wake = self._wake_match(normalized)
+        now = time.monotonic()
+        if wake is not None:
+            request = normalized[wake.end():].strip(" ,:;-")
+        elif now <= self._dedicated_wake_until or now <= self._conversation_until:
+            request = normalized.strip(" ,:;-")
+        else:
+            return
+
+        if len(request) < 3 or request == self._last_preview:
+            return
+        self._last_preview = request
+        try:
+            self._previews.put_nowait(request)
+        except queue.Full:
+            try:
+                self._previews.get_nowait()
+                self._previews.put_nowait(request)
+            except (queue.Empty, queue.Full):
+                pass
+
     def _on_text(self, text: str) -> None:
+        self._last_preview = ""
         with self._dictation_lock:
             target = self._dictation_target
             if target is not None:

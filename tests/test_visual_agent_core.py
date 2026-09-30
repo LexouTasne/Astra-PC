@@ -67,5 +67,43 @@ class VisualAgentCoreTests(unittest.TestCase):
         self.assertGreaterEqual(len(_KEYCODES), 100)
 
 
+class VoicePartialPipelineTests(unittest.TestCase):
+    def test_partial_voice_preview_queues_before_final(self):
+        import queue
+        import time
+        from astra_pc.voice.assistant import AstraVoiceAssistant
+
+        voice = object.__new__(AstraVoiceAssistant)
+        voice.preview_handler = lambda text: None
+        voice._dictation_lock = threading.Lock()
+        voice._dictation_target = None
+        voice.wake_word = "astra"
+        voice._conversation_until = 0.0
+        voice._dedicated_wake_until = 0.0
+        voice._last_preview = ""
+        voice._previews = queue.Queue(maxsize=1)
+
+        voice._on_partial("Astra clica no WhatsApp")
+        self.assertEqual(voice._previews.get_nowait(), "clica no WhatsApp")
+
+        voice._on_partial("Astra clica no WhatsApp")
+        self.assertTrue(voice._previews.empty())
+
+        voice._conversation_until = time.monotonic() + 5.0
+        voice._on_partial("agora abre essa janela")
+        self.assertEqual(voice._previews.get_nowait(), "agora abre essa janela")
+
+    def test_partial_queue_keeps_latest_snapshot(self):
+        import queue
+        from astra_pc.voice.fast_whisper import FastWhisperVoiceEngine
+
+        engine = object.__new__(FastWhisperVoiceEngine)
+        engine.on_partial = lambda text: None
+        engine._partials = queue.Queue(maxsize=1)
+
+        engine._enqueue_partial(b"first")
+        engine._enqueue_partial(b"second")
+        self.assertEqual(engine._partials.get_nowait(), b"second")
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,8 @@ class FastWhisperVoiceEngine:
         self,
         on_text: Callable[[str], None],
         *,
+        on_partial: Callable[[str], None] | None = None,
+        partial_interval_ms: int = 850,
         model_size: str = "base",
         language: str = "pt",
         sample_rate: int = 16000,
@@ -56,6 +58,8 @@ class FastWhisperVoiceEngine:
             cpu_threads=max(2, min(8, __import__("os").cpu_count() or 4)),
         )
         self.on_text = on_text
+        self.on_partial = on_partial
+        self.partial_interval_ms = max(400, int(partial_interval_ms))
         self.raw_frame_callback = raw_frame_callback
         self.language = language
         self.initial_prompt = initial_prompt or "Português do Brasil. Assistente Astra."
@@ -84,6 +88,8 @@ class FastWhisperVoiceEngine:
         self._thread: threading.Thread | None = None
         self._decoder_thread: threading.Thread | None = None
         self._utterances: queue.Queue[bytes | None] = queue.Queue(maxsize=4)
+        self._partials: queue.Queue[bytes] = queue.Queue(maxsize=1)
+        self._last_partial_text = ""
 
     def _resolve_capture_rate(self, target_rate: int) -> int:
         """Use target rate when possible, otherwise capture at a native rate."""
@@ -227,18 +233,49 @@ class FastWhisperVoiceEngine:
         except (queue.Empty, queue.Full):
             pass
 
+    def _enqueue_partial(self, pcm: bytes) -> None:
+        if not pcm or self.on_partial is None:
+            return
+        try:
+            self._partials.put_nowait(pcm)
+            return
+        except queue.Full:
+            pass
+        try:
+            self._partials.get_nowait()
+            self._partials.put_nowait(pcm)
+        except (queue.Empty, queue.Full):
+            pass
+
     def _decode_loop(self) -> None:
         while not self._stop.is_set():
+            pcm = None
+            final = False
             try:
-                pcm = self._utterances.get(timeout=0.20)
+                pcm = self._utterances.get_nowait()
+                final = True
             except queue.Empty:
-                continue
+                try:
+                    pcm = self._partials.get(timeout=0.12)
+                except queue.Empty:
+                    continue
+
             if pcm is None:
                 return
             try:
-                self._transcribe(pcm)
+                if final:
+                    self._transcribe(pcm)
+                    self._last_partial_text = ""
+                    while True:
+                        try:
+                            self._partials.get_nowait()
+                        except queue.Empty:
+                            break
+                else:
+                    self._transcribe_partial(pcm)
             except Exception as exc:
-                print(f"[asr] transcription failed: {exc}")
+                label = "transcription" if final else "partial"
+                print(f"[asr] {label} failed: {exc}")
 
     def _run(self) -> None:
         audio_q: queue.Queue[bytes] = queue.Queue(maxsize=128)
@@ -248,6 +285,7 @@ class FastWhisperVoiceEngine:
         silent = 0
         speech_run = 0
         voiced = 0
+        last_partial_at = 0.0
 
         def callback(indata, frames, time_info, status):
             if status:
@@ -311,6 +349,7 @@ class FastWhisperVoiceEngine:
                         speech = list(preroll)
                         voiced = speech_run
                         silent = 0
+                        last_partial_at = time.monotonic()
                     continue
 
                 speech.append(frame)
@@ -319,6 +358,14 @@ class FastWhisperVoiceEngine:
                     silent = 0
                 else:
                     silent += 1
+
+                if self.on_partial is not None:
+                    now = time.monotonic()
+                    elapsed_ms = (now - last_partial_at) * 1000.0
+                    enough_audio = len(speech) * self.frame_ms >= 650
+                    if enough_audio and elapsed_ms >= self.partial_interval_ms and silent < self.silence_frames:
+                        self._enqueue_partial(b"".join(speech))
+                        last_partial_at = now
 
                 endpoint = silent >= self.silence_frames
                 forced = len(speech) >= self.max_frames
@@ -337,6 +384,30 @@ class FastWhisperVoiceEngine:
                     speech_run = 0
                     voiced = 0
                     preroll.clear()
+
+    def _transcribe_partial(self, pcm: bytes) -> None:
+        if self.on_partial is None:
+            return
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        if audio.size < self.sample_rate // 2:
+            return
+        audio = self._condition_audio(audio)
+        text, confidence = self._decode(audio, beam_size=1)
+        text = self._normalize_transcript(" ".join(text.strip().split()))
+        if not text or confidence < -1.05:
+            return
+        if text == self._last_partial_text:
+            return
+        # Ignore tiny rewrites that do not add useful intent information.
+        if self._last_partial_text and len(text) <= len(self._last_partial_text):
+            old_words = self._last_partial_text.lower().split()
+            new_words = text.lower().split()
+            common = sum(a == b for a, b in zip(old_words, new_words))
+            if common >= min(len(old_words), len(new_words)) - 1:
+                return
+        self._last_partial_text = text
+        print(f"[asr:partial] {text} (score={confidence:.2f})")
+        self.on_partial(text)
 
     def _transcribe(self, pcm: bytes) -> None:
         audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
